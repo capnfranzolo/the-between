@@ -37,7 +37,7 @@ export default async function Home() {
           </p>
           {stars?.map((star) => (
             <p key={star.id} style={{ fontSize: '1.1rem', lineHeight: 1.6 }}>
-              "{star.answer}"
+                    &ldquo;{star.answer}&rdquo;
             </p>
           ))}
         </div>
