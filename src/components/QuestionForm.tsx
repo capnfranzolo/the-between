@@ -101,7 +101,7 @@ export default function QuestionForm() {
           onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
         >
-          {submitting ? 'Sending…' : 'See your shape →'}
+          {submitting ? 'Sending…' : 'See your thought →'}
         </button>
 
         <div id="turnstile-widget" style={{ marginTop: 16 }} />
