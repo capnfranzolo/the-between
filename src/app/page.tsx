@@ -1,48 +1,49 @@
-export const dynamic = 'force-dynamic'
-import { createClient } from '@supabase/supabase-js'
+'use client';
+import TwilightSky from '@/components/TwilightSky';
+import AmbientField from '@/components/AmbientField';
+import Terrain from '@/components/Terrain';
+import QuestionForm from '@/components/QuestionForm';
+import { BTW, SERIF, SANS } from '@/lib/btw';
+import { QUESTION_TEXT } from '@/lib/constants';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
-export default async function Home() {
-  const { data: stars, error } = await supabase.from('stars').select('*')
-
+export default function LandingPage() {
   return (
-    <main style={{
-      minHeight: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'system-ui',
-      background: '#0a0a0a',
-      color: '#e0e0e0',
-    }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>The Between</h1>
-      <p style={{ opacity: 0.5, marginBottom: '2rem' }}>thebetween.world</p>
+    <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', fontFamily: SANS, color: BTW.textPri }}>
+      <TwilightSky>
+        <AmbientField count={4} seedBase="landing-amb" maxSize={120} />
+        <Terrain height={120} />
+      </TwilightSky>
 
-      {error ? (
-        <p style={{ color: '#ff6b6b' }}>DB error: {error.message}</p>
-      ) : (
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        justifyContent: 'center', alignItems: 'center',
+        padding: '0 28px',
+        textAlign: 'center',
+        zIndex: 2,
+      }}>
         <div style={{
-          background: '#1a1a1a',
-          borderRadius: '12px',
-          padding: '1.5rem 2rem',
-          maxWidth: '400px',
-          width: '100%',
+          fontFamily: SANS, fontSize: 11, letterSpacing: '0.32em',
+          textTransform: 'uppercase', color: BTW.textDim,
+          marginBottom: 36,
         }}>
-          <p style={{ opacity: 0.4, fontSize: '0.75rem', marginBottom: '0.5rem' }}>
-            Supabase connected — {stars?.length} star{stars?.length !== 1 ? 's' : ''} found
-          </p>
-          {stars?.map((star) => (
-            <p key={star.id} style={{ fontSize: '1.1rem', lineHeight: 1.6 }}>
-                    &ldquo;{star.answer}&rdquo;
-            </p>
-          ))}
+          The Between
         </div>
-      )}
-    </main>
-  )
+
+        <h1 style={{
+          fontFamily: SERIF, fontWeight: 400,
+          fontSize: 'clamp(24px, 5vw, 32px)', lineHeight: 1.18,
+          margin: 0, color: BTW.textPri,
+          maxWidth: 360,
+          letterSpacing: '0.005em',
+          textShadow: '0 1px 24px rgba(30,24,64,0.6)',
+        }}>
+          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>What do you know is true</span>
+          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>but you can&rsquo;t prove?</span>
+        </h1>
+
+        <QuestionForm />
+      </div>
+    </div>
+  );
 }

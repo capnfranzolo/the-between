@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Between · UX Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; font-family: 'Inter', -apple-system, system-ui, sans-serif; }
+  body { overflow: hidden; }
+  #root { width: 100%; height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="between.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ─── Mobile flow harness ─────────────────────────────────────
+// Wraps a series of mobile screens with a thin device-style frame
+// so reviewers can step through Landing → Reveal in one artboard.
+function MobileFlow() {
+  const [stage, setStage] = useState('landing'); // landing | reveal | unique | cosmos
+  const [answer, setAnswer] = useState('');
+  const [unique, setUnique] = useState('');
+
+  const myThought = answer ? {
+    id: '7kx2',
+    text: answer,
+    warmth: 0.62,
+    unique: unique || undefined,
+    mine: true,
+  } : null;
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {stage === 'landing' && (
+        <LandingScreen onSubmit={(t) => { setAnswer(t); setStage('reveal'); }} />
+      )}
+      {stage === 'reveal' && (
+        <RevealScreen
+          answer={answer || "I think people remember the weather of a moment more than the words."}
+          shortId="7kx2"
+          onAction={(kind) => {
+            if (kind === 'cosmos') setStage('unique');
+          }}
+        />
+      )}
+      {stage === 'unique' && (
+        <UniqueScreen
+          onBack={() => setStage('reveal')}
+          onSubmit={(u) => { setUnique(u); setStage('cosmos'); }}
+        />
+      )}
+      {stage === 'cosmos' && (
+        <CosmosScreen
+          myThought={myThought}
+          initialSelected="7kx2"
+        />
+      )}
+      {/* Replay pip in bottom-left corner of the frame */}
+      <button
+        onClick={() => { setStage('landing'); setAnswer(''); setUnique(''); }}
+        title="Replay flow"
+        style={{
+          position: 'absolute',
+          left: 10, bottom: 10,
+          background: 'rgba(20,14,40,0.55)',
+          border: '1px solid rgba(240,232,224,0.18)',
+          color: 'rgba(240,232,224,0.7)',
+          padding: '5px 10px',
+          borderRadius: 999,
+          fontSize: 9,
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          cursor: 'pointer',
+          fontFamily: 'Inter, sans-serif',
+          backdropFilter: 'blur(6px)',
+          zIndex: 99,
+        }}
+      >
+        ↺ replay
+      </button>
+    </div>
+  );
+}
+
+// ─── Desktop flow harness ────────────────────────────────────
+// Same staging as MobileFlow, but at landscape dimensions.
+// Question-taking screens are intimate by design — content stays
+// centered; the wider canvas just lets the twilight sky breathe.
+function DesktopFlow() {
+  const [stage, setStage] = useState('landing');
+  const [answer, setAnswer] = useState('');
+  const [unique, setUnique] = useState('');
+
+  const myThought = answer ? {
+    id: '7kx2',
+    text: answer,
+    warmth: 0.62,
+    unique: unique || undefined,
+    mine: true,
+  } : null;
+
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      {stage === 'landing' && (
+        <LandingScreen onSubmit={(t) => { setAnswer(t); setStage('reveal'); }} />
+      )}
+      {stage === 'reveal' && (
+        <RevealScreen
+          answer={answer || "I think people remember the weather of a moment more than the words."}
+          shortId="7kx2"
+          onAction={(kind) => { if (kind === 'cosmos') setStage('unique'); }}
+        />
+      )}
+      {stage === 'unique' && (
+        <UniqueScreen
+          onBack={() => setStage('reveal')}
+          onSubmit={(u) => { setUnique(u); setStage('cosmos'); }}
+        />
+      )}
+      {stage === 'cosmos' && (
+        <CosmosScreen
+          myThought={myThought}
+          initialSelected="7kx2"
+        />
+      )}
+      <button
+        onClick={() => { setStage('landing'); setAnswer(''); setUnique(''); }}
+        title="Replay flow"
+        style={{
+          position: 'absolute', left: 14, bottom: 14,
+          background: 'rgba(20,14,40,0.55)',
+          border: '1px solid rgba(240,232,224,0.18)',
+          color: 'rgba(240,232,224,0.7)',
+          padding: '6px 12px', borderRadius: 999,
+          fontSize: 10, fontWeight: 500, letterSpacing: '0.1em',
+          textTransform: 'uppercase', cursor: 'pointer',
+          fontFamily: 'Inter, sans-serif',
+          backdropFilter: 'blur(6px)', zIndex: 99,
+        }}
+      >
+        ↺ Replay
+      </button>
+    </div>
+  );
+}
+
+// ─── Cosmos with linked Binary screen ────────────────────────
+function CosmosFlow() {
+  const myThought = {
+    id: '7kx2',
+    text: "I think people remember the weather of a moment more than the words.",
+    warmth: 0.62,
+    unique: "I save train ticket stubs in the back of my passport.",
+    mine: true,
+  };
+  return (
+    <CosmosScreen
+      myThought={myThought}
+      initialSelected="7kx2"
+    />
+  );
+}
+
+// ─── Mobile bezel ────────────────────────────────────────────
+// Light, opinionated phone frame: a thin dark bezel + status bar.
+// Keeps the artboard self-explanatory without pretending to be a real iPhone.
+function PhoneBezel({ children, label = '9:41' }) {
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      background: '#0c0820',
+      padding: 0,
+      position: 'relative',
+      overflow: 'hidden',
+      borderRadius: 0,
+    }}>
+      {/* Status bar */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        height: 42, zIndex: 100,
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 22px',
+        color: '#F0E8E0',
+        fontSize: 13, fontWeight: 600,
+        fontFamily: 'Inter, sans-serif',
+        pointerEvents: 'none',
+      }}>
+        <span>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {/* signal */}
+          <svg width="16" height="10" viewBox="0 0 16 10"><g fill="#F0E8E0">
+            <rect x="0" y="6" width="3" height="4" rx="0.5"/>
+            <rect x="4" y="4" width="3" height="6" rx="0.5"/>
+            <rect x="8" y="2" width="3" height="8" rx="0.5"/>
+            <rect x="12" y="0" width="3" height="10" rx="0.5"/>
+          </g></svg>
+          {/* battery */}
+          <svg width="22" height="10" viewBox="0 0 22 10">
+            <rect x="0.5" y="0.5" width="19" height="9" rx="2" fill="none" stroke="#F0E8E0" strokeOpacity="0.5" />
+            <rect x="2" y="2" width="15" height="6" rx="1" fill="#F0E8E0" />
+            <rect x="20" y="3" width="1.5" height="4" rx="0.5" fill="#F0E8E0" fillOpacity="0.5" />
+          </svg>
+        </div>
+      </div>
+      {/* notch / dynamic-island-ish */}
+      <div style={{
+        position: 'absolute', top: 8, left: '50%',
+        transform: 'translateX(-50%)',
+        width: 92, height: 26, borderRadius: 999,
+        background: '#000', zIndex: 101,
+      }} />
+      {/* Content fills */}
+      <div style={{ position: 'absolute', inset: 0 }}>
+        {children}
+      </div>
+      {/* Home indicator */}
+      <div style={{
+        position: 'absolute', bottom: 6, left: '50%',
+        transform: 'translateX(-50%)',
+        width: 124, height: 4, borderRadius: 999,
+        background: 'rgba(240,232,224,0.85)', zIndex: 100,
+      }} />
+    </div>
+  );
+}
+
+// ─── Top-level: design canvas with all artboards ────────────
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection
+        id="mobile-flow"
+        title="Mobile flow"
+        subtitle="Landing → Reveal → Unique → Cosmos. Tap through the phone frame to walk the whole experience."
+      >
+        <DCArtboard id="landing" label="01 · Landing / Question" width={390} height={780}>
+          <PhoneBezel>
+            <LandingScreen onSubmit={() => {}} />
+          </PhoneBezel>
+        </DCArtboard>
+
+        <DCArtboard id="reveal" label="02 · Reveal · spirograph blooms" width={390} height={780}>
+          <PhoneBezel>
+            <RevealScreen
+              answer="I think people remember the weather of a moment more than the words."
+              shortId="7kx2"
+            />
+          </PhoneBezel>
+        </DCArtboard>
+
+        <DCArtboard id="unique" label="02b · Unique fact (gates the cosmos)" width={390} height={780}>
+          <PhoneBezel>
+            <UniqueScreen onSubmit={() => {}} onBack={() => {}} />
+          </PhoneBezel>
+        </DCArtboard>
+
+        <DCArtboard id="mobile-cosmos" label="03 · Cosmos on mobile" width={390} height={780}>
+          <PhoneBezel>
+            <CosmosScreen
+              myThought={{
+                id: '7kx2',
+                text: "I think people remember the weather of a moment more than the words.",
+                warmth: 0.62,
+                unique: "I save train ticket stubs in the back of my passport.",
+                mine: true,
+              }}
+              initialSelected="7kx2"
+            />
+          </PhoneBezel>
+        </DCArtboard>
+
+        <DCArtboard id="mobile-flow-live" label="04 · Mobile · live flow" width={390} height={780}>
+          <PhoneBezel>
+            <MobileFlow />
+          </PhoneBezel>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="desktop-flow"
+        title="Desktop flow"
+        subtitle="Same five stages on a landscape canvas. The intimate question screens stay centered; the cosmos opens up."
+      >
+        <DCArtboard id="desktop-landing" label="05 · Landing (desktop)" width={1280} height={760}>
+          <LandingScreen onSubmit={() => {}} />
+        </DCArtboard>
+
+        <DCArtboard id="desktop-reveal" label="06 · Reveal (desktop)" width={1280} height={760}>
+          <RevealScreen
+            answer="I think people remember the weather of a moment more than the words."
+            shortId="7kx2"
+          />
+        </DCArtboard>
+
+        <DCArtboard id="desktop-unique" label="07 · Unique fact (desktop)" width={1280} height={760}>
+          <UniqueScreen onSubmit={() => {}} onBack={() => {}} />
+        </DCArtboard>
+
+        <DCArtboard id="desktop-cosmos-static" label="08 · Cosmos · ambient (no user star)" width={1280} height={760}>
+          <CosmosScreen myThought={null} />
+        </DCArtboard>
+
+        <DCArtboard id="desktop-flow-live" label="09 · Desktop · live flow" width={1280} height={760}>
+          <DesktopFlow />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="share"
+        title="Share preview · OG image (1200 × 630)"
+        subtitle="What appears in social previews. Never reveals the answer — the mystery is the hook."
+      >
+        <DCArtboard id="share" label="10 · Share / OG card" width={1200} height={630}>
+          <SharePreviewScreen
+            question="What do you know is true that you can't prove?"
+            spirographSeed="I think people remember the weather of a moment more than the words."
+            warmth={0.62}
+          />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
