@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { generateShortcode } from '@/lib/shortcode';
 import { extractDimensions } from '@/lib/dimensions/extract';
+import { randomCurveType } from '@/lib/spirograph/renderer';
 import { QUESTION_ID_MOCK, MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
@@ -15,10 +16,15 @@ export async function POST(req: NextRequest) {
   }
 
   const shortcode = generateShortcode(4);
-  const dimensions = await extractDimensions(answer);
+  const dimensionResult = await extractDimensions(answer);
+  const curveType = randomCurveType();
+
+  const dimensions = {
+    ...dimensionResult,
+    curveType,
+  };
 
   // TODO: persist to Supabase
-  // For now: return mock response
   return Response.json({
     shortcode,
     questionId: QUESTION_ID_MOCK,

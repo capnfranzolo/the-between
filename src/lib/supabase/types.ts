@@ -13,7 +13,22 @@ export interface Star {
   answer: string;
   unique_fact: string | null;
   status: 'pending' | 'approved' | 'rejected';
-  dimensions: Record<string, number> | null;
+  /**
+   * jsonb shape: { certainty, warmth, tension, vulnerability, scope, rootedness,
+   *                emotionIndex, curveType, reasoning }
+   * All floats are 0–1; emotionIndex is 0–6; curveType is a CURVE_TYPES string.
+   */
+  dimensions: {
+    certainty: number;
+    warmth: number;
+    tension: number;
+    vulnerability: number;
+    scope: number;
+    rootedness: number;
+    emotionIndex: number;
+    curveType: string;
+    reasoning: string;
+  } | null;
   ip_hash: string;
   created_at: string;
   approved_at: string | null;

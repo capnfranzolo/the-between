@@ -1,12 +1,14 @@
 'use client';
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { BTW, SANS, withAlpha, mulberry32, hashString, warmthColor } from '@/lib/btw';
+import { useState, useMemo, useEffect } from 'react';
+import { BTW, SANS, withAlpha } from '@/lib/btw';
 import TwilightSky from './TwilightSky';
 import Terrain from './Terrain';
 import AmbientField from './AmbientField';
 import BondCurves, { CosmosBond } from './BondCurves';
 import StarDetail, { CosmosStarData } from './StarDetail';
 import ConnectionDrawer from './ConnectionDrawer';
+import Spirograph from './Spirograph';
+import { EMOTIONS } from '@/lib/spirograph/renderer';
 
 interface CosmosViewProps {
   stars: CosmosStarData[];
@@ -111,6 +113,8 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
           const isSel = selected === t.id;
           const isActive = isHov || isSel;
           const dimmed = !!(active && !isActive);
+          const emotionRGB = EMOTIONS[t.dimensions.emotionIndex]?.rgb ?? [180, 120, 200];
+          const emotionColor = `rgb(${emotionRGB[0]},${emotionRGB[1]},${emotionRGB[2]})`;
 
           return (
             <div
@@ -131,16 +135,14 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
                 opacity: dp.opacity * (dimmed ? 0.5 : 1),
                 transition: 'transform .7s cubic-bezier(.2,.7,.3,1), opacity .5s',
                 cursor: 'pointer',
-                filter: isActive ? 'drop-shadow(0 0 22px rgba(240,200,120,0.45))' : undefined,
+                filter: isActive ? `drop-shadow(0 0 22px ${withAlpha(emotionColor, 0.45)})` : undefined,
               }}
             >
-              {/* Import Spirograph inline to avoid circular deps through StarRenderer */}
-              <SpirographInline
-                seed={t.id + ':' + t.text}
+              <Spirograph
+                dimensions={t.dimensions}
                 size={dp.size}
-                warmth={t.warmth}
-                blur={isActive ? 0 : dp.blur}
-                speedMul={t.depth === 0 ? 1 : 0.5}
+                animate={t.depth < 2}
+                style={{ filter: dp.blur && !isActive ? `blur(${dp.blur}px)` : undefined }}
               />
               {t.mine && (
                 <div style={{
@@ -214,73 +216,4 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
       `}</style>
     </div>
   );
-}
-
-function SpirographInline({ seed = 'between', size = 140, warmth = 0.5, blur = 0, speedMul = 1 }: {
-  seed?: string; size?: number; warmth?: number; blur?: number; speedMul?: number;
-}) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number | null>(null);
-  const startRef = useRef(performance.now());
-
-  const params = useMemo(() => {
-    const rng = mulberry32(hashString(seed));
-    const lyr = 3 + Math.floor(rng() * 3);
-    const ellipses = [];
-    for (let i = 0; i < lyr; i++) {
-      const aspect = rng();
-      const rx = aspect < 0.5 ? 0.85 + rng() * 0.25 : 0.55 + rng() * 0.25;
-      const ry = aspect < 0.5 ? 0.55 + rng() * 0.25 : 0.85 + rng() * 0.25;
-      ellipses.push({ rx, ry, rot: (i / lyr) * Math.PI + rng() * 0.4, spin: (rng() - 0.5) * 0.6 });
-    }
-    return { ellipses };
-  }, [seed]);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = size * 2, H = size * 2;
-    el.width = W * dpr; el.height = H * dpr;
-    el.style.width = W + 'px'; el.style.height = H + 'px';
-    const ctx = el.getContext('2d')!;
-    ctx.scale(dpr, dpr);
-    const baseColor = warmthColor(warmth);
-    const draw = (now: number) => {
-      const t = (now - startRef.current) / 1000;
-      ctx.clearRect(0, 0, W, H);
-      const cx = W / 2, cy = H / 2;
-      const haloR = size * 0.95;
-      const grad = ctx.createRadialGradient(cx, cy, size * 0.1, cx, cy, haloR);
-      grad.addColorStop(0, withAlpha(baseColor, 0.22));
-      grad.addColorStop(0.5, withAlpha(baseColor, 0.07));
-      grad.addColorStop(1, withAlpha(baseColor, 0));
-      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, haloR, 0, Math.PI * 2); ctx.fill();
-      const masterRot = t * 0.18 * speedMul;
-      const alphas = [0.85, 0.55, 0.32, 0.18, 0.10];
-      const strokes = [1.4, 0.9, 0.6, 0.45, 0.35];
-      for (let i = 0; i < params.ellipses.length; i++) {
-        const e = params.ellipses[i];
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(e.rot + masterRot * (1 + e.spin * 0.4));
-        ctx.strokeStyle = withAlpha(baseColor, (alphas[i] ?? 0.1));
-        ctx.lineWidth = (strokes[i] ?? 0.3) * (size / 60);
-        ctx.shadowColor = withAlpha(baseColor, 0.5); ctx.shadowBlur = i === 0 ? 6 : 0;
-        ctx.beginPath(); ctx.ellipse(0, 0, size * 0.78 * e.rx, size * 0.78 * e.ry, 0, 0, Math.PI * 2); ctx.stroke();
-        ctx.restore();
-      }
-      ctx.shadowBlur = 0;
-      const coreR = Math.max(1.2, size / 50);
-      const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 5);
-      cg.addColorStop(0, 'rgba(255,248,235,0.9)'); cg.addColorStop(0.4, withAlpha(baseColor, 0.4)); cg.addColorStop(1, withAlpha(baseColor, 0));
-      ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, coreR * 5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgba(255,250,240,1)'; ctx.beginPath(); ctx.arc(cx, cy, coreR, 0, Math.PI * 2); ctx.fill();
-      rafRef.current = requestAnimationFrame(draw);
-    };
-    rafRef.current = requestAnimationFrame(draw);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [size, warmth, params, speedMul]);
-
-  return <canvas ref={ref} style={{ display: 'block', filter: blur ? `blur(${blur}px)` : undefined }} />;
 }
