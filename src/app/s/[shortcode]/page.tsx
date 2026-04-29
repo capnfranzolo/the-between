@@ -7,7 +7,7 @@ import Terrain from '@/components/Terrain';
 import Spirograph from '@/components/Spirograph';
 import PathCard from '@/components/PathCard';
 import { BTW, SERIF, SANS, withAlpha, hashString } from '@/lib/btw';
-import { SITE_URL, QUESTION_ID_MOCK } from '@/lib/constants';
+import { SITE_URL } from '@/lib/constants';
 
 interface StarData {
   shortcode: string;
@@ -40,11 +40,11 @@ export default function RevealPage() {
   }, [shortcode]);
 
   const warmth = star ? (hashString(star.answer) % 100) / 100 : 0.5;
-  const url = `${SITE_URL}/s/${shortcode}`;
+  const url = `https://${SITE_URL}/s/${shortcode}`;
 
   const handleShare = async () => {
     try {
-      await navigator.clipboard.writeText('https://' + url);
+      await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
@@ -116,6 +116,13 @@ export default function RevealPage() {
         overflowY: 'auto',
       }}>
         <div style={{
+          fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5,
+          color: BTW.textDim, maxWidth: 320, margin: '0 0 12px',
+        }}>
+          What do you know is true but you can&rsquo;t prove?
+        </div>
+
+        <div style={{
           fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45,
           color: BTW.textPri, opacity: stage === 'blooming' ? 0 : 0.95,
           maxWidth: 320, margin: '0 0 28px',
@@ -155,8 +162,8 @@ export default function RevealPage() {
             }}
           >
             {url}
-            <span style={{ fontSize: 10, color: copied ? BTW.horizon[3] : BTW.textDim, letterSpacing: '0.2em', transition: 'color .3s' }}>
-              {copied ? 'COPIED' : ''}
+            <span style={{ fontSize: 10, letterSpacing: '0.2em', transition: 'color .3s', color: copied ? BTW.horizon[3] : 'transparent' }}>
+              COPIED
             </span>
           </div>
         </div>

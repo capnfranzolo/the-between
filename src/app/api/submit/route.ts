@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import { generateShortcode } from '@/lib/shortcode';
 import { extractDimensions } from '@/lib/dimensions/extract';
-import { QUESTION_ID_MOCK, MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
+import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
+import { supabaseServer } from '@/lib/supabase/server';
+import { hashString } from '@/lib/btw';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -14,14 +16,40 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Answer length out of range' }, { status: 400 });
   }
 
+  const { data: question } = await supabaseServer
+    .from('questions')
+    .select('id')
+    .eq('active', true)
+    .single();
+
+  if (!question) {
+    return Response.json({ error: 'No active question' }, { status: 503 });
+  }
+
+  const rawIp =
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    req.headers.get('x-real-ip') ??
+    'unknown';
+  const ipHash = hashString(rawIp).toString(16);
+
   const shortcode = generateShortcode(4);
   const dimensions = await extractDimensions(answer);
 
-  // TODO: persist to Supabase
-  // For now: return mock response
-  return Response.json({
-    shortcode,
-    questionId: QUESTION_ID_MOCK,
-    dimensions,
-  });
+  const { error } = await supabaseServer
+    .from('stars')
+    .insert({
+      shortcode,
+      answer,
+      question_id: question.id,
+      status: 'pending',
+      ip_hash: ipHash,
+      dimensions,
+    });
+
+  if (error) {
+    console.error('Insert star error:', error);
+    return Response.json({ error: 'Failed to save' }, { status: 500 });
+  }
+
+  return Response.json({ shortcode, questionId: question.id, dimensions });
 }
