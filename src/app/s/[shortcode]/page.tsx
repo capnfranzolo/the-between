@@ -51,11 +51,11 @@ export default function RevealPage() {
   }, [shortcode]);
 
   const dimensions = star?.dimensions ?? DEFAULT_DIMS;
-  const url = `${SITE_URL}/s/${shortcode}`;
+  const url = `https://${SITE_URL}/s/${shortcode}`;
 
   const handleShare = async () => {
     try {
-      await navigator.clipboard.writeText('https://' + url);
+      await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
@@ -73,7 +73,7 @@ export default function RevealPage() {
     );
   }
 
-  // Visitor view — no answer shown
+  // Visitor view
   if (!isOwner) {
     return (
       <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden', fontFamily: SANS, color: BTW.textPri }}>
@@ -86,9 +86,13 @@ export default function RevealPage() {
           display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
           padding: '40px 24px', textAlign: 'center',
+          overflowY: 'auto',
         }}>
-          <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textDim, marginBottom: 32, maxWidth: 320, lineHeight: 1.4 }}>
-            What do you know is true<br />but you can&rsquo;t prove?
+          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5, color: BTW.textDim, maxWidth: 320, margin: '0 0 12px' }}>
+            What do you know is true but you can&rsquo;t prove?
+          </div>
+          <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45, color: BTW.textPri, maxWidth: 320, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
+            &ldquo;{star.answer}&rdquo;
           </div>
           <Spirograph dimensions={dimensions} size={260} animate />
           <div style={{ marginTop: 36 }}>
@@ -103,7 +107,7 @@ export default function RevealPage() {
                 textDecoration: 'none',
               }}
             >
-              What shape are you? →
+              What&rsquo;s yours? →
             </a>
           </div>
         </div>
@@ -126,6 +130,13 @@ export default function RevealPage() {
         padding: '40px 24px 32px', textAlign: 'center',
         overflowY: 'auto',
       }}>
+        <div style={{
+          fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5,
+          color: BTW.textDim, maxWidth: 320, margin: '0 0 12px',
+        }}>
+          What do you know is true but you can&rsquo;t prove?
+        </div>
+
         <div style={{
           fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45,
           color: BTW.textPri, opacity: stage === 'blooming' ? 0 : 0.95,
@@ -166,8 +177,8 @@ export default function RevealPage() {
             }}
           >
             {url}
-            <span style={{ fontSize: 10, color: copied ? BTW.horizon[3] : BTW.textDim, letterSpacing: '0.2em', transition: 'color .3s' }}>
-              {copied ? 'COPIED' : ''}
+            <span style={{ fontSize: 10, letterSpacing: '0.2em', transition: 'color .3s', color: copied ? BTW.horizon[3] : 'transparent' }}>
+              COPIED
             </span>
           </div>
         </div>
