@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { generateShortcode } from '@/lib/shortcode';
 import { extractDimensions } from '@/lib/dimensions/extract';
+import { randomCurveType } from '@/lib/spirograph/renderer';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
 import { supabaseServer } from '@/lib/supabase/server';
 import { hashString } from '@/lib/btw';
@@ -33,7 +34,13 @@ export async function POST(req: NextRequest) {
   const ipHash = hashString(rawIp).toString(16);
 
   const shortcode = generateShortcode(4);
-  const dimensions = await extractDimensions(answer);
+  const dimensionResult = await extractDimensions(answer);
+  const curveType = randomCurveType();
+
+  const dimensions = {
+    ...dimensionResult,
+    curveType,
+  };
 
   const { error } = await supabaseServer
     .from('stars')

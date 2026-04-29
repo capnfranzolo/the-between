@@ -2,6 +2,8 @@
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
+import type { DimensionResult } from '@/lib/dimensions/prompt';
+import type { CurveType } from '@/lib/spirograph/renderer';
 
 export interface CosmosStarData {
   id: string;
@@ -11,7 +13,7 @@ export interface CosmosStarData {
   x: number;
   y: number;
   depth: number;
-  warmth: number;
+  dimensions: DimensionResult & { curveType: CurveType };
   mine?: boolean;
 }
 
@@ -44,7 +46,7 @@ export default function StarDetail({ star, hasMystar, onConnect }: StarDetailPro
       }}
     >
       <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 24, lineHeight: 1.4, color: BTW.textPri }}>
-        "{star.text}"
+        &ldquo;{star.text}&rdquo;
       </div>
 
       {star.unique_fact && (

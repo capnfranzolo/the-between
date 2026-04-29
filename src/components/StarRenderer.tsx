@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import Spirograph from './Spirograph';
+import Spirograph from './SpirographSeed';
 import { BTW, withAlpha, hashString } from '@/lib/btw';
 
 interface StarRendererProps {

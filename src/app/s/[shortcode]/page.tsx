@@ -6,13 +6,24 @@ import AmbientField from '@/components/AmbientField';
 import Terrain from '@/components/Terrain';
 import Spirograph from '@/components/Spirograph';
 import PathCard from '@/components/PathCard';
-import { BTW, SERIF, SANS, withAlpha, hashString } from '@/lib/btw';
+import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { SITE_URL } from '@/lib/constants';
+import type { DimensionResult } from '@/lib/dimensions/prompt';
+import type { CurveType } from '@/lib/spirograph/renderer';
+
+type StarDimensions = DimensionResult & { curveType: CurveType };
+
+const DEFAULT_DIMS: StarDimensions = {
+  certainty: 0.5, warmth: 0.5, tension: 0.4, vulnerability: 0.7,
+  scope: 0.3, rootedness: 0.5, emotionIndex: 3,
+  curveType: 'hypotrochoid', reasoning: '',
+};
 
 interface StarData {
   shortcode: string;
   answer: string;
   question_id: string;
+  dimensions?: StarDimensions;
 }
 
 type Stage = 'blooming' | 'revealed';
@@ -39,7 +50,7 @@ export default function RevealPage() {
     return () => clearTimeout(t);
   }, [shortcode]);
 
-  const warmth = star ? (hashString(star.answer) % 100) / 100 : 0.5;
+  const dimensions = star?.dimensions ?? DEFAULT_DIMS;
   const url = `https://${SITE_URL}/s/${shortcode}`;
 
   const handleShare = async () => {
@@ -83,7 +94,7 @@ export default function RevealPage() {
           <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45, color: BTW.textPri, maxWidth: 320, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
             &ldquo;{star.answer}&rdquo;
           </div>
-          <Spirograph seed={star.answer} size={130} warmth={warmth} bloomMs={2200} />
+          <Spirograph dimensions={dimensions} size={260} animate />
           <div style={{ marginTop: 36 }}>
             <a
               href="/"
@@ -140,7 +151,7 @@ export default function RevealPage() {
           transform: stage === 'blooming' ? 'scale(0.92)' : 'scale(1)',
           transition: 'transform 2.2s cubic-bezier(.2,.7,.3,1)',
         }}>
-          <Spirograph seed={star.answer} size={130} warmth={warmth} bloomMs={2200} animate />
+          <Spirograph dimensions={dimensions} size={260} animate />
         </div>
 
         <div style={{

@@ -1,7 +1,7 @@
 'use client';
 import { useMemo } from 'react';
 import { mulberry32, hashString } from '@/lib/btw';
-import Spirograph from './Spirograph';
+import Spirograph from './SpirographSeed';
 
 interface AmbientFieldProps {
   count?: number;
