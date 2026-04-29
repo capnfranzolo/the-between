@@ -3,6 +3,11 @@ import { useRef, useEffect, useState } from 'react';
 import { createSpirograph, type SpiroDimensions, type CurveType } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 
+// The renderer was built around outerRadius=120 and zoom=1.4.
+// Epitrochoid can extend ~224px from center, so we need a canvas radius > 224.
+// We always render at this internal size and CSS-scale down to the display size.
+const RENDER_SIZE = 480;
+
 export interface SpirographProps {
   dimensions: DimensionResult & { curveType: CurveType };
   size?: number;
@@ -13,7 +18,7 @@ export interface SpirographProps {
 
 export default function Spirograph({
   dimensions,
-  size = 300,
+  size = 220,
   animate = true,
   style,
   onClick,
@@ -36,7 +41,10 @@ export default function Spirograph({
       curveType:     dimensions.curveType,
     };
 
-    const spiro = createSpirograph(canvas, dims, { size });
+    // Render at full size to avoid clipping, then override CSS to display smaller
+    const spiro = createSpirograph(canvas, dims, { size: RENDER_SIZE });
+    canvas.style.width = size + 'px';
+    canvas.style.height = size + 'px';
 
     if (animate) {
       spiro.start();
@@ -44,7 +52,6 @@ export default function Spirograph({
       spiro.renderStatic(2.5);
     }
 
-    // Trigger bloom fade after first frame
     const raf = requestAnimationFrame(() => setVisible(true));
 
     return () => {
@@ -73,6 +80,8 @@ export default function Spirograph({
         opacity: visible ? 1 : 0,
         transition: 'opacity 2.2s ease',
         cursor: onClick ? 'pointer' : 'default',
+        zIndex: 1,
+        position: 'relative',
         ...style,
       }}
     />

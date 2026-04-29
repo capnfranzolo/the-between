@@ -94,7 +94,7 @@ export default function RevealPage() {
           <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45, color: BTW.textPri, maxWidth: 320, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
             &ldquo;{star.answer}&rdquo;
           </div>
-          <Spirograph dimensions={dimensions} size={260} animate />
+          <Spirograph dimensions={dimensions} size={200} animate />
           <div style={{ marginTop: 36 }}>
             <a
               href="/"
@@ -151,7 +151,7 @@ export default function RevealPage() {
           transform: stage === 'blooming' ? 'scale(0.92)' : 'scale(1)',
           transition: 'transform 2.2s cubic-bezier(.2,.7,.3,1)',
         }}>
-          <Spirograph dimensions={dimensions} size={260} animate />
+          <Spirograph dimensions={dimensions} size={200} animate />
         </div>
 
         <div style={{
