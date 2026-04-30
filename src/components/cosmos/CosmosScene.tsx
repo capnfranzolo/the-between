@@ -67,6 +67,8 @@ function hashStr(s: string): number {
 const MAX_BAKED = 50;
 const LIVE_SIZE = 1024;  // hi-res canvas for the selected star
 const SELECTED_SCALE_MULT = 1.4; // sprite scale boost when star is selected
+// Sun sits slightly below horizon, directly in front of initial camera heading
+const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
   function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, onThoughtClick, onBackgroundClick }, ref) {
@@ -113,8 +115,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.toneMappingExposure = 1.1;
       container.appendChild(renderer.domElement);
 
-      scene.fog = new THREE.FogExp2(0x2A1B3D, 0.0012);
-
       // ─── LIGHTING ───
       scene.add(new THREE.AmbientLight(0x6B4D8A, 0.8));
       const dirLight = new THREE.DirectionalLight(0xF0C080, 0.4);
@@ -122,45 +122,63 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       scene.add(dirLight);
       scene.add(new THREE.HemisphereLight(0x5A3D78, 0x1E1030, 0.3));
 
-      // ─── SKY DOME ───
+      // ─── SKY DOME — radial gradient emanating from a fixed sun point ───
       const skyGeo = new THREE.SphereGeometry(900, 64, 64);
       const skyMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
-        uniforms: { uTime: { value: 0 } },
+        uniforms: { uTime: { value: 0 }, uSunDir: { value: SUN_DIRECTION } },
         vertexShader: `
-          varying vec3 vLocalPos;
+          varying vec3 vWorldDir;
           void main() {
-            vLocalPos = normalize(position);
+            vWorldDir = normalize(position);
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
         fragmentShader: `
+          uniform vec3  uSunDir;
           uniform float uTime;
-          varying vec3 vLocalPos;
-          vec3 hex(float r, float g, float b) { return vec3(r, g, b) / 255.0; }
+          varying vec3  vWorldDir;
+
+          vec3 twiGrad(float t) {
+            // t = 0 at sun point, t = 1 at opposite pole
+            vec3 c0  = vec3(240.0,192.0,128.0)/255.0; //   0° warm gold
+            vec3 c1  = vec3(224.0,168.0,104.0)/255.0; //  10° amber
+            vec3 c2  = vec3(208.0,144.0,112.0)/255.0; //  20° copper
+            vec3 c3  = vec3(184.0,120.0,120.0)/255.0; //  30° dusty rose
+            vec3 c4  = vec3(154.0, 96.0,128.0)/255.0; //  45° warm mauve
+            vec3 c5  = vec3(123.0, 80.0,136.0)/255.0; //  60° warm purple
+            vec3 c6  = vec3( 90.0, 61.0,120.0)/255.0; //  80° medium purple
+            vec3 c7  = vec3( 61.0, 45.0,101.0)/255.0; // 100° purple
+            vec3 c8  = vec3( 42.0, 32.0, 80.0)/255.0; // 120° dark purple
+            vec3 c9  = vec3( 30.0, 24.0, 64.0)/255.0; // 150° deep indigo
+            vec3 c10 = vec3( 13.0, 10.0, 32.0)/255.0; // 180° near black
+            if (t < 0.056) return mix(c0,  c1,  smoothstep(0.000,0.056,t));
+            if (t < 0.111) return mix(c1,  c2,  smoothstep(0.056,0.111,t));
+            if (t < 0.167) return mix(c2,  c3,  smoothstep(0.111,0.167,t));
+            if (t < 0.250) return mix(c3,  c4,  smoothstep(0.167,0.250,t));
+            if (t < 0.333) return mix(c4,  c5,  smoothstep(0.250,0.333,t));
+            if (t < 0.444) return mix(c5,  c6,  smoothstep(0.333,0.444,t));
+            if (t < 0.556) return mix(c6,  c7,  smoothstep(0.444,0.556,t));
+            if (t < 0.667) return mix(c7,  c8,  smoothstep(0.556,0.667,t));
+            if (t < 0.833) return mix(c8,  c9,  smoothstep(0.667,0.833,t));
+            return             mix(c9,  c10, smoothstep(0.833,1.000,t));
+          }
+
           void main() {
-            float y = vLocalPos.y;
-            float breathe = sin(uTime * 0.02) * 0.002;
-            vec3 zenith    = hex(30.0, 24.0, 64.0);
-            vec3 upper     = hex(61.0, 45.0, 101.0);
-            vec3 mid       = hex(110.0, 70.0, 125.0);
-            vec3 low       = hex(155.0, 100.0, 135.0);
-            vec3 rose      = hex(180.0, 120.0, 130.0);
-            vec3 horizPeak = hex(210.0, 150.0, 110.0);
-            vec3 color;
-            if (y < -0.15) { color = rose; }
-            else if (y < 0.0) { color = mix(rose, horizPeak, smoothstep(-0.15, 0.0, y)); }
-            else if (y < 0.008 + breathe) { color = mix(horizPeak, rose, smoothstep(0.0, 0.008 + breathe, y)); }
-            else if (y < 0.04) { color = mix(rose, low, smoothstep(0.008 + breathe, 0.04, y)); }
-            else if (y < 0.12) { color = mix(low, mid, smoothstep(0.04, 0.12, y)); }
-            else if (y < 0.4) { color = mix(mid, upper, smoothstep(0.12, 0.4, y)); }
-            else { color = mix(upper, zenith, smoothstep(0.4, 1.0, y)); }
+            vec3 dir  = normalize(vWorldDir);
+            float cosA = dot(dir, uSunDir);
+            float t   = acos(clamp(cosA, -1.0, 1.0)) / 3.14159265;
+            vec3 color = twiGrad(t);
+            // Atmospheric haze near sun — additive warm scatter
+            float haze = max(0.0, cosA - 0.97);
+            color += vec3(0.35, 0.18, 0.05) * haze * 5.0;
+            // Very gentle breathing pulse
+            color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color, 1.0);
           }
         `,
       });
       const skyDome = new THREE.Mesh(skyGeo, skyMat);
-      skyDome.rotation.x = -8 * Math.PI / 180;
       scene.add(skyDome);
 
       // ─── BACKGROUND STARS ───
@@ -212,9 +230,37 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const TERRAIN_SIZE = 3200;
       const TERRAIN_SEGS = 300;
       const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
-      const terrainMat = new THREE.MeshLambertMaterial({ color: 0x503868 });
+      const terrainMat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: true,
+        vertexShader: `
+          varying float vDistFromCam;
+          varying float vFlatness;
+          void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vDistFromCam = length(worldPos.xz - cameraPosition.xz);
+            // normal.z ≈ flatness in local space (PlaneGeometry normal = local +Z)
+            vec3 wn = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+            vFlatness = wn.y;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying float vDistFromCam;
+          varying float vFlatness;
+          void main() {
+            vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0; // #503868
+            vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0; // darker
+            vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness);
+            float fade = 1.0 - smoothstep(500.0, 1000.0, vDistFromCam);
+            if (fade < 0.01) discard;
+            gl_FragColor = vec4(color, fade);
+          }
+        `,
+      });
       const terrain = new THREE.Mesh(terrainGeo, terrainMat);
       terrain.rotation.x = -Math.PI / 2;
+      terrain.renderOrder = -1; // render before transparent sprites for correct depth
       scene.add(terrain);
 
       let terrainOffsetX = 0;
@@ -385,7 +431,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       function destroyThought(id: string) {
         deactivateLive(id);
-        if (flyStarId === id) { flyStarId = null; flyStartDist = 0; }
+        if (id === activeStarRef.current) flyTargetXZ = null;
         const group = thoughtGroups.get(id);
         if (!group) return;
         const spiro = group.userData.spiro as StarSpiro | null;
@@ -476,14 +522,17 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       removeBondFnRef.current = destroyBond;
 
       // ─── CAMERA STATE ───
-      let heading = 0;
+      // Initial heading toward SUN_DIRECTION (sunset straight ahead)
+      let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let targetHeading: number | null = null;
-      let flyTargetPos: THREE.Vector3 | null = null;
-      let flyStarId: string | null = null;  // star we're flying toward
-      let flyStartDist = 0;                 // total distance at click time
+      let flyTargetXZ: { x: number; z: number } | null = null;
+      let flyStarTargetY = 90; // camera Y to aim for during flyTo
+      let camTargetY = 90;
       let speed = 4;
-      let clickBoostTime = 0;
-      camera.position.set(0, 80, 0);
+      // Smooth look-at tracker — interpolated toward destination each frame
+      const lookAtCur = new THREE.Vector3(0, 86, -200);
+      const tmpLook = new THREE.Vector3();
+      camera.position.set(0, 90, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
@@ -491,30 +540,28 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
         if (!g) return;
-        const dx = g.position.x - camera.position.x;
-        const dz = g.position.z - camera.position.z;
-        targetHeading = Math.atan2(dx, -dz);
+        const starPos = g.position;
+        const dx = starPos.x - camera.position.x;
+        const dz = starPos.z - camera.position.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
-        flyStarId = id;
-        flyStartDist = dist;
-        const stopDist = 22;
+        targetHeading = Math.atan2(dx, -dz);
+        const stopDist = 60;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
-          flyTargetPos = new THREE.Vector3(
-            camera.position.x + dx * t,
-            g.position.y,
-            camera.position.z + dz * t,
-          );
+          flyTargetXZ = {
+            x: camera.position.x + dx * t,
+            z: camera.position.z + dz * t,
+          };
         } else {
-          // Already close — activate immediately
-          flyTargetPos = null;
-          flyStartDist = 0;
+          flyTargetXZ = null;
         }
+        // Camera stops slightly below star so star sits in the upper viewport
+        flyStarTargetY = Math.max(starPos.y - 14, 60);
       };
 
       turnRightFnRef.current = () => {
         targetHeading = heading + Math.PI / 2;
-        flyTargetPos = null;
+        flyTargetXZ = null;
       };
 
       // ─── INPUT ───
@@ -575,59 +622,65 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           prevActiveStar = currentActiveStar;
         }
 
-        const targetSpeed = isPaused ? 0 : (keys['Space'] ? 25 : (clickBoostTime > 0 ? 18 : 4));
-        speed += (targetSpeed - speed) * dt * (isPaused ? 8 : 3);
-        if (clickBoostTime > 0) clickBoostTime -= dt;
-
+        // Heading: smooth toward target, or very slow drift when idle
         if (targetHeading !== null) {
           let diff = targetHeading - heading;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
           heading += diff * dt * 1.5;
           if (Math.abs(diff) < 0.05) targetHeading = null;
+        } else if (!isPaused && !flyTargetXZ) {
+          // One rotation every ~50 minutes — sunset slowly sweeps across the view
+          heading += 0.002 * dt;
         }
 
         const fwdX = Math.sin(heading);
         const fwdZ = -Math.cos(heading);
-        if (flyTargetPos) {
-          const fdx = flyTargetPos.x - camera.position.x;
-          const fdz = flyTargetPos.z - camera.position.z;
+
+        // Speed for free drift
+        const targetSpeed = isPaused ? 0 : (keys['Space'] ? 25 : 4);
+        speed += (targetSpeed - speed) * dt * 3;
+
+        // Horizontal position
+        if (flyTargetXZ) {
+          const fdx = flyTargetXZ.x - camera.position.x;
+          const fdz = flyTargetXZ.z - camera.position.z;
           const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
-          if (fdist < 3) {
-            flyTargetPos = null;
-            flyStartDist = 0;
+          if (fdist < 2) {
+            flyTargetXZ = null;
           } else {
             const flyAmt = Math.min(fdist, 90 * dt);
             camera.position.x += (fdx / fdist) * flyAmt;
             camera.position.z += (fdz / fdist) * flyAmt;
-            flyStartDist = 0;
           }
         } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
           camera.position.z += fwdZ * speed * dt;
         }
-        camera.position.y = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 80 + Math.sin(time * 0.3) * 0.4);
 
-        const lookDist = 200;
-        if (isPaused && activeStarRef.current) {
+        // Camera Y — smooth lerp; tracks terrain floor in free mode, star approach Y in flyTo
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 80);
+        if (flyTargetXZ) {
+          camTargetY = Math.max(flyStarTargetY, terrainFloor);
+        } else if (activeStarRef.current) {
           const ag = thoughtGroups.get(activeStarRef.current);
-          if (ag) {
-            // Look slightly below the star so it sits in the upper half above the detail panel
-            camera.lookAt(new THREE.Vector3(ag.position.x, ag.position.y - 4, ag.position.z));
-          } else {
-            camera.lookAt(new THREE.Vector3(
-              camera.position.x + fwdX * lookDist,
-              camera.position.y + Math.tan(17 * Math.PI / 180) * lookDist,
-              camera.position.z + fwdZ * lookDist,
-            ));
-          }
+          camTargetY = ag ? Math.max(ag.position.y - 14, terrainFloor) : terrainFloor;
         } else {
-          camera.lookAt(new THREE.Vector3(
-            camera.position.x + fwdX * lookDist,
-            camera.position.y + Math.tan(17 * Math.PI / 180) * lookDist,
-            camera.position.z + fwdZ * lookDist,
-          ));
+          camTargetY = terrainFloor;
         }
+        camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
+
+        // Smooth lookAt — interpolates toward star when selected, forward+slightly-down otherwise
+        const activeId = activeStarRef.current;
+        if (activeId) {
+          const ag = thoughtGroups.get(activeId);
+          if (ag) tmpLook.set(ag.position.x, ag.position.y - 4, ag.position.z);
+          else tmpLook.set(camera.position.x + fwdX * 200, camera.position.y - 4, camera.position.z + fwdZ * 200);
+        } else {
+          tmpLook.set(camera.position.x + fwdX * 200, camera.position.y - 4, camera.position.z + fwdZ * 200);
+        }
+        lookAtCur.lerp(tmpLook, Math.min((activeId ? 4.0 : 2.0) * dt, 1));
+        camera.lookAt(lookAtCur);
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
