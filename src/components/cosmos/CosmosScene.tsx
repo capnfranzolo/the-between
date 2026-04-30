@@ -65,8 +65,10 @@ function hashStr(s: string): number {
 }
 
 const MAX_BAKED = 50;
-const LIVE_SIZE = 1024;  // hi-res canvas for the selected star
-const SELECTED_SCALE_MULT = 1.4; // sprite scale boost when star is selected
+// Canvas must be large enough that the glow (outerRadius 120 × zoom 1.4 + yOffset 30)
+// never clips. At size=560 the bottom margin is ~82px — safe even with glow overlap.
+const SPIRO_SIZE_LIVE = 560; // used for both baked and live so visual size stays identical
+const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at stop-dist
 // Sun sits slightly below horizon, directly in front of initial camera heading
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
@@ -91,15 +93,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
-    const [dbgExposure, setDbgExposure] = useState(0.95);
-    const [dbgSkyBright, setDbgSkyBright] = useState(0.95);
-    const [dbgAmbient, setDbgAmbient] = useState(0.80);
-    const dbgExposureRef = useRef(0.95);
-    const dbgSkyBrightRef = useRef(0.95);
-    const dbgAmbientRef = useRef(0.80);
-    useEffect(() => { dbgExposureRef.current = dbgExposure; }, [dbgExposure]);
+    const [dbgExposure,   setDbgExposure]   = useState(0.90);
+    const [dbgSkyBright,  setDbgSkyBright]  = useState(1.25);
+    const [dbgGradSteep,  setDbgGradSteep]  = useState(1.00);
+    const [dbgGradLift,   setDbgGradLift]   = useState(0.35);
+    const [dbgTerrain,    setDbgTerrain]    = useState(1.00);
+    const dbgExposureRef  = useRef(0.90);
+    const dbgSkyBrightRef = useRef(1.25);
+    const dbgGradSteepRef = useRef(1.00);
+    const dbgGradLiftRef  = useRef(0.35);
+    const dbgTerrainRef   = useRef(1.00);
+    useEffect(() => { dbgExposureRef.current  = dbgExposure;  }, [dbgExposure]);
     useEffect(() => { dbgSkyBrightRef.current = dbgSkyBright; }, [dbgSkyBright]);
-    useEffect(() => { dbgAmbientRef.current = dbgAmbient; }, [dbgAmbient]);
+    useEffect(() => { dbgGradSteepRef.current = dbgGradSteep; }, [dbgGradSteep]);
+    useEffect(() => { dbgGradLiftRef.current  = dbgGradLift;  }, [dbgGradLift]);
+    useEffect(() => { dbgTerrainRef.current   = dbgTerrain;   }, [dbgTerrain]);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -122,7 +130,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.95;
+      renderer.toneMappingExposure = 0.90;
       container.appendChild(renderer.domElement);
 
       // ─── LIGHTING ───
@@ -137,7 +145,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const skyGeo = new THREE.SphereGeometry(900, 64, 64);
       const skyMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
-        uniforms: { uTime: { value: 0 }, uSunDir: { value: SUN_DIRECTION }, uBrightness: { value: 1.0 } },
+        uniforms: {
+          uTime:      { value: 0 },
+          uSunDir:    { value: SUN_DIRECTION },
+          uBrightness:{ value: 1.25 },
+          uGradSteep: { value: 1.0 },
+          uGradLift:  { value: 0.35 },
+        },
         vertexShader: `
           varying vec3 vWorldDir;
           void main() {
@@ -149,44 +163,47 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform vec3  uSunDir;
           uniform float uTime;
           uniform float uBrightness;
+          uniform float uGradSteep;
+          uniform float uGradLift;
           varying vec3  vWorldDir;
 
           vec3 skyGrad(float t) {
-            // t=0: warm peach at/below horizon  t=1: dark navy at zenith
-            // Palette matched to twilight screenshot: peach→dusty-rose→mauve→purple→blue-navy
-            vec3 c0 = vec3(224.0,150.0,100.0)/255.0; // warm peach
-            vec3 c1 = vec3(206.0,122.0,110.0)/255.0; // peach-rose
-            vec3 c2 = vec3(180.0, 94.0,116.0)/255.0; // dusty rose
-            vec3 c3 = vec3(152.0, 72.0,118.0)/255.0; // mauve-pink
-            vec3 c4 = vec3(122.0, 56.0,130.0)/255.0; // warm purple
-            vec3 c5 = vec3( 90.0, 46.0,136.0)/255.0; // purple
-            vec3 c6 = vec3( 60.0, 36.0,108.0)/255.0; // deep purple
-            vec3 c7 = vec3( 36.0, 24.0, 76.0)/255.0; // dark blue-purple
-            vec3 c8 = vec3( 20.0, 14.0, 50.0)/255.0; // near-black navy
-            vec3 c9 = vec3( 10.0,  8.0, 30.0)/255.0; // deepest night
-            if (t < 0.100) return mix(c0, c1, smoothstep(0.000,0.100,t));
-            if (t < 0.200) return mix(c1, c2, smoothstep(0.100,0.200,t));
-            if (t < 0.310) return mix(c2, c3, smoothstep(0.200,0.310,t));
-            if (t < 0.430) return mix(c3, c4, smoothstep(0.310,0.430,t));
-            if (t < 0.560) return mix(c4, c5, smoothstep(0.430,0.560,t));
-            if (t < 0.680) return mix(c5, c6, smoothstep(0.560,0.680,t));
-            if (t < 0.800) return mix(c6, c7, smoothstep(0.680,0.800,t));
-            if (t < 0.920) return mix(c7, c8, smoothstep(0.800,0.920,t));
-            return             mix(c8, c9, smoothstep(0.920,1.000,t));
+            // t=0: warm peach (horizon/below)   t=1: space-blue night (zenith)
+            // Upper colors match TwilightSky component: #1E1840 at top
+            vec3 c0  = vec3(228.0,154.0,108.0)/255.0; // peach
+            vec3 c1  = vec3(210.0,126.0,114.0)/255.0; // peach-rose
+            vec3 c2  = vec3(184.0, 98.0,118.0)/255.0; // dusty rose
+            vec3 c3  = vec3(156.0, 76.0,120.0)/255.0; // mauve-pink
+            vec3 c4  = vec3(124.0, 60.0,132.0)/255.0; // warm purple
+            vec3 c5  = vec3( 88.0, 50.0,140.0)/255.0; // purple
+            vec3 c6  = vec3( 58.0, 40.0,116.0)/255.0; // deep purple
+            vec3 c7  = vec3( 38.0, 30.0, 90.0)/255.0; // blue-purple
+            vec3 c8  = vec3( 30.0, 24.0, 72.0)/255.0; // #1E1848 space-blue (TwilightSky top)
+            vec3 c9  = vec3( 16.0, 13.0, 46.0)/255.0; // deep space
+            vec3 c10 = vec3(  9.0,  8.0, 28.0)/255.0; // near-black blue
+            if (t < 0.08) return mix(c0,  c1,  smoothstep(0.00,0.08,t));
+            if (t < 0.16) return mix(c1,  c2,  smoothstep(0.08,0.16,t));
+            if (t < 0.26) return mix(c2,  c3,  smoothstep(0.16,0.26,t));
+            if (t < 0.38) return mix(c3,  c4,  smoothstep(0.26,0.38,t));
+            if (t < 0.52) return mix(c4,  c5,  smoothstep(0.38,0.52,t));
+            if (t < 0.65) return mix(c5,  c6,  smoothstep(0.52,0.65,t));
+            if (t < 0.78) return mix(c6,  c7,  smoothstep(0.65,0.78,t));
+            if (t < 0.88) return mix(c7,  c8,  smoothstep(0.78,0.88,t));
+            if (t < 0.95) return mix(c8,  c9,  smoothstep(0.88,0.95,t));
+            return             mix(c9,  c10, smoothstep(0.95,1.00,t));
           }
 
           void main() {
             vec3 dir = normalize(vWorldDir);
 
-            // Primary axis: elevation — warm at/below horizon, dark navy at zenith
-            // dir.y: -1=down  0=horizon  +1=up
-            // t=0 at y≈-0.6 (below horizon), t=1 at y=1 (zenith)
-            float t = clamp(dir.y * 0.58 + 0.35, 0.0, 1.0);
+            // uGradSteep: higher = tighter warm band at horizon
+            // uGradLift:  higher = warm zone sits higher on screen
+            float t = clamp(dir.y * uGradSteep + uGradLift, 0.0, 1.0);
 
-            // Subtle azimuthal boost: slightly warmer in sun direction near horizon
+            // Subtle azimuthal nudge — warmer in sun direction near horizon only
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
-            float horizBand = clamp(0.35 - dir.y, 0.0, 0.35) / 0.35;
-            t -= sunAz * horizBand * 0.10;
+            float horizBand = clamp(uGradLift - dir.y, 0.0, uGradLift) / max(uGradLift, 0.001);
+            t -= sunAz * horizBand * 0.08;
             t = clamp(t, 0.0, 1.0);
 
             vec3 color = skyGrad(t);
@@ -250,6 +267,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const terrainMat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: true,
+        uniforms: { uTerrainBright: { value: 1.0 } },
         vertexShader: `
           varying float vDistFromCam;
           varying float vFlatness;
@@ -263,12 +281,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         `,
         fragmentShader: `
+          uniform float uTerrainBright;
           varying float vDistFromCam;
           varying float vFlatness;
           void main() {
             vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0; // #503868
             vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0; // darker
-            vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness);
+            vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness) * uTerrainBright;
             float fade = 1.0 - smoothstep(500.0, 1000.0, vDistFromCam);
             if (fade < 0.01) discard;
             gl_FragColor = vec4(color, fade);
@@ -343,10 +362,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const liveStars = new Map<string, LiveEntry>();
       let bakedStarCount = 0;
 
-      // Canvas size must be ≥ 396px: outerRadius(120) × zoom(1.4) = 168px from center;
-      // yOffset(30) adds 30 more to the bottom → 198px needed. 420/2 = 210 ✓
-      const SPIRO_SIZE = 420;
-      const SPRITE_SCALE = 12;
+      // SPRITE_SCALE compensates for the spirograph occupying ~71 % of the SPIRO_SIZE_LIVE
+      // canvas (vs ~94 % at the old 420 px). 16 × 0.71 / 12 × 0.94 ≈ 1.0 — same apparent size.
+      const SPIRO_SIZE = SPIRO_SIZE_LIVE;
+      const SPRITE_SCALE = 16;
 
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
@@ -418,8 +437,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const spiro = g.userData.spiro as StarSpiro | null;
         if (!spiro) return;
         const canvas = document.createElement('canvas');
+        // Same logical size as baked stars — spirograph fills same canvas fraction.
+        // Higher dpr gives sharper pixels without changing visual proportions.
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const inst = createSpirograph(canvas, spiro.dims, { size: LIVE_SIZE, dpr });
+        const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr });
         inst.start();
         const texture = new THREE.CanvasTexture(canvas);
         const mat = spiro.sprite.material as THREE.SpriteMaterial;
@@ -624,8 +645,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         skyMat.uniforms.uTime.value = time;
         skyMat.uniforms.uBrightness.value = dbgSkyBrightRef.current;
+        skyMat.uniforms.uGradSteep.value  = dbgGradSteepRef.current;
+        skyMat.uniforms.uGradLift.value   = dbgGradLiftRef.current;
+        terrainMat.uniforms.uTerrainBright.value = dbgTerrainRef.current;
         renderer.toneMappingExposure = dbgExposureRef.current;
-        ambientLight.intensity = dbgAmbientRef.current;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
@@ -903,10 +926,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }}>
           <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.5, textTransform: 'uppercase' }}>debug</div>
           {([
-            ['Exposure', dbgExposure, setDbgExposure, 0.1, 2.0, 0.05] as const,
-            ['Sky bright', dbgSkyBright, setDbgSkyBright, 0.1, 2.0, 0.05] as const,
-            ['Ambient', dbgAmbient, setDbgAmbient, 0.0, 2.0, 0.05] as const,
-          ]).map(([label, val, set, min, max, step]) => (
+            ['Exposure',   dbgExposure,  setDbgExposure,  0.10, 2.0, 0.05],
+            ['Sky bright', dbgSkyBright, setDbgSkyBright, 0.10, 2.5, 0.05],
+            ['Grad steep', dbgGradSteep, setDbgGradSteep, 0.30, 2.5, 0.05],
+            ['Grad lift',  dbgGradLift,  setDbgGradLift,  0.00, 0.7, 0.01],
+            ['Terrain',    dbgTerrain,   setDbgTerrain,   0.00, 2.0, 0.05],
+          ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>{label}</span>
