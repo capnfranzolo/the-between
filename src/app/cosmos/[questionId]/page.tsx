@@ -260,28 +260,21 @@ export default function CosmosPage() {
           </div>
         )}
 
-        {/* Turn-right button */}
-        <button
-          onClick={() => sceneRef.current?.turnRight()}
-          style={{
-            position: 'absolute', right: 24, bottom: 24,
-            background: 'rgba(20,14,40,0.6)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            border: `1px solid ${BTW.textPri}33`,
-            color: BTW.textDim,
-            width: 40, height: 40,
-            borderRadius: '50%',
-            fontSize: 18,
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            pointerEvents: 'auto',
-            zIndex: 5,
-          }}
-          title="Turn right 90°"
-        >
-          ↻
-        </button>
+        {/* Left / right edge rotation zones — pointer-events none; canvas handles actual click */}
+        <div style={{
+          position: 'absolute', left: 0, top: 0, width: '5%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>‹</span>
+        </div>
+        <div style={{
+          position: 'absolute', right: 0, top: 0, width: '5%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>›</span>
+        </div>
 
         {/* Star detail panel */}
         {selectedStar && !connecting && !connectConfirmed && (
