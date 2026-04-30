@@ -151,6 +151,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uBrightness:{ value: 1.25 },
           uGradSteep: { value: 1.0 },
           uGradLift:  { value: 0.35 },
+          uSkyGrad:   { value: null as THREE.Texture | null },
         },
         vertexShader: `
           varying vec3 vWorldDir;
@@ -160,53 +161,27 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         `,
         fragmentShader: `
-          uniform vec3  uSunDir;
-          uniform float uTime;
-          uniform float uBrightness;
-          uniform float uGradSteep;
-          uniform float uGradLift;
-          varying vec3  vWorldDir;
-
-          vec3 skyGrad(float t) {
-            // t=0: warm peach (horizon/below)   t=1: space-blue night (zenith)
-            // Upper colors match TwilightSky component: #1E1840 at top
-            vec3 c0  = vec3(228.0,154.0,108.0)/255.0; // peach
-            vec3 c1  = vec3(210.0,126.0,114.0)/255.0; // peach-rose
-            vec3 c2  = vec3(184.0, 98.0,118.0)/255.0; // dusty rose
-            vec3 c3  = vec3(156.0, 76.0,120.0)/255.0; // mauve-pink
-            vec3 c4  = vec3(124.0, 60.0,132.0)/255.0; // warm purple
-            vec3 c5  = vec3( 88.0, 50.0,140.0)/255.0; // purple
-            vec3 c6  = vec3( 58.0, 40.0,116.0)/255.0; // deep purple
-            vec3 c7  = vec3( 38.0, 30.0, 90.0)/255.0; // blue-purple
-            vec3 c8  = vec3( 30.0, 24.0, 72.0)/255.0; // #1E1848 space-blue (TwilightSky top)
-            vec3 c9  = vec3( 16.0, 13.0, 46.0)/255.0; // deep space
-            vec3 c10 = vec3(  9.0,  8.0, 28.0)/255.0; // near-black blue
-            if (t < 0.08) return mix(c0,  c1,  smoothstep(0.00,0.08,t));
-            if (t < 0.16) return mix(c1,  c2,  smoothstep(0.08,0.16,t));
-            if (t < 0.26) return mix(c2,  c3,  smoothstep(0.16,0.26,t));
-            if (t < 0.38) return mix(c3,  c4,  smoothstep(0.26,0.38,t));
-            if (t < 0.52) return mix(c4,  c5,  smoothstep(0.38,0.52,t));
-            if (t < 0.65) return mix(c5,  c6,  smoothstep(0.52,0.65,t));
-            if (t < 0.78) return mix(c6,  c7,  smoothstep(0.65,0.78,t));
-            if (t < 0.88) return mix(c7,  c8,  smoothstep(0.78,0.88,t));
-            if (t < 0.95) return mix(c8,  c9,  smoothstep(0.88,0.95,t));
-            return             mix(c9,  c10, smoothstep(0.95,1.00,t));
-          }
+          uniform vec3      uSunDir;
+          uniform float     uTime;
+          uniform float     uBrightness;
+          uniform float     uGradSteep;
+          uniform float     uGradLift;
+          uniform sampler2D uSkyGrad;
+          varying vec3      vWorldDir;
 
           void main() {
             vec3 dir = normalize(vWorldDir);
 
-            // uGradSteep: higher = tighter warm band at horizon
-            // uGradLift:  higher = warm zone sits higher on screen
+            // Elevation-driven t: uGradSteep controls band width, uGradLift its height
             float t = clamp(dir.y * uGradSteep + uGradLift, 0.0, 1.0);
 
-            // Subtle azimuthal nudge — warmer in sun direction near horizon only
+            // Subtle azimuthal nudge near horizon in sun direction
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
             float horizBand = clamp(uGradLift - dir.y, 0.0, uGradLift) / max(uGradLift, 0.001);
-            t -= sunAz * horizBand * 0.08;
-            t = clamp(t, 0.0, 1.0);
+            t = clamp(t - sunAz * horizBand * 0.08, 0.0, 1.0);
 
-            vec3 color = skyGrad(t);
+            // Sample baked gradient texture — smooth, no GLSL banding
+            vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color * uBrightness, 1.0);
           }
@@ -214,6 +189,34 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       });
       const skyDome = new THREE.Mesh(skyGeo, skyMat);
       scene.add(skyDome);
+
+      // Build gradient texture from canvas so interpolation is smooth (no GLSL banding).
+      // t=0 (x=0) = warm amber at horizon; t=1 (x=255) = space-blue night at zenith.
+      {
+        const gc = document.createElement('canvas');
+        gc.width = 256; gc.height = 1;
+        const gx = gc.getContext('2d')!;
+        const grd = gx.createLinearGradient(0, 0, 256, 0);
+        grd.addColorStop(0.000, '#D09038'); // amber-gold
+        grd.addColorStop(0.055, '#C07840'); // amber
+        grd.addColorStop(0.110, '#AE6450'); // amber-peach
+        grd.addColorStop(0.185, '#9A5460'); // peach-rose
+        grd.addColorStop(0.280, '#804070'); // mauve-pink
+        grd.addColorStop(0.390, '#622C7A'); // warm purple
+        grd.addColorStop(0.510, '#481E70'); // purple
+        grd.addColorStop(0.630, '#321460'); // deep blue-purple
+        grd.addColorStop(0.730, '#241048'); // dark blue
+        grd.addColorStop(0.830, '#1A0C38'); // space blue (#1E1840 ≈)
+        grd.addColorStop(0.920, '#0E0828'); // deep space
+        grd.addColorStop(1.000, '#080618'); // near-black
+        gx.fillStyle = grd;
+        gx.fillRect(0, 0, 256, 1);
+        const skyGradTex = new THREE.CanvasTexture(gc);
+        skyGradTex.minFilter = THREE.LinearFilter;
+        skyGradTex.magFilter = THREE.LinearFilter;
+        skyGradTex.wrapS = THREE.ClampToEdgeWrapping;
+        skyMat.uniforms.uSkyGrad.value = skyGradTex;
+      }
 
       // ─── BACKGROUND STARS ───
       const starCount = 300;
@@ -384,7 +387,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           inst.renderStatic(timeOffset);
           const texture = new THREE.CanvasTexture(canvas);
           const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: texture, transparent: true, depthWrite: false, opacity: 1.0,
+            map: texture, transparent: true, depthWrite: false, opacity: 0.88,
+            blending: THREE.AdditiveBlending,
           }));
           sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
           group.add(sprite);
@@ -495,63 +499,34 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (idx >= 0) thoughtMeshes.splice(idx, 1);
       }
 
-      // ─── BONDS ───
-      interface BondLineEntry { line: THREE.Line; fromId: string; toId: string }
-      const bondLines = new Map<string, BondLineEntry>();
+      // ─── BONDS ───  (orbital mechanics only — no line visuals)
+      const bondOrbitals = new Map<string, { fromId: string; toId: string }>();
 
       function createBond(b: BondData) {
-        const fromGroup = thoughtGroups.get(b.from_id); // orbiter
-        const toGroup   = thoughtGroups.get(b.to_id);   // anchor
-        if (!fromGroup || !toGroup || bondLines.has(b.id)) return;
+        const fromGroup = thoughtGroups.get(b.from_id);
+        const toGroup   = thoughtGroups.get(b.to_id);
+        if (!fromGroup || !toGroup || bondOrbitals.has(b.id)) return;
 
-        // Solar system model: from_star orbits to_star (anchor).
-        // Anchor stays at its deterministic basePos.
-        // Count existing orbiters of this anchor to pick radius/period.
         let orbiterCount = 0;
-        bondLines.forEach(entry => { if (entry.toId === b.to_id) orbiterCount++; });
+        bondOrbitals.forEach(entry => { if (entry.toId === b.to_id) orbiterCount++; });
 
-        const BASE_RADIUS = 15;
-        const RADIUS_STEP = 7;
-        const BASE_PERIOD = 40;
-        const PERIOD_STEP = 15;
-        const orbitRadius = BASE_RADIUS + orbiterCount * RADIUS_STEP;
-        const period = BASE_PERIOD + orbiterCount * PERIOD_STEP;
+        const orbitRadius = 15 + orbiterCount * 7;
+        const period      = 40 + orbiterCount * 15;
 
-        // Derive tilt and phase from orbiter id so each orbit is distinct
         const rand = seededRand(hashStr(b.from_id + b.to_id));
-        const tilt = (rand() - 0.5) * 40 * (Math.PI / 180); // -20° to +20°
+        const tilt = (rand() - 0.5) * 40 * (Math.PI / 180);
         const phaseOffset = rand() * Math.PI * 2;
 
         fromGroup.userData.orbit = { anchorId: b.to_id, radius: orbitRadius, period, tilt, phaseOffset };
-
-        const fromEI = fromGroup.userData.emotionIndex as number;
-        const toEI   = toGroup.userData.emotionIndex as number;
-        const [fr, fg, fb] = EMOTIONS[fromEI]?.rgb ?? [255, 255, 255];
-        const [tr, tg, tb] = EMOTIONS[toEI]?.rgb ?? [255, 255, 255];
-        const lineColor = new THREE.Color(
-          ((fr + tr) / 2 / 255) * 0.55,
-          ((fg + tg) / 2 / 255) * 0.55,
-          ((fb + tb) / 2 / 255) * 0.55,
-        );
-
-        const linePosArr = new Float32Array(6);
-        const lineGeo = new THREE.BufferGeometry();
-        lineGeo.setAttribute('position', new THREE.BufferAttribute(linePosArr, 3));
-        const lineMat = new THREE.LineBasicMaterial({
-          color: lineColor, transparent: true, opacity: 0.3, depthWrite: false,
-        });
-        const line = new THREE.Line(lineGeo, lineMat);
-        scene.add(line);
-        bondLines.set(b.id, { line, fromId: b.from_id, toId: b.to_id });
+        bondOrbitals.set(b.id, { fromId: b.from_id, toId: b.to_id });
       }
 
       function destroyBond(id: string) {
-        const entry = bondLines.get(id);
+        const entry = bondOrbitals.get(id);
         if (!entry) return;
-        scene.remove(entry.line);
-        entry.line.geometry.dispose();
-        (entry.line.material as THREE.LineBasicMaterial).dispose();
-        bondLines.delete(id);
+        const fromGroup = thoughtGroups.get(entry.fromId);
+        if (fromGroup) fromGroup.userData.orbit = null;
+        bondOrbitals.delete(id);
       }
 
       addThoughtFnRef.current = createThought;
@@ -789,24 +764,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         });
 
-        // Update bond lines — endpoints + proximity brightness
-        bondLines.forEach(({ line, fromId, toId }) => {
-          const fromG = thoughtGroups.get(fromId);
-          const toG   = thoughtGroups.get(toId);
-          if (!fromG || !toG) return;
-          const pos = line.geometry.attributes.position as THREE.BufferAttribute;
-          pos.setXYZ(0, fromG.position.x, fromG.position.y, fromG.position.z);
-          pos.setXYZ(1, toG.position.x,   toG.position.y,   toG.position.z);
-          pos.needsUpdate = true;
-          const mx = (fromG.position.x + toG.position.x) / 2;
-          const mz = (fromG.position.z + toG.position.z) / 2;
-          const bdx = mx - camera.position.x;
-          const bdz = mz - camera.position.z;
-          const nearby = (bdx * bdx + bdz * bdz) < 50 * 50;
-          const mat = line.material as THREE.LineBasicMaterial;
-          mat.opacity += ((nearby ? 0.7 : 0.3) - mat.opacity) * dt * 3;
-        });
-
         // Clouds
         for (const cloud of clouds) {
           cloud.position.x += (cloud.userData.dx as number) * dt;
@@ -844,7 +801,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
-        bondLines.forEach((_, id) => destroyBond(id));
+        bondOrbitals.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
 
         renderer.dispose();

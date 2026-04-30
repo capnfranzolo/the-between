@@ -36,6 +36,7 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const sceneRef = useRef<CosmosSceneHandle>(null);
+  const autoFocused = useRef(false);
 
   useEffect(() => {
     fetch(`/api/cosmos/${questionId}`)
@@ -171,6 +172,15 @@ export default function CosmosPage() {
       }
     } catch { /* bond already shown optimistically */ }
   };
+
+  // Auto-focus user's star when cosmos first loads with their star present
+  useEffect(() => {
+    if (!autoFocused.current && userStarId && data) {
+      autoFocused.current = true;
+      setSelected(userStarId);
+      setTimeout(() => sceneRef.current?.flyToThought(userStarId), 80);
+    }
+  }, [userStarId, data]);
 
   const clearSelection = () => {
     setSelected(null);
