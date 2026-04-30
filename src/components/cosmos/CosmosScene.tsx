@@ -65,6 +65,8 @@ function hashStr(s: string): number {
 }
 
 const MAX_BAKED = 50;
+const LIVE_SIZE = 1024;  // hi-res canvas for the selected star
+const SELECTED_SCALE_MULT = 1.4; // sprite scale boost when star is selected
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
   function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, onThoughtClick, onBackgroundClick }, ref) {
@@ -282,8 +284,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // yOffset(30) adds 30 more to the bottom → 198px needed. 420/2 = 210 ✓
       const SPIRO_SIZE = 420;
       const SPRITE_SCALE = 12;
-      const LIVE_SIZE = 1024;
-      const SELECTED_SCALE_MULT = 1.4;
 
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
@@ -385,6 +385,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       function destroyThought(id: string) {
         deactivateLive(id);
+        if (flyStarId === id) { flyStarId = null; flyStartDist = 0; }
         const group = thoughtGroups.get(id);
         if (!group) return;
         const spiro = group.userData.spiro as StarSpiro | null;
@@ -478,6 +479,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let heading = 0;
       let targetHeading: number | null = null;
       let flyTargetPos: THREE.Vector3 | null = null;
+      let flyStarId: string | null = null;  // star we're flying toward
+      let flyStartDist = 0;                 // total distance at click time
       let speed = 4;
       let clickBoostTime = 0;
       camera.position.set(0, 80, 0);
@@ -492,6 +495,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dz = g.position.z - camera.position.z;
         targetHeading = Math.atan2(dx, -dz);
         const dist = Math.sqrt(dx * dx + dz * dz);
+        flyStarId = id;
+        flyStartDist = dist;
         const stopDist = 22;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
@@ -501,7 +506,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             camera.position.z + dz * t,
           );
         } else {
+          // Already close — activate immediately
           flyTargetPos = null;
+          flyStartDist = 0;
         }
       };
 
@@ -588,10 +595,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
           if (fdist < 3) {
             flyTargetPos = null;
+            flyStartDist = 0;
           } else {
             const flyAmt = Math.min(fdist, 90 * dt);
             camera.position.x += (fdx / fdist) * flyAmt;
             camera.position.z += (fdz / fdist) * flyAmt;
+            flyStartDist = 0;
           }
         } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
