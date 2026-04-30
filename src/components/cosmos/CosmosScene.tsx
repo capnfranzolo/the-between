@@ -184,9 +184,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             float t = clamp(dir.y * uGradSteep + uGradLift, 0.0, 1.0);
 
             // Concentrated sun glow: cubed dot product focuses warmth in a tight cone
-            // ahead of the camera; pow(3) means 45° away gets only 35% of the effect
+            // ahead of the camera; pow(3) means 45° away gets only 35% of the effect.
+            // horizBand is symmetric — fades above AND below horizon so warm sky
+            // doesn't bleed into the entire below-horizon zone.
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
-            float horizBand = clamp(uGradLift - dir.y, 0.0, uGradLift) / max(uGradLift, 0.001);
+            float horizBand = 1.0 - smoothstep(0.0, uGradLift, abs(dir.y));
             float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
             t = clamp(t - sunInfluence * 0.32, 0.0, 1.0);
 
@@ -262,7 +264,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           void main() {
             vSize = size;
             vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = size * (300.0 / -mvPos.z);
+            // Stars orbit at r=880; 300→900 keeps them 1-4px instead of sub-pixel
+          gl_PointSize = size * (900.0 / -mvPos.z);
             gl_Position = projectionMatrix * mvPos;
           }
         `,
@@ -288,7 +291,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       scene.add(bgStars);
 
       // ─── TERRAIN ───
-      const TERRAIN_SIZE = 3200;
+      const TERRAIN_SIZE = 5600;
       const TERRAIN_SEGS = 300;
       const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
       const terrainMat = new THREE.ShaderMaterial({
@@ -319,7 +322,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             vec3 darkSil = vec3(8.0,  5.0, 14.0) / 255.0;
             vec3 warmSil = vec3(70.0, 28.0, 10.0) / 255.0;
             vec3 silColor = mix(darkSil, warmSil, uTerrainGlow);
-            float silFade = smoothstep(350.0, 900.0, vDistFromCam);
+            float silFade = smoothstep(400.0, 1800.0, vDistFromCam);
             color = mix(color, silColor, silFade);
             gl_FragColor = vec4(color, 1.0);
           }
