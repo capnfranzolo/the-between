@@ -349,9 +349,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function destroyThought(id: string) {
         const group = thoughtGroups.get(id);
         if (!group) return;
-        // Dispose live texture first if this star is currently live
+        // Stop and dispose live texture if this star is currently live
         const live = liveStars.get(id);
         if (live) {
+          live.inst.stop();
           live.texture.dispose();
           liveStars.delete(id);
           if (flyStarId === id) { flyStarId = null; flyStartDist = 0; }
@@ -457,7 +458,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (!spiro) return;
         const canvas = document.createElement('canvas');
         const inst = createSpirograph(canvas, spiro.dims, { size: LIVE_SIZE, dpr: 1 });
+        // Render one static frame first so the swap has no visible pop
         inst.renderStatic(time + spiro.timeOffset);
+        // Then kick off the live firefly animation loop
+        inst.start();
         const texture = new THREE.CanvasTexture(canvas);
         const mat = spiro.sprite.material as THREE.SpriteMaterial;
         mat.map = texture;
@@ -468,6 +472,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function deactivateLive(id: string, time: number) {
         const live = liveStars.get(id);
         if (!live) return;
+        // Stop the firefly animation loop before swapping back
+        live.inst.stop();
         const g = thoughtGroups.get(id);
         if (g) {
           const spiro = g.userData.spiro as StarSpiro | null;
@@ -697,8 +703,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           const live = liveStars.get(id);
           if (live) {
-            // Hi-res live canvas — render every frame, no throttle
-            live.inst.renderStatic(time + spiro.timeOffset);
+            // inst.start() runs its own RAF loop — just tell Three.js to upload the canvas each frame
             live.texture.needsUpdate = true;
           } else {
             // Baked canvas — active/user stars every frame, others at ~30fps
@@ -764,7 +769,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
 
-        liveStars.forEach(live => live.texture.dispose());
+        liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
         bondLines.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
