@@ -101,8 +101,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const GRAD_STEEP  = 1.30;
     const GRAD_LIFT   = 0.18;
     const TERRAIN_BRIGHT = 1.00;
-    // Standard cruising altitude — camera returns here after deselecting a star
-    const BASE_CAM_Y  = 100;
+    // Standard cruising altitude — low enough that stars (y=80-140) are always above camera
+    const BASE_CAM_Y  = 65;
 
     // Baked star/terrain tweaks (no runtime sliders)
     const dbgTerrainGlowRef = useRef(0.46);
@@ -205,21 +205,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         gc.width = 256; gc.height = 1;
         const gx = gc.getContext('2d')!;
         const grd = gx.createLinearGradient(0, 0, 256, 0);
-        // t=0 is deep below horizon (blocked by terrain); t=1 is zenith.
-        // Original gold palette, but now with corrected lift=0.18 so the amber
-        // only shows near the actual sun-direction horizon, not flooding the sky.
-        grd.addColorStop(0.000, '#D09038'); // amber-gold  (deep below horizon, mostly hidden)
-        grd.addColorStop(0.055, '#C07840'); // amber
-        grd.addColorStop(0.110, '#AE6450'); // amber-peach
-        grd.addColorStop(0.185, '#9A5460'); // peach-rose
-        grd.addColorStop(0.280, '#804070'); // mauve-pink
-        grd.addColorStop(0.390, '#622C7A'); // warm purple
-        grd.addColorStop(0.510, '#481E70'); // purple
-        grd.addColorStop(0.630, '#321460'); // deep blue-purple
-        grd.addColorStop(0.730, '#241048'); // dark blue
-        grd.addColorStop(0.830, '#1A0C38'); // space blue
-        grd.addColorStop(0.920, '#0E0828'); // deep space
-        grd.addColorStop(1.000, '#080618'); // near-black
+        // t=0 is below horizon (blocked by terrain); t=1 is zenith.
+        // Colors from user reference comp, reversed (horizon→zenith).
+        grd.addColorStop(0.000, '#d2a480'); // warm peach  (below horizon, mostly hidden by terrain)
+        grd.addColorStop(0.111, '#b27f7e'); // rose-peach
+        grd.addColorStop(0.222, '#93637f'); // mauve-rose
+        grd.addColorStop(0.333, '#7d5784'); // purple-mauve
+        grd.addColorStop(0.444, '#5a4177'); // purple
+        grd.addColorStop(0.556, '#443469'); // deep purple
+        grd.addColorStop(0.667, '#352a5c'); // dark blue-purple
+        grd.addColorStop(0.778, '#2a214e'); // darker blue-purple
+        grd.addColorStop(0.889, '#1e1a40'); // near-black blue
+        grd.addColorStop(1.000, '#000000'); // black at zenith
         gx.fillStyle = grd;
         gx.fillRect(0, 0, 256, 1);
         const skyGradTex = new THREE.CanvasTexture(gc);
@@ -613,8 +610,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else {
           flyTargetXZ = null;
         }
-        // Camera tracks star elevation in both directions; terrain floor clamps in animate
-        flyStarTargetY = starPos.y - 10;
+        // Stay at standard altitude — stars are above camera so we look up, not level
+        flyStarTargetY = BASE_CAM_Y;
       };
 
       turnLeftFnRef.current = () => {
@@ -748,22 +745,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z += fwdZ * speed * dt;
         }
 
-        // Camera Y — standard altitude is BASE_CAM_Y; descend only for stars below it
-        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 45, 90);
-        if (flyTargetXZ) {
-          camTargetY = Math.max(flyStarTargetY, terrainFloor);
-        } else if (activeStarRef.current) {
-          const ag = thoughtGroups.get(activeStarRef.current);
-          if (ag) {
-            // Descend toward stars that sit below standard altitude; for stars above, stay at BASE
-            const starY = ag.position.y - 10;
-            camTargetY = Math.max(starY < BASE_CAM_Y ? starY : BASE_CAM_Y, terrainFloor);
-          } else {
-            camTargetY = Math.max(BASE_CAM_Y, terrainFloor);
-          }
-        } else {
-          camTargetY = Math.max(freeTargetY, terrainFloor);
-        }
+        // Camera Y — always at BASE_CAM_Y; stars (y=80-140) are above so we always look up
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 55);
+        camTargetY = Math.max(flyTargetXZ ? flyStarTargetY : freeTargetY, terrainFloor);
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
 
         // Pitch-based smooth lookAt — angles interpolate, no world-space jump on star click
