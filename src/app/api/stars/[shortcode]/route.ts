@@ -9,7 +9,7 @@ export async function GET(
 
   const { data, error } = await supabaseAnon
     .from('stars')
-    .select('shortcode, answer, question_id, dimensions')
+    .select('id, shortcode, answer, question_id, dimensions, questions(id, text)')
     .eq('shortcode', shortcode)
     .single();
 

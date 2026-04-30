@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
-import { QUESTION_ID_MOCK, MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH } from '@/lib/constants';
+import { supabaseServer } from '@/lib/supabase/server';
+import { MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH } from '@/lib/constants';
 
 export async function POST(
   req: NextRequest,
@@ -16,6 +17,16 @@ export async function POST(
     return Response.json({ error: 'Unique fact length out of range' }, { status: 400 });
   }
 
-  // TODO: persist to Supabase
-  return Response.json({ ok: true, shortcode, questionId: QUESTION_ID_MOCK });
+  const { data: star, error } = await supabaseServer
+    .from('stars')
+    .update({ unique_fact: unique_fact.trim() })
+    .eq('shortcode', shortcode)
+    .select('shortcode, question_id')
+    .single();
+
+  if (error || !star) {
+    return Response.json({ error: 'Star not found' }, { status: 404 });
+  }
+
+  return Response.json({ ok: true, shortcode: star.shortcode, questionId: star.question_id });
 }

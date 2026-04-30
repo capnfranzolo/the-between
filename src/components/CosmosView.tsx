@@ -55,7 +55,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
 
   const starPositions = useMemo(() => {
     const m: Record<string, { id: string; x: number; y: number; text: string }> = {};
-    stars.forEach(s => { m[s.id] = { id: s.id, x: s.x, y: s.y, text: s.text }; });
+    stars.forEach(s => { m[s.id] = { id: s.id, x: s.x ?? 0, y: s.y ?? 0, text: s.text }; });
     return m;
   }, [stars]);
 
@@ -108,7 +108,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
       {/* Stars */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 3 }}>
         {stars.map(t => {
-          const dp = depthProps(t.depth);
+          const dp = depthProps(t.depth ?? 0);
           const isHov = hovered === t.id;
           const isSel = selected === t.id;
           const isActive = isHov || isSel;
@@ -129,8 +129,8 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
               }}
               style={{
                 position: 'absolute',
-                left: `${t.x * 100}%`,
-                top: `${t.y * 100}%`,
+                left: `${(t.x ?? 0) * 100}%`,
+                top: `${(t.y ?? 0) * 100}%`,
                 transform: `translate(-50%, -50%) scale(${isActive ? 1.18 : 1})`,
                 opacity: dp.opacity * (dimmed ? 0.5 : 1),
                 transition: 'transform .7s cubic-bezier(.2,.7,.3,1), opacity .5s',
@@ -141,7 +141,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
               <Spirograph
                 dimensions={t.dimensions}
                 size={dp.size}
-                animate={t.depth < 2}
+                animate={(t.depth ?? 0) < 2}
                 style={{ filter: dp.blur && !isActive ? `blur(${dp.blur}px)` : undefined }}
               />
               {t.mine && (
