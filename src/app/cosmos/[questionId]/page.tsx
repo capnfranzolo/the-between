@@ -223,7 +223,7 @@ export default function CosmosPage() {
           {data?.question?.text && (
             <div style={{
               fontFamily: SERIF, fontStyle: 'italic',
-              fontSize: 'clamp(38px, 5.5vw, 54px)',
+              fontSize: 'clamp(22px, 3.2vw, 36px)',
               color: BTW.textPri,
               letterSpacing: '0.01em',
               textAlign: 'center',
