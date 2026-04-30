@@ -120,12 +120,21 @@ export default function CosmosPage() {
 
   const handleConnect = async (targetId: string) => {
     if (!userStarId || reason.trim().length < 4) return;
+    const savedReason = reason.trim();
     const newBond: CosmosBond = {
       id: 'local-' + Date.now(),
       from_id: userStarId,
       to_id: targetId,
-      reason: reason.trim(),
+      reason: savedReason,
     };
+
+    // Optimistic update first so the UI always responds
+    setLocalBonds(b => [...b, newBond]);
+    setReason('');
+    setConnecting(false);
+    setConnectConfirmed(true);
+
+    // Persist in background
     try {
       const res = await fetch('/api/connect', {
         method: 'POST',
@@ -133,20 +142,17 @@ export default function CosmosPage() {
         body: JSON.stringify({
           fromStarId: userStarId,
           toStarId: targetId,
-          reason: reason.trim(),
+          reason: savedReason,
           questionId,
         }),
       });
       const payload = await res.json();
-      if (!payload.ok) return;
-      localStorage.setItem(PENDING_BOND_KEY(userStarId), JSON.stringify({
-        fromStarId: userStarId, toStarId: targetId, reason: reason.trim(),
-      }));
-    } catch { /* optimistic */ }
-    setLocalBonds(b => [...b, newBond]);
-    setReason('');
-    setConnecting(false);
-    setConnectConfirmed(true);
+      if (payload.ok) {
+        localStorage.setItem(PENDING_BOND_KEY(userStarId), JSON.stringify({
+          fromStarId: userStarId, toStarId: targetId, reason: savedReason,
+        }));
+      }
+    } catch { /* bond already shown optimistically */ }
   };
 
   const clearSelection = () => {
