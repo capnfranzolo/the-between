@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
       shortcode,
       answer,
       question_id: questionId,
-      status: 'pending',
+      status: 'approved',
+      approved_at: new Date().toISOString(),
       ip_hash: ipHash,
       dimensions,
     });

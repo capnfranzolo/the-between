@@ -31,20 +31,16 @@ export default function CosmosPage() {
   const [connectConfirmed, setConnectConfirmed] = useState(false);
   const [reason, setReason] = useState('');
   const [localBonds, setLocalBonds] = useState<CosmosBond[]>([]);
-  const [myStarData, setMyStarData] = useState<CosmosStarData | null>(null);
-
   const [myShortcode] = useState<string | null>(() =>
     typeof window !== 'undefined' ? sessionStorage.getItem('my_star') : null,
   );
   const sceneRef = useRef<CosmosSceneHandle>(null);
 
   useEffect(() => {
-    const url = myShortcode
-      ? `/api/cosmos/${questionId}?me=${encodeURIComponent(myShortcode)}`
-      : `/api/cosmos/${questionId}`;
-    fetch(url)
+    fetch(`/api/cosmos/${questionId}`)
       .then(r => r.json())
       .then((d: CosmosData) => {
+        // API returns `answer` field; map to `text` for CosmosStarData
         const stars = d.stars.map(s => ({
           ...s,
           text: (s as unknown as { answer?: string }).answer ?? s.text,
@@ -52,36 +48,9 @@ export default function CosmosPage() {
         setData({ ...d, stars });
       })
       .catch(() => {});
-  }, [questionId, myShortcode]);
+  }, [questionId]);
 
-  // Fetch user's own star separately if it's not in the cosmos data
-  useEffect(() => {
-    if (!myShortcode || !data) return;
-    if (data.stars.some(s => s.shortcode === myShortcode)) return;
-    fetch(`/api/stars/${myShortcode}`)
-      .then(r => r.json())
-      .then((d: { id?: string; shortcode?: string; answer?: string; question_id?: string; dimensions?: CosmosStarData['dimensions'] }) => {
-        if (d.id && d.dimensions && d.question_id === questionId) {
-          setMyStarData({
-            id: d.id,
-            shortcode: d.shortcode!,
-            text: d.answer!,
-            unique_fact: null,
-            x: 0, y: 0, depth: 0,
-            dimensions: d.dimensions,
-          });
-        }
-      })
-      .catch(() => {});
-  }, [myShortcode, data, questionId]);
-
-  const allStars = useMemo(() => {
-    if (!data) return [];
-    if (myStarData && !data.stars.find(s => s.id === myStarData.id)) {
-      return [...data.stars, myStarData];
-    }
-    return data.stars;
-  }, [data, myStarData]);
+  const allStars = useMemo(() => data?.stars ?? [], [data]);
 
   const bonds = useMemo(
     () => [...(data?.bonds ?? []), ...localBonds],
@@ -111,9 +80,8 @@ export default function CosmosPage() {
   // Compute userStarId before any hooks that depend on it
   const userStarId = useMemo(() => {
     if (!myShortcode) return null;
-    const fromCosmos = data?.stars.find(s => s.shortcode === myShortcode);
-    return fromCosmos?.id ?? myStarData?.id ?? null;
-  }, [myShortcode, data, myStarData]);
+    return data?.stars.find(s => s.shortcode === myShortcode)?.id ?? null;
+  }, [myShortcode, data]);
 
   const selectedStar = useMemo(() => {
     if (!selected) return null;
@@ -218,7 +186,7 @@ export default function CosmosPage() {
             width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <div style={{ fontSize: 12, letterSpacing: '0.34em', textTransform: 'uppercase', color: BTW.textDim }}>
-              The Between &middot; cosmos
+              The Between
             </div>
             {data && (
               <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em' }}>
@@ -233,7 +201,7 @@ export default function CosmosPage() {
               color: BTW.textSec,
               letterSpacing: '0.01em',
               textAlign: 'center',
-              maxWidth: 480,
+              maxWidth: 700,
               lineHeight: 1.4,
               opacity: 0.9,
             }}>

@@ -11,10 +11,6 @@ export async function GET(
 ) {
   const { questionId } = await params;
 
-  // Optionally include the caller's own pending star
-  const url = new URL(req.url);
-  const myShortcode = url.searchParams.get('me') ?? null;
-
   const [starsRes, bondsRes, questionRes] = await Promise.all([
     supabaseServer
       .from('stars')
@@ -33,24 +29,7 @@ export async function GET(
       .single(),
   ]);
 
-  let stars: Array<{ id: string; shortcode: string; answer: string; unique_fact: string | null; dimensions: StarDimensions }> =
-    (starsRes.data ?? []) as typeof stars;
-
-  // Include the caller's own star even if it's still pending
-  if (myShortcode) {
-    const alreadyIncluded = stars.some(s => s.shortcode === myShortcode);
-    if (!alreadyIncluded) {
-      const { data: myStar } = await supabaseServer
-        .from('stars')
-        .select('id, shortcode, answer, unique_fact, dimensions')
-        .eq('shortcode', myShortcode)
-        .eq('question_id', questionId)
-        .maybeSingle();
-      if (myStar) {
-        stars = [...stars, myStar as typeof stars[0]];
-      }
-    }
-  }
+  const stars = (starsRes.data ?? []) as Array<{ id: string; shortcode: string; answer: string; unique_fact: string | null; dimensions: StarDimensions }>;
 
   const bonds = (bondsRes.data ?? []).map(b => ({
     id: b.id,
