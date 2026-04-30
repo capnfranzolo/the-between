@@ -91,12 +91,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
-    const [dbgExposure, setDbgExposure] = useState(0.75);
-    const [dbgSkyBright, setDbgSkyBright] = useState(1.0);
-    const [dbgAmbient, setDbgAmbient] = useState(0.8);
-    const dbgExposureRef = useRef(0.75);
-    const dbgSkyBrightRef = useRef(1.0);
-    const dbgAmbientRef = useRef(0.8);
+    const [dbgExposure, setDbgExposure] = useState(0.95);
+    const [dbgSkyBright, setDbgSkyBright] = useState(0.95);
+    const [dbgAmbient, setDbgAmbient] = useState(0.80);
+    const dbgExposureRef = useRef(0.95);
+    const dbgSkyBrightRef = useRef(0.95);
+    const dbgAmbientRef = useRef(0.80);
     useEffect(() => { dbgExposureRef.current = dbgExposure; }, [dbgExposure]);
     useEffect(() => { dbgSkyBrightRef.current = dbgSkyBright; }, [dbgSkyBright]);
     useEffect(() => { dbgAmbientRef.current = dbgAmbient; }, [dbgAmbient]);
@@ -122,7 +122,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.75;
+      renderer.toneMappingExposure = 0.95;
       container.appendChild(renderer.domElement);
 
       // ─── LIGHTING ───
@@ -151,39 +151,45 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform float uBrightness;
           varying vec3  vWorldDir;
 
-          vec3 twiGrad(float t) {
-            // t = 0 at sun point, t = 1 at opposite pole
-            // Warm zone is narrow — purples dominate by ~25° out
-            vec3 c0  = vec3(160.0,100.0,140.0)/255.0; //   0° dim rose-mauve
-            vec3 c1  = vec3(130.0, 88.0,138.0)/255.0; //  10° rose-purple
-            vec3 c2  = vec3(108.0, 78.0,135.0)/255.0; //  20° purple
-            vec3 c3  = vec3( 88.0, 65.0,125.0)/255.0; //  35° mid purple
-            vec3 c4  = vec3( 68.0, 52.0,112.0)/255.0; //  55° purple
-            vec3 c5  = vec3( 50.0, 39.0, 96.0)/255.0; //  75° dark purple
-            vec3 c6  = vec3( 36.0, 28.0, 78.0)/255.0; //  95° deep purple
-            vec3 c7  = vec3( 24.0, 19.0, 58.0)/255.0; // 115° indigo
-            vec3 c8  = vec3( 16.0, 13.0, 42.0)/255.0; // 140° near black-blue
-            vec3 c9  = vec3( 10.0,  8.0, 28.0)/255.0; // 180° near black
-            if (t < 0.056) return mix(c0, c1, smoothstep(0.000,0.056,t));
-            if (t < 0.111) return mix(c1, c2, smoothstep(0.056,0.111,t));
-            if (t < 0.194) return mix(c2, c3, smoothstep(0.111,0.194,t));
-            if (t < 0.305) return mix(c3, c4, smoothstep(0.194,0.305,t));
-            if (t < 0.416) return mix(c4, c5, smoothstep(0.305,0.416,t));
-            if (t < 0.528) return mix(c5, c6, smoothstep(0.416,0.528,t));
-            if (t < 0.639) return mix(c6, c7, smoothstep(0.528,0.639,t));
-            if (t < 0.778) return mix(c7, c8, smoothstep(0.639,0.778,t));
-            return             mix(c8, c9, smoothstep(0.778,1.000,t));
+          vec3 skyGrad(float t) {
+            // t=0: warm peach at/below horizon  t=1: dark navy at zenith
+            // Palette matched to twilight screenshot: peach→dusty-rose→mauve→purple→blue-navy
+            vec3 c0 = vec3(224.0,150.0,100.0)/255.0; // warm peach
+            vec3 c1 = vec3(206.0,122.0,110.0)/255.0; // peach-rose
+            vec3 c2 = vec3(180.0, 94.0,116.0)/255.0; // dusty rose
+            vec3 c3 = vec3(152.0, 72.0,118.0)/255.0; // mauve-pink
+            vec3 c4 = vec3(122.0, 56.0,130.0)/255.0; // warm purple
+            vec3 c5 = vec3( 90.0, 46.0,136.0)/255.0; // purple
+            vec3 c6 = vec3( 60.0, 36.0,108.0)/255.0; // deep purple
+            vec3 c7 = vec3( 36.0, 24.0, 76.0)/255.0; // dark blue-purple
+            vec3 c8 = vec3( 20.0, 14.0, 50.0)/255.0; // near-black navy
+            vec3 c9 = vec3( 10.0,  8.0, 30.0)/255.0; // deepest night
+            if (t < 0.100) return mix(c0, c1, smoothstep(0.000,0.100,t));
+            if (t < 0.200) return mix(c1, c2, smoothstep(0.100,0.200,t));
+            if (t < 0.310) return mix(c2, c3, smoothstep(0.200,0.310,t));
+            if (t < 0.430) return mix(c3, c4, smoothstep(0.310,0.430,t));
+            if (t < 0.560) return mix(c4, c5, smoothstep(0.430,0.560,t));
+            if (t < 0.680) return mix(c5, c6, smoothstep(0.560,0.680,t));
+            if (t < 0.800) return mix(c6, c7, smoothstep(0.680,0.800,t));
+            if (t < 0.920) return mix(c7, c8, smoothstep(0.800,0.920,t));
+            return             mix(c8, c9, smoothstep(0.920,1.000,t));
           }
 
           void main() {
-            vec3 dir  = normalize(vWorldDir);
-            float cosA = dot(dir, uSunDir);
-            float t   = acos(clamp(cosA, -1.0, 1.0)) / 3.14159265;
-            vec3 color = twiGrad(t);
-            // Faint violet glow near sun — keeps it subtle
-            float haze = max(0.0, cosA - 0.95);
-            color += vec3(0.18, 0.08, 0.22) * haze * 3.0;
-            // Very gentle breathing pulse
+            vec3 dir = normalize(vWorldDir);
+
+            // Primary axis: elevation — warm at/below horizon, dark navy at zenith
+            // dir.y: -1=down  0=horizon  +1=up
+            // t=0 at y≈-0.6 (below horizon), t=1 at y=1 (zenith)
+            float t = clamp(dir.y * 0.58 + 0.35, 0.0, 1.0);
+
+            // Subtle azimuthal boost: slightly warmer in sun direction near horizon
+            float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
+            float horizBand = clamp(0.35 - dir.y, 0.0, 0.35) / 0.35;
+            t -= sunAz * horizBand * 0.10;
+            t = clamp(t, 0.0, 1.0);
+
+            vec3 color = skyGrad(t);
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color * uBrightness, 1.0);
           }
