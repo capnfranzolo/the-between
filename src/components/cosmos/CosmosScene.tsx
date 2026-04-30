@@ -219,18 +219,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
 
       // ─── BACKGROUND STARS ───
-      const starCount = 300;
+      const starCount = 700;
       const starGeo = new THREE.BufferGeometry();
       const starPositions = new Float32Array(starCount * 3);
       const starSizes = new Float32Array(starCount);
       for (let i = 0; i < starCount; i++) {
         const theta = Math.random() * Math.PI * 2;
-        const phi = Math.random() * Math.PI * 0.45;
+        // 55% in the top 30° dome, 45% spread across upper 75° — many more visible at zenith
+        const phi = i < starCount * 0.55
+          ? Math.random() * Math.PI * 0.17
+          : Math.random() * Math.PI * 0.42;
         const r = 880;
         starPositions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
         starPositions[i * 3 + 1] = r * Math.cos(phi);
         starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-        starSizes[i] = 1.5 + Math.random() * 2.5;
+        starSizes[i] = 1.2 + Math.random() * 2.8;
       }
       starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
       starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
@@ -254,7 +257,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           void main() {
             float d = length(gl_PointCoord - vec2(0.5));
             if (d > 0.5) discard;
-            float alpha = smoothstep(0.5, 0.0, d) * 0.7;
+            float alpha = smoothstep(0.5, 0.0, d) * 0.85;
             alpha *= 0.6 + 0.4 * sin(uTime * (1.0 + vSize * 0.5) + vSize * 10.0);
             gl_FragColor = vec4(0.9, 0.85, 1.0, alpha);
           }
@@ -268,7 +271,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const TERRAIN_SEGS = 300;
       const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
       const terrainMat = new THREE.ShaderMaterial({
-        transparent: true,
+        transparent: false,
         depthWrite: true,
         uniforms: { uTerrainBright: { value: 1.0 } },
         vertexShader: `
@@ -277,7 +280,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           void main() {
             vec4 worldPos = modelMatrix * vec4(position, 1.0);
             vDistFromCam = length(worldPos.xz - cameraPosition.xz);
-            // normal.z ≈ flatness in local space (PlaneGeometry normal = local +Z)
             vec3 wn = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
             vFlatness = wn.y;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -291,9 +293,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0; // #503868
             vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0; // darker
             vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness) * uTerrainBright;
-            float fade = 1.0 - smoothstep(500.0, 1000.0, vDistFromCam);
-            if (fade < 0.01) discard;
-            gl_FragColor = vec4(color, fade);
+            // Fade to dark silhouette at distance — no transparent discard, so warm sky
+            // can never bleed through distant valley pixels
+            vec3 silColor = vec3(8.0, 6.0, 18.0) / 255.0;
+            float silFade = smoothstep(350.0, 900.0, vDistFromCam);
+            color = mix(color, silColor, silFade);
+            gl_FragColor = vec4(color, 1.0);
           }
         `,
       });
@@ -331,21 +336,37 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── CLOUDS ───
       const clouds: THREE.Sprite[] = [];
       for (let i = 0; i < 30; i++) {
+        const cw = 512; const ch = 200;
         const c = document.createElement('canvas');
-        c.width = 256; c.height = 128;
+        c.width = cw; c.height = ch;
         const ctx = c.getContext('2d')!;
-        const blobs = 6 + Math.floor(Math.random() * 7);
+        const blobs = 10 + Math.floor(Math.random() * 8);
         for (let j = 0; j < blobs; j++) {
-          const x = 40 + Math.random() * 176;
-          const y = 20 + Math.random() * 88;
-          const r = 20 + Math.random() * 40;
-          const a = 0.06 + Math.random() * 0.09;
+          const x = 60 + Math.random() * (cw - 120);
+          const y = 30 + Math.random() * (ch - 60);
+          const r = 40 + Math.random() * 80;
+          const a = 0.045 + Math.random() * 0.07;
           const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
           grad.addColorStop(0, `rgba(140,100,170,${a})`);
+          grad.addColorStop(0.6, `rgba(140,100,170,${a * 0.4})`);
           grad.addColorStop(1, 'rgba(140,100,170,0)');
           ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, 256, 128);
+          ctx.fillRect(0, 0, cw, ch);
         }
+        // Feather all four edges so there's no hard canvas boundary
+        const vigX = ctx.createLinearGradient(0, 0, cw * 0.25, 0);
+        vigX.addColorStop(0, 'rgba(0,0,0,1)'); vigX.addColorStop(1, 'rgba(0,0,0,0)');
+        const vigX2 = ctx.createLinearGradient(cw, 0, cw * 0.75, 0);
+        vigX2.addColorStop(0, 'rgba(0,0,0,1)'); vigX2.addColorStop(1, 'rgba(0,0,0,0)');
+        const vigY = ctx.createLinearGradient(0, 0, 0, ch * 0.35);
+        vigY.addColorStop(0, 'rgba(0,0,0,1)'); vigY.addColorStop(1, 'rgba(0,0,0,0)');
+        const vigY2 = ctx.createLinearGradient(0, ch, 0, ch * 0.65);
+        vigY2.addColorStop(0, 'rgba(0,0,0,1)'); vigY2.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalCompositeOperation = 'destination-out';
+        for (const vig of [vigX, vigX2, vigY, vigY2]) {
+          ctx.fillStyle = vig; ctx.fillRect(0, 0, cw, ch);
+        }
+        ctx.globalCompositeOperation = 'source-over';
         const tex = new THREE.CanvasTexture(c);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.8 });
         const sprite = new THREE.Sprite(mat);
@@ -387,8 +408,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           inst.renderStatic(timeOffset);
           const texture = new THREE.CanvasTexture(canvas);
           const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: texture, transparent: true, depthWrite: false, opacity: 0.88,
-            blending: THREE.AdditiveBlending,
+            map: texture, transparent: true, depthWrite: false, opacity: 0.92,
+            blending: THREE.CustomBlending,
+            blendEquation: THREE.AddEquation,
+            blendSrc: THREE.OneFactor,
+            blendDst: THREE.OneMinusSrcColorFactor,
           }));
           sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
           group.add(sprite);
@@ -429,6 +453,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
           spiro,
+          scaleMult: 1.0,
         };
         scene.add(group);
         thoughtGroups.set(t.id, group);
@@ -540,10 +565,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let targetHeading: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = 90; // camera Y to aim for during flyTo
-      let camTargetY = 90;
+      let camTargetY = 130;
       let speed = 4;
-      let pitch = -0.035; // radians; negative = slight downward gaze
-      camera.position.set(0, 90, 0);
+      let pitch = 0.05; // radians; slight upward tilt to show more sky
+      camera.position.set(0, 130, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
@@ -567,7 +592,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           flyTargetXZ = null;
         }
         // Camera stops slightly below star so star sits in the upper viewport
-        flyStarTargetY = Math.max(starPos.y - 14, 60);
+        flyStarTargetY = Math.max(starPos.y - 14, 100);
       };
 
       turnRightFnRef.current = () => {
@@ -677,7 +702,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
 
         // Camera Y — smooth lerp; tracks terrain floor in free mode, star approach Y in flyTo
-        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 80);
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 70, 120);
         if (flyTargetXZ) {
           camTargetY = Math.max(flyStarTargetY, terrainFloor);
         } else if (activeStarRef.current) {
@@ -700,7 +725,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
           }
         } else {
-          pitch += (-0.035 - pitch) * Math.min(dt * 1.5, 1);
+          pitch += (0.05 - pitch) * Math.min(dt * 1.5, 1);
         }
         const cosP = Math.cos(pitch);
         const sinP = Math.sin(pitch);
@@ -744,7 +769,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const id = g.userData.id as string;
           const isSelected = id === activeStarRef.current;
           const baseScale = 1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05;
-          g.scale.setScalar(baseScale * (isSelected ? SELECTED_SCALE_MULT : 1.0));
+          const targetMult = isSelected ? SELECTED_SCALE_MULT : 1.0;
+          const curMult = g.userData.scaleMult as number;
+          const newMult = curMult + (targetMult - curMult) * Math.min(dt * 3.5, 1);
+          g.userData.scaleMult = newMult;
+          g.scale.setScalar(baseScale * newMult);
 
           const spiro = g.userData.spiro as StarSpiro | null;
           if (!spiro) return;
