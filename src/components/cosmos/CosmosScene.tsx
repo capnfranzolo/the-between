@@ -112,7 +112,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.1;
+      renderer.toneMappingExposure = 0.75;
       container.appendChild(renderer.domElement);
 
       // ─── LIGHTING ───
@@ -141,27 +141,26 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           vec3 twiGrad(float t) {
             // t = 0 at sun point, t = 1 at opposite pole
-            vec3 c0  = vec3(240.0,192.0,128.0)/255.0; //   0° warm gold
-            vec3 c1  = vec3(224.0,168.0,104.0)/255.0; //  10° amber
-            vec3 c2  = vec3(208.0,144.0,112.0)/255.0; //  20° copper
-            vec3 c3  = vec3(184.0,120.0,120.0)/255.0; //  30° dusty rose
-            vec3 c4  = vec3(154.0, 96.0,128.0)/255.0; //  45° warm mauve
-            vec3 c5  = vec3(123.0, 80.0,136.0)/255.0; //  60° warm purple
-            vec3 c6  = vec3( 90.0, 61.0,120.0)/255.0; //  80° medium purple
-            vec3 c7  = vec3( 61.0, 45.0,101.0)/255.0; // 100° purple
-            vec3 c8  = vec3( 42.0, 32.0, 80.0)/255.0; // 120° dark purple
-            vec3 c9  = vec3( 30.0, 24.0, 64.0)/255.0; // 150° deep indigo
-            vec3 c10 = vec3( 13.0, 10.0, 32.0)/255.0; // 180° near black
-            if (t < 0.056) return mix(c0,  c1,  smoothstep(0.000,0.056,t));
-            if (t < 0.111) return mix(c1,  c2,  smoothstep(0.056,0.111,t));
-            if (t < 0.167) return mix(c2,  c3,  smoothstep(0.111,0.167,t));
-            if (t < 0.250) return mix(c3,  c4,  smoothstep(0.167,0.250,t));
-            if (t < 0.333) return mix(c4,  c5,  smoothstep(0.250,0.333,t));
-            if (t < 0.444) return mix(c5,  c6,  smoothstep(0.333,0.444,t));
-            if (t < 0.556) return mix(c6,  c7,  smoothstep(0.444,0.556,t));
-            if (t < 0.667) return mix(c7,  c8,  smoothstep(0.556,0.667,t));
-            if (t < 0.833) return mix(c8,  c9,  smoothstep(0.667,0.833,t));
-            return             mix(c9,  c10, smoothstep(0.833,1.000,t));
+            // Warm zone is narrow — purples dominate by ~25° out
+            vec3 c0  = vec3(160.0,100.0,140.0)/255.0; //   0° dim rose-mauve
+            vec3 c1  = vec3(130.0, 88.0,138.0)/255.0; //  10° rose-purple
+            vec3 c2  = vec3(108.0, 78.0,135.0)/255.0; //  20° purple
+            vec3 c3  = vec3( 88.0, 65.0,125.0)/255.0; //  35° mid purple
+            vec3 c4  = vec3( 68.0, 52.0,112.0)/255.0; //  55° purple
+            vec3 c5  = vec3( 50.0, 39.0, 96.0)/255.0; //  75° dark purple
+            vec3 c6  = vec3( 36.0, 28.0, 78.0)/255.0; //  95° deep purple
+            vec3 c7  = vec3( 24.0, 19.0, 58.0)/255.0; // 115° indigo
+            vec3 c8  = vec3( 16.0, 13.0, 42.0)/255.0; // 140° near black-blue
+            vec3 c9  = vec3( 10.0,  8.0, 28.0)/255.0; // 180° near black
+            if (t < 0.056) return mix(c0, c1, smoothstep(0.000,0.056,t));
+            if (t < 0.111) return mix(c1, c2, smoothstep(0.056,0.111,t));
+            if (t < 0.194) return mix(c2, c3, smoothstep(0.111,0.194,t));
+            if (t < 0.305) return mix(c3, c4, smoothstep(0.194,0.305,t));
+            if (t < 0.416) return mix(c4, c5, smoothstep(0.305,0.416,t));
+            if (t < 0.528) return mix(c5, c6, smoothstep(0.416,0.528,t));
+            if (t < 0.639) return mix(c6, c7, smoothstep(0.528,0.639,t));
+            if (t < 0.778) return mix(c7, c8, smoothstep(0.639,0.778,t));
+            return             mix(c8, c9, smoothstep(0.778,1.000,t));
           }
 
           void main() {
@@ -169,9 +168,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             float cosA = dot(dir, uSunDir);
             float t   = acos(clamp(cosA, -1.0, 1.0)) / 3.14159265;
             vec3 color = twiGrad(t);
-            // Atmospheric haze near sun — additive warm scatter
-            float haze = max(0.0, cosA - 0.97);
-            color += vec3(0.35, 0.18, 0.05) * haze * 5.0;
+            // Faint violet glow near sun — keeps it subtle
+            float haze = max(0.0, cosA - 0.95);
+            color += vec3(0.18, 0.08, 0.22) * haze * 3.0;
             // Very gentle breathing pulse
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color, 1.0);
