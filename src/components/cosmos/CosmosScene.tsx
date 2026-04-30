@@ -97,9 +97,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
     // Baked-in sky/terrain values (dialled in)
     const EXPOSURE    = 0.90;
-    const SKY_BRIGHT  = 1.40;
-    const GRAD_STEEP  = 1.85;
-    const GRAD_LIFT   = 0.39;
+    const SKY_BRIGHT  = 1.10;
+    const GRAD_STEEP  = 1.30;
+    const GRAD_LIFT   = 0.18;
     const TERRAIN_BRIGHT = 1.00;
 
     // Tunable at runtime
@@ -190,7 +190,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
             float horizBand = 1.0 - smoothstep(0.0, uGradLift, abs(dir.y));
             float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
-            t = clamp(t - sunInfluence * 0.32, 0.0, 1.0);
+            t = clamp(t - sunInfluence * 0.16, 0.0, 1.0);
 
             // Sample baked gradient texture — smooth, no GLSL banding
             vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
@@ -209,18 +209,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         gc.width = 256; gc.height = 1;
         const gx = gc.getContext('2d')!;
         const grd = gx.createLinearGradient(0, 0, 256, 0);
-        grd.addColorStop(0.000, '#D09038'); // amber-gold
-        grd.addColorStop(0.055, '#C07840'); // amber
-        grd.addColorStop(0.110, '#AE6450'); // amber-peach
-        grd.addColorStop(0.185, '#9A5460'); // peach-rose
-        grd.addColorStop(0.280, '#804070'); // mauve-pink
-        grd.addColorStop(0.390, '#622C7A'); // warm purple
-        grd.addColorStop(0.510, '#481E70'); // purple
-        grd.addColorStop(0.630, '#321460'); // deep blue-purple
-        grd.addColorStop(0.730, '#241048'); // dark blue
-        grd.addColorStop(0.830, '#1A0C38'); // space blue (#1E1840 ≈)
-        grd.addColorStop(0.920, '#0E0828'); // deep space
-        grd.addColorStop(1.000, '#080618'); // near-black
+        // t=0 is below-horizon (mostly blocked by terrain), t=1 is zenith.
+        // Matches the comp: dark space-blue sky, narrow dusty-rose horizon strip.
+        grd.addColorStop(0.000, '#5A2410'); // dark muted ember (deep below horizon)
+        grd.addColorStop(0.055, '#9A4828'); // muted rust-amber  (narrow sun-glow zone)
+        grd.addColorStop(0.120, '#8A4448'); // warm rose-rust
+        grd.addColorStop(0.200, '#703C60'); // dusty rose-purple (visible horizon strip)
+        grd.addColorStop(0.300, '#562C70'); // mauve-purple
+        grd.addColorStop(0.420, '#3C1A60'); // deep purple
+        grd.addColorStop(0.540, '#281050'); // dark purple
+        grd.addColorStop(0.650, '#1C0C3C'); // very dark blue-purple
+        grd.addColorStop(0.760, '#130828'); // near void
+        grd.addColorStop(0.870, '#0C0620'); // space
+        grd.addColorStop(1.000, '#060412'); // void
         gx.fillStyle = grd;
         gx.fillRect(0, 0, 256, 1);
         const skyGradTex = new THREE.CanvasTexture(gc);
@@ -587,10 +588,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let targetHeading: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = 90; // camera Y to aim for during flyTo
-      let camTargetY = 100;
+      let camTargetY = 120;
       let speed = 4;
       let pitch = 0.05; // radians; slight upward tilt to show more sky
-      camera.position.set(0, 100, 0);
+      camera.position.set(0, 120, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
@@ -671,7 +672,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
-      let freeTargetY = 100; // camera holds this height when no star is selected
+      let freeTargetY = 120; // camera holds this height when no star is selected
 
       function animate() {
         if (disposed) return;
@@ -744,7 +745,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
 
         // Camera Y — smooth lerp; tracks terrain floor in free mode, star approach Y in flyTo
-        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 50, 90);
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 60, 110);
         if (flyTargetXZ) {
           camTargetY = Math.max(flyStarTargetY, terrainFloor);
         } else if (activeStarRef.current) {
