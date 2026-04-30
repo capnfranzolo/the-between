@@ -529,9 +529,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let flyStarTargetY = 90; // camera Y to aim for during flyTo
       let camTargetY = 90;
       let speed = 4;
-      // Smooth look-at tracker — interpolated toward destination each frame
-      const lookAtCur = new THREE.Vector3(0, 86, -200);
-      const tmpLook = new THREE.Vector3();
+      let pitch = -0.035; // radians; negative = slight downward gaze
       camera.position.set(0, 90, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
@@ -636,6 +634,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         const fwdX = Math.sin(heading);
         const fwdZ = -Math.cos(heading);
+        // Sun always in front of camera so warm glow stays ahead
+        skyMat.uniforms.uSunDir.value.set(fwdX, -0.15, fwdZ).normalize();
 
         // Speed for free drift
         const targetSpeed = isPaused ? 0 : (keys['Space'] ? 25 : 4);
@@ -670,17 +670,27 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
 
-        // Smooth lookAt — interpolates toward star when selected, forward+slightly-down otherwise
+        // Pitch-based smooth lookAt — angles interpolate, no world-space jump on star click
         const activeId = activeStarRef.current;
         if (activeId) {
           const ag = thoughtGroups.get(activeId);
-          if (ag) tmpLook.set(ag.position.x, ag.position.y - 4, ag.position.z);
-          else tmpLook.set(camera.position.x + fwdX * 200, camera.position.y - 4, camera.position.z + fwdZ * 200);
+          if (ag) {
+            const dx = ag.position.x - camera.position.x;
+            const dz = ag.position.z - camera.position.z;
+            const dy = (ag.position.y - 4) - camera.position.y;
+            const hDist = Math.max(Math.sqrt(dx * dx + dz * dz), 0.01);
+            pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
+          }
         } else {
-          tmpLook.set(camera.position.x + fwdX * 200, camera.position.y - 4, camera.position.z + fwdZ * 200);
+          pitch += (-0.035 - pitch) * Math.min(dt * 1.5, 1);
         }
-        lookAtCur.lerp(tmpLook, Math.min((activeId ? 4.0 : 2.0) * dt, 1));
-        camera.lookAt(lookAtCur);
+        const cosP = Math.cos(pitch);
+        const sinP = Math.sin(pitch);
+        camera.lookAt(new THREE.Vector3(
+          camera.position.x + fwdX * cosP * 200,
+          camera.position.y + sinP * 200,
+          camera.position.z + fwdZ * cosP * 200,
+        ));
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;

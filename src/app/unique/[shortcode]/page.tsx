@@ -37,8 +37,7 @@ export default function UniquePage() {
           maxWidth: 360,
           textShadow: '0 1px 24px rgba(30,24,64,0.6)',
         }}>
-          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>What&rsquo;s something</span>
-          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>unique about you?</span>
+          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>Who are you?</span>
         </h1>
 
         <div style={{ marginTop: 14, fontSize: 13, color: BTW.textDim, maxWidth: 280, lineHeight: 1.5 }}>
