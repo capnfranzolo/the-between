@@ -327,24 +327,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         spiro.nextSwapAt = currentTime + spiro.swapInterval;
       }
 
-      function rebakeTextures(spiro: StarSpiro, newResolution: number) {
-        if (spiro.resolution === newResolution) return;
-        spiro.resolution = newResolution;
-        const newScale = newResolution === 256 ? 12 : 8;
-        const { canvases, textures } = bakeFrames(spiro.dims, newResolution);
-        spiro.textures.forEach(t => t.dispose());
-        spiro.canvases = canvases;
-        spiro.textures = textures;
-        const matA = spiro.spriteA.material as THREE.SpriteMaterial;
-        const matB = spiro.spriteB.material as THREE.SpriteMaterial;
-        matA.map = textures[spiro.frameIdx];
-        matA.needsUpdate = true;
-        matB.map = textures[(spiro.frameIdx + 1) % 3];
-        matB.needsUpdate = true;
-        spiro.spriteA.scale.set(newScale, newScale, 1);
-        spiro.spriteB.scale.set(newScale, newScale, 1);
-        if (spiro.liveSprite) spiro.liveSprite.scale.set(newScale, newScale, 1);
-      }
+      // Canvas size must be ≥ 396px to contain the full spirograph without clipping.
+      // outerRadius(120) × zoom(1.4) = 168px from center; yOffset(30) adds 30 more on bottom.
+      // 420/2 = 210 > 168+30=198, so all forms fit.
+      const SPIRO_SIZE = 420;
+      const SPRITE_SCALE = 12;
 
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
@@ -354,17 +341,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         const group = new THREE.Group();
 
-        // Initial resolution from distance to camera start position (0, 80, 0)
         const distSq = t.x * t.x + t.z * t.z;
         const initialTier = distSq < 100 * 100 ? 0 : distSq < 200 * 200 ? 1 : 2;
-        const resolution = initialTier === 0 ? 256 : 128;
 
         let spiro: StarSpiro | null = null;
 
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
-          const { canvases, textures } = bakeFrames(t.dimensions, resolution);
-          const scale = resolution === 256 ? 12 : 8;
+          const { canvases, textures } = bakeFrames(t.dimensions, SPIRO_SIZE);
+          const scale = SPRITE_SCALE;
 
           const spriteA = new THREE.Sprite(new THREE.SpriteMaterial({
             map: textures[0], transparent: true, depthWrite: false, opacity: 1.0,
@@ -388,7 +373,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             nextSwapAt: stagger + swapInterval,
             swapInterval,
             live: null, liveTexture: null, liveSprite: null,
-            resolution, distanceTier: initialTier, dims: t.dimensions,
+            resolution: SPIRO_SIZE, distanceTier: initialTier, dims: t.dimensions,
           };
         } else {
           // Glowing dot fallback when baked cap is reached
@@ -659,17 +644,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             spiro.liveTexture.needsUpdate = true;
           }
 
-          // Distance-based resolution swap
+          // Track distance tier for crossfade skip (no resolution change — all stars use SPIRO_SIZE)
           const cdx = g.position.x - camera.position.x;
           const cdz = g.position.z - camera.position.z;
           const distSq = cdx * cdx + cdz * cdz;
           const newTier = distSq < 100 * 100 ? 0 : distSq < 200 * 200 ? 1 : 2;
-          if (newTier !== spiro.distanceTier) {
-            spiro.distanceTier = newTier;
-            if (!spiro.live) {
-              rebakeTextures(spiro, newTier === 0 ? 256 : 128);
-            }
-          }
+          if (newTier !== spiro.distanceTier) spiro.distanceTier = newTier;
 
           // Crossfade cycle — skip while live or when star is far (tier 2)
           if (!spiro.live && newTier < 2) {
