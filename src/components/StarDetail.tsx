@@ -1,7 +1,6 @@
 'use client';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
-import Spirograph from './Spirograph';
 import { SITE_URL } from '@/lib/constants';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
@@ -37,7 +36,7 @@ export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onCon
         position: 'absolute',
         left: '50%', bottom: 28,
         transform: 'translateX(-50%)',
-        width: 'min(720px, 90%)',
+        width: 'min(560px, 90%)',
         background: 'rgba(20,14,40,0.72)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
@@ -50,27 +49,21 @@ export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onCon
         animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
       }}
     >
-      <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-        <div style={{ flexShrink: 0 }}>
-          <Spirograph dimensions={star.dimensions} size={200} animate />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
-            &ldquo;{star.text}&rdquo;
-          </div>
-          {star.unique_fact && (
-            <div style={{
-              marginTop: 10,
-              paddingLeft: 18,
-              fontFamily: SANS, fontSize: 13,
-              lineHeight: 1.45, color: BTW.textSec,
-              fontStyle: 'italic',
-            }}>
-              — {star.unique_fact}
-            </div>
-          )}
-        </div>
+      <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
+        &ldquo;{star.text}&rdquo;
       </div>
+
+      {star.unique_fact && (
+        <div style={{
+          marginTop: 10,
+          paddingLeft: 18,
+          fontFamily: SANS, fontSize: 13,
+          lineHeight: 1.45, color: BTW.textSec,
+          fontStyle: 'italic',
+        }}>
+          — {star.unique_fact}
+        </div>
+      )}
 
       {connections && connections.length > 0 && (
         <div style={{ marginTop: 16 }}>
