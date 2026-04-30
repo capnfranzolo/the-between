@@ -39,7 +39,7 @@ export default function RevealPage() {
   const [showKept, setShowKept] = useState(false);
 
   useEffect(() => {
-    const myStar = sessionStorage.getItem('my_star');
+    const myStar = localStorage.getItem('my_star');
     setIsOwner(myStar === shortcode);
 
     fetch(`/api/stars/${shortcode}`)

@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
       to_star_id: toStarId,
       reason: reason.trim(),
       ip_hash: ipHash,
+      status: 'approved',
+      approved_at: new Date().toISOString(),
     })
     .select('id, from_star_id, to_star_id, reason')
     .single();

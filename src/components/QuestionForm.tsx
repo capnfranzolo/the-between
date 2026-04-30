@@ -25,7 +25,7 @@ export default function QuestionForm() {
       });
       const data = await res.json();
       if (data.shortcode) {
-        sessionStorage.setItem('my_star', data.shortcode);
+        localStorage.setItem('my_star', data.shortcode);
         router.push(`/s/${data.shortcode}`);
       }
     } catch {

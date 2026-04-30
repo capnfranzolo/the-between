@@ -32,7 +32,7 @@ export default function CosmosPage() {
   const [reason, setReason] = useState('');
   const [localBonds, setLocalBonds] = useState<CosmosBond[]>([]);
   const [myShortcode] = useState<string | null>(() =>
-    typeof window !== 'undefined' ? sessionStorage.getItem('my_star') : null,
+    typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const sceneRef = useRef<CosmosSceneHandle>(null);
 
@@ -40,15 +40,33 @@ export default function CosmosPage() {
     fetch(`/api/cosmos/${questionId}`)
       .then(r => r.json())
       .then((d: CosmosData) => {
-        // API returns `answer` field; map to `text` for CosmosStarData
         const stars = d.stars.map(s => ({
           ...s,
           text: (s as unknown as { answer?: string }).answer ?? s.text,
         }));
         setData({ ...d, stars });
+
+        // Restore any pending local bond for this user
+        if (myShortcode) {
+          const myStarId = stars.find(s => s.shortcode === myShortcode)?.id;
+          if (myStarId) {
+            const raw = localStorage.getItem(PENDING_BOND_KEY(myStarId));
+            if (raw) {
+              try {
+                const b = JSON.parse(raw) as { fromStarId: string; toStarId: string; reason: string };
+                setLocalBonds([{
+                  id: 'pending-' + b.fromStarId,
+                  from_id: b.fromStarId,
+                  to_id: b.toStarId,
+                  reason: b.reason,
+                }]);
+              } catch { /* ignore corrupt entry */ }
+            }
+          }
+        }
       })
       .catch(() => {});
-  }, [questionId]);
+  }, [questionId, myShortcode]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 

@@ -39,7 +39,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
   const [myShortcode, setMyShortcode] = useState<string | null>(null);
 
   useEffect(() => {
-    setMyShortcode(sessionStorage.getItem('my_star'));
+    setMyShortcode(localStorage.getItem('my_star'));
   }, []);
 
   const stars = useMemo(() => {
