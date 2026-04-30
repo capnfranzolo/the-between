@@ -95,21 +95,23 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
-    const [dbgExposure,   setDbgExposure]   = useState(0.90);
-    const [dbgSkyBright,  setDbgSkyBright]  = useState(1.25);
-    const [dbgGradSteep,  setDbgGradSteep]  = useState(1.00);
-    const [dbgGradLift,   setDbgGradLift]   = useState(0.35);
-    const [dbgTerrain,    setDbgTerrain]    = useState(1.00);
-    const dbgExposureRef  = useRef(0.90);
-    const dbgSkyBrightRef = useRef(1.25);
-    const dbgGradSteepRef = useRef(1.00);
-    const dbgGradLiftRef  = useRef(0.35);
-    const dbgTerrainRef   = useRef(1.00);
-    useEffect(() => { dbgExposureRef.current  = dbgExposure;  }, [dbgExposure]);
-    useEffect(() => { dbgSkyBrightRef.current = dbgSkyBright; }, [dbgSkyBright]);
-    useEffect(() => { dbgGradSteepRef.current = dbgGradSteep; }, [dbgGradSteep]);
-    useEffect(() => { dbgGradLiftRef.current  = dbgGradLift;  }, [dbgGradLift]);
-    useEffect(() => { dbgTerrainRef.current   = dbgTerrain;   }, [dbgTerrain]);
+    // Baked-in sky/terrain values (dialled in)
+    const EXPOSURE    = 0.90;
+    const SKY_BRIGHT  = 1.40;
+    const GRAD_STEEP  = 1.85;
+    const GRAD_LIFT   = 0.39;
+    const TERRAIN_BRIGHT = 1.00;
+
+    // Tunable at runtime
+    const [dbgTerrainGlow, setDbgTerrainGlow] = useState(0.30);
+    const [dbgStarDensity, setDbgStarDensity] = useState(0.70);
+    const [dbgStarSpeed,   setDbgStarSpeed]   = useState(1.00);
+    const dbgTerrainGlowRef = useRef(0.30);
+    const dbgStarDensityRef = useRef(0.70);
+    const dbgStarSpeedRef   = useRef(1.00);
+    useEffect(() => { dbgTerrainGlowRef.current = dbgTerrainGlow; }, [dbgTerrainGlow]);
+    useEffect(() => { dbgStarDensityRef.current = dbgStarDensity; }, [dbgStarDensity]);
+    useEffect(() => { dbgStarSpeedRef.current   = dbgStarSpeed;   }, [dbgStarSpeed]);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -151,9 +153,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         uniforms: {
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
-          uBrightness:{ value: 1.25 },
-          uGradSteep: { value: 1.0 },
-          uGradLift:  { value: 0.35 },
+          uBrightness:{ value: SKY_BRIGHT },
+          uGradSteep: { value: GRAD_STEEP },
+          uGradLift:  { value: GRAD_LIFT },
           uSkyGrad:   { value: null as THREE.Texture | null },
         },
         vertexShader: `
@@ -243,7 +245,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const starMat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
-        uniforms: { uTime: { value: 0 } },
+        uniforms: { uTime: { value: 0 }, uStarDensity: { value: 0.70 }, uStarSpeed: { value: 1.0 } },
         vertexShader: `
           attribute float size;
           varying float vSize;
@@ -256,14 +258,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         `,
         fragmentShader: `
           uniform float uTime;
+          uniform float uStarDensity;
+          uniform float uStarSpeed;
           varying float vSize;
           void main() {
             float d = length(gl_PointCoord - vec2(0.5));
             if (d > 0.5) discard;
-            float alpha = smoothstep(0.5, 0.0, d) * 0.88;
-            // Slow gentle shimmer — never dims below 60%, full cycle ~30-80 seconds
-            alpha *= 0.72 + 0.28 * sin(uTime * (0.08 + vSize * 0.025) + vSize * 10.0);
-            gl_FragColor = vec4(0.9, 0.85, 1.0, alpha);
+            float alpha = smoothstep(0.5, 0.0, d) * uStarDensity;
+            alpha *= 0.72 + 0.28 * sin(uTime * uStarSpeed * (0.08 + vSize * 0.025) + vSize * 10.0);
+            gl_FragColor = vec4(0.92, 0.88, 1.0, alpha);
           }
         `,
       });
@@ -277,7 +280,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const terrainMat = new THREE.ShaderMaterial({
         transparent: false,
         depthWrite: true,
-        uniforms: { uTerrainBright: { value: 1.0 } },
+        uniforms: { uTerrainBright: { value: TERRAIN_BRIGHT }, uTerrainGlow: { value: 0.30 } },
         vertexShader: `
           varying float vDistFromCam;
           varying float vFlatness;
@@ -291,14 +294,17 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         `,
         fragmentShader: `
           uniform float uTerrainBright;
+          uniform float uTerrainGlow;
           varying float vDistFromCam;
           varying float vFlatness;
           void main() {
-            vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0; // #503868
-            vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0; // darker
+            vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0;
+            vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0;
             vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness) * uTerrainBright;
-            // Fade to warm-dark silhouette — blocks sky spill without stark black
-            vec3 silColor = vec3(26.0, 11.0, 8.0) / 255.0;
+            // Silhouette: lerp from near-black to warm amber based on uTerrainGlow dial
+            vec3 darkSil = vec3(8.0,  5.0, 14.0) / 255.0;
+            vec3 warmSil = vec3(70.0, 28.0, 10.0) / 255.0;
+            vec3 silColor = mix(darkSil, warmSil, uTerrainGlow);
             float silFade = smoothstep(350.0, 900.0, vDistFromCam);
             color = mix(color, silColor, silFade);
             gl_FragColor = vec4(color, 1.0);
@@ -564,10 +570,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let targetHeading: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = 90; // camera Y to aim for during flyTo
-      let camTargetY = 130;
+      let camTargetY = 100;
       let speed = 4;
       let pitch = 0.05; // radians; slight upward tilt to show more sky
-      camera.position.set(0, 130, 0);
+      camera.position.set(0, 100, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
@@ -656,11 +662,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const time = clock.getElapsedTime();
 
         skyMat.uniforms.uTime.value = time;
-        skyMat.uniforms.uBrightness.value = dbgSkyBrightRef.current;
-        skyMat.uniforms.uGradSteep.value  = dbgGradSteepRef.current;
-        skyMat.uniforms.uGradLift.value   = dbgGradLiftRef.current;
-        terrainMat.uniforms.uTerrainBright.value = dbgTerrainRef.current;
-        renderer.toneMappingExposure = dbgExposureRef.current;
+        terrainMat.uniforms.uTerrainGlow.value    = dbgTerrainGlowRef.current;
+        starMat.uniforms.uStarDensity.value        = dbgStarDensityRef.current;
+        starMat.uniforms.uStarSpeed.value          = dbgStarSpeedRef.current;
+        renderer.toneMappingExposure = EXPOSURE;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
@@ -714,7 +719,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
 
         // Camera Y — smooth lerp; tracks terrain floor in free mode, star approach Y in flyTo
-        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 70, 120);
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 50, 90);
         if (flyTargetXZ) {
           camTargetY = Math.max(flyStarTargetY, terrainFloor);
         } else if (activeStarRef.current) {
@@ -925,11 +930,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }}>
           <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.5, textTransform: 'uppercase' }}>debug</div>
           {([
-            ['Exposure',   dbgExposure,  setDbgExposure,  0.10, 2.0, 0.05],
-            ['Sky bright', dbgSkyBright, setDbgSkyBright, 0.10, 2.5, 0.05],
-            ['Grad steep', dbgGradSteep, setDbgGradSteep, 0.30, 2.5, 0.05],
-            ['Grad lift',  dbgGradLift,  setDbgGradLift,  0.00, 0.7, 0.01],
-            ['Terrain',    dbgTerrain,   setDbgTerrain,   0.00, 2.0, 0.05],
+            ['Terrain glow', dbgTerrainGlow, setDbgTerrainGlow, 0.00, 1.0, 0.02],
+            ['Stars',        dbgStarDensity, setDbgStarDensity, 0.10, 2.0, 0.05],
+            ['Twinkle spd',  dbgStarSpeed,   setDbgStarSpeed,   0.05, 8.0, 0.05],
           ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
