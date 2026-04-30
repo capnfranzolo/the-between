@@ -372,25 +372,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const bondLines = new Map<string, BondLineEntry>();
 
       function createBond(b: BondData) {
-        const fromGroup = thoughtGroups.get(b.from_id);
-        const toGroup = thoughtGroups.get(b.to_id);
+        const fromGroup = thoughtGroups.get(b.from_id); // orbiter
+        const toGroup   = thoughtGroups.get(b.to_id);   // anchor
         if (!fromGroup || !toGroup || bondLines.has(b.id)) return;
 
-        const rand = seededRand(hashStr(b.id));
+        // Solar system model: from_star orbits to_star (anchor).
+        // Anchor stays at its deterministic basePos.
+        // Count existing orbiters of this anchor to pick radius/period.
+        let orbiterCount = 0;
+        bondLines.forEach(entry => { if (entry.toId === b.to_id) orbiterCount++; });
 
-        if (!fromGroup.userData.orbit && !toGroup.userData.orbit) {
-          const orbitRadius = 8 + rand() * 4;
-          const period = 30 + rand() * 30;
-          const fromBase = fromGroup.userData.basePos as THREE.Vector3;
-          const toBase   = toGroup.userData.basePos as THREE.Vector3;
-          const center   = new THREE.Vector3(
-            (fromBase.x + toBase.x) / 2,
-            (fromBase.y + toBase.y) / 2,
-            (fromBase.z + toBase.z) / 2,
-          );
-          fromGroup.userData.orbit = { center, radius: orbitRadius, period, phaseOffset: 0 };
-          toGroup.userData.orbit   = { center, radius: orbitRadius, period, phaseOffset: Math.PI };
-        }
+        const BASE_RADIUS = 15;
+        const RADIUS_STEP = 7;
+        const BASE_PERIOD = 40;
+        const PERIOD_STEP = 15;
+        const orbitRadius = BASE_RADIUS + orbiterCount * RADIUS_STEP;
+        const period = BASE_PERIOD + orbiterCount * PERIOD_STEP;
+
+        // Derive tilt and phase from orbiter id so each orbit is distinct
+        const rand = seededRand(hashStr(b.from_id + b.to_id));
+        const tilt = (rand() - 0.5) * 40 * (Math.PI / 180); // -20° to +20°
+        const phaseOffset = rand() * Math.PI * 2;
+
+        fromGroup.userData.orbit = { anchorId: b.to_id, radius: orbitRadius, period, tilt, phaseOffset };
 
         const fromEI = fromGroup.userData.emotionIndex as number;
         const toEI   = toGroup.userData.emotionIndex as number;
@@ -530,18 +534,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           updateTerrainGeometry();
         }
 
-        // Animate thoughts
+        // Animate thoughts — two passes so anchors are positioned before their orbiters
+        // Pass 1: non-orbiters (anchors and free stars)
+        thoughtGroups.forEach(g => {
+          if (g.userData.orbit) return; // skip orbiters in pass 1
+          g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
+        });
+        // Pass 2: orbiters (may orbit anchors that were just updated above)
+        thoughtGroups.forEach(g => {
+          const orbit = g.userData.orbit as { anchorId: string; radius: number; period: number; tilt: number; phaseOffset: number } | null;
+          if (!orbit) return;
+          const anchorGroup = thoughtGroups.get(orbit.anchorId);
+          if (!anchorGroup) {
+            g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
+            return;
+          }
+          const angle = (time / orbit.period) * Math.PI * 2 + orbit.phaseOffset;
+          g.position.x = anchorGroup.position.x + Math.cos(angle) * orbit.radius;
+          g.position.z = anchorGroup.position.z + Math.sin(angle) * orbit.radius * Math.cos(orbit.tilt);
+          g.position.y = anchorGroup.position.y + Math.sin(angle) * orbit.radius * Math.sin(orbit.tilt);
+        });
+        // Pass 3: scale pulse + spiro animation for all stars
         thoughtGroups.forEach(g => {
           const id = g.userData.id as string;
-          const orbit = g.userData.orbit as { center: THREE.Vector3; radius: number; period: number; phaseOffset: number } | null;
-          if (orbit) {
-            const angle = (time / orbit.period) * Math.PI * 2 + orbit.phaseOffset;
-            g.position.x = orbit.center.x + Math.cos(angle) * orbit.radius;
-            g.position.z = orbit.center.z + Math.sin(angle) * orbit.radius;
-            g.position.y = orbit.center.y + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
-          } else {
-            g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
-          }
           g.scale.setScalar(1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05);
 
           const spiro = g.userData.spiro as StarSpiro | null;

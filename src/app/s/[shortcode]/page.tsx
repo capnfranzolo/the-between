@@ -24,6 +24,7 @@ interface StarData {
   answer: string;
   question_id: string;
   dimensions?: StarDimensions;
+  questions?: { id: string; text: string } | null;
 }
 
 type Stage = 'blooming' | 'revealed';
@@ -89,7 +90,7 @@ export default function RevealPage() {
           overflowY: 'auto',
         }}>
           <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5, color: BTW.textDim, maxWidth: 320, margin: '0 0 12px' }}>
-            What do you know is true but you can&rsquo;t prove?
+            {star.questions?.text ?? "What do you know is true but you can't prove?"}
           </div>
           <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45, color: BTW.textPri, maxWidth: 320, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
             &ldquo;{star.answer}&rdquo;
@@ -134,7 +135,7 @@ export default function RevealPage() {
           fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5,
           color: BTW.textDim, maxWidth: 320, margin: '0 0 12px',
         }}>
-          What do you know is true but you can&rsquo;t prove?
+          {star.questions?.text ?? "What do you know is true but you can't prove?"}
         </div>
 
         <div style={{

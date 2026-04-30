@@ -11,9 +11,9 @@ export interface CosmosStarData {
   shortcode: string;
   text: string;
   unique_fact?: string | null;
-  x: number;
-  y: number;
-  depth: number;
+  x?: number;
+  y?: number;
+  depth?: number;
   dimensions: DimensionResult & { curveType: CurveType };
   mine?: boolean;
 }
@@ -21,11 +21,12 @@ export interface CosmosStarData {
 interface StarDetailProps {
   star: CosmosStarData;
   hasMystar: boolean;
+  userHasOutgoingBond?: boolean;
   onConnect: () => void;
   connections?: Array<{ reason: string }>;
 }
 
-export default function StarDetail({ star, hasMystar, onConnect, connections }: StarDetailProps) {
+export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onConnect, connections }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
 
   return (
@@ -104,7 +105,7 @@ export default function StarDetail({ star, hasMystar, onConnect, connections }: 
         alignItems: 'center', gap: 16,
       }}>
         <ShareButton url={url} />
-        {hasMystar && !star.mine && (
+        {hasMystar && !star.mine && !userHasOutgoingBond && (
           <button
             onClick={onConnect}
             style={{
