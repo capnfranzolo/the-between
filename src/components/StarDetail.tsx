@@ -23,10 +23,11 @@ interface StarDetailProps {
   hasMystar: boolean;
   userHasOutgoingBond?: boolean;
   onConnect: () => void;
-  connections?: Array<{ reason: string }>;
+  connections?: Array<{ reason: string; relatedStarId?: string }>;
+  onConnectionClick?: (id: string) => void;
 }
 
-export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onConnect, connections }: StarDetailProps) {
+export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onConnect, connections, onConnectionClick }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
 
   return (
@@ -57,26 +58,19 @@ export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onCon
           <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
             &ldquo;{star.text}&rdquo;
           </div>
+          {star.unique_fact && (
+            <div style={{
+              marginTop: 10,
+              paddingLeft: 18,
+              fontFamily: SANS, fontSize: 13,
+              lineHeight: 1.45, color: BTW.textSec,
+              fontStyle: 'italic',
+            }}>
+              — {star.unique_fact}
+            </div>
+          )}
         </div>
       </div>
-
-      {star.unique_fact && (
-        <div style={{
-          marginTop: 16,
-          paddingLeft: 14,
-          borderLeft: `2px solid ${withAlpha(BTW.horizon[3], 0.55)}`,
-          fontFamily: SANS, fontSize: 14,
-          lineHeight: 1.45, color: BTW.textSec,
-        }}>
-          <span style={{
-            display: 'block', fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase',
-            color: BTW.horizon[3], opacity: 0.8, marginBottom: 4,
-          }}>
-            something unique
-          </span>
-          {star.unique_fact}
-        </div>
-      )}
 
       {connections && connections.length > 0 && (
         <div style={{ marginTop: 16 }}>
@@ -84,19 +78,36 @@ export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onCon
             fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase',
             color: BTW.horizon[3], opacity: 0.8, marginBottom: 8,
           }}>
-            connected because
+            connected
           </div>
-          {connections.map((c, i) => (
-            <div key={i} style={{
-              paddingLeft: 14,
-              borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
-              fontFamily: SANS, fontSize: 13,
-              lineHeight: 1.45, color: BTW.textSec,
-              marginBottom: i < connections.length - 1 ? 8 : 0,
-            }}>
-              {c.reason}
-            </div>
-          ))}
+          <div style={{
+            maxHeight: 160, overflowY: 'auto',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
+            {connections.map((c, i) => (
+              <div
+                key={i}
+                onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
+                style={{
+                  paddingLeft: 14,
+                  borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
+                  fontFamily: SANS, fontSize: 13,
+                  lineHeight: 1.45, color: BTW.textSec,
+                  cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
+                  transition: 'color .2s',
+                }}
+                onMouseEnter={e => {
+                  if (c.relatedStarId && onConnectionClick)
+                    (e.currentTarget as HTMLDivElement).style.color = BTW.textPri;
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLDivElement).style.color = BTW.textSec;
+                }}
+              >
+                {c.reason}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

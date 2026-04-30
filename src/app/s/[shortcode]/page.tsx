@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import TwilightSky from '@/components/TwilightSky';
@@ -33,15 +34,15 @@ export default function RevealPage() {
   const { shortcode } = useParams<{ shortcode: string }>();
   const router = useRouter();
   const [star, setStar] = useState<StarData | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
+  const [myLocalShortcode] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
+  );
+  const isOwner = myLocalShortcode === shortcode;
   const [stage, setStage] = useState<Stage>('blooming');
   const [copied, setCopied] = useState(false);
   const [showKept, setShowKept] = useState(false);
 
   useEffect(() => {
-    const myStar = localStorage.getItem('my_star');
-    setIsOwner(myStar === shortcode);
-
     fetch(`/api/stars/${shortcode}`)
       .then(r => r.json())
       .then(data => setStar(data))
@@ -89,15 +90,15 @@ export default function RevealPage() {
           padding: '40px 24px', textAlign: 'center',
           overflowY: 'auto',
         }}>
-          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5, color: BTW.textDim, maxWidth: 320, margin: '0 0 12px' }}>
+          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 20, lineHeight: 1.5, color: BTW.textDim, maxWidth: 360, margin: '0 0 14px' }}>
             {star.questions?.text ?? "What do you know is true but you can't prove?"}
           </div>
-          <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45, color: BTW.textPri, maxWidth: 320, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
+          <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 28, lineHeight: 1.4, color: BTW.textPri, maxWidth: 360, margin: '0 0 28px', opacity: stage === 'blooming' ? 0 : 0.95, transition: 'opacity 1.2s ease 0.2s' }}>
             &ldquo;{star.answer}&rdquo;
           </div>
           <Spirograph dimensions={dimensions} size={200} animate />
           <div style={{ marginTop: 36 }}>
-            <a
+            <Link
               href="/"
               style={{
                 display: 'inline-block',
@@ -109,7 +110,7 @@ export default function RevealPage() {
               }}
             >
               What&rsquo;s yours? →
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -132,16 +133,16 @@ export default function RevealPage() {
         overflowY: 'auto',
       }}>
         <div style={{
-          fontFamily: SERIF, fontStyle: 'italic', fontSize: 15, lineHeight: 1.5,
-          color: BTW.textDim, maxWidth: 320, margin: '0 0 12px',
+          fontFamily: SERIF, fontStyle: 'italic', fontSize: 20, lineHeight: 1.5,
+          color: BTW.textDim, maxWidth: 360, margin: '0 0 14px',
         }}>
           {star.questions?.text ?? "What do you know is true but you can't prove?"}
         </div>
 
         <div style={{
-          fontFamily: SERIF, fontWeight: 400, fontSize: 19, lineHeight: 1.45,
+          fontFamily: SERIF, fontWeight: 400, fontSize: 28, lineHeight: 1.4,
           color: BTW.textPri, opacity: stage === 'blooming' ? 0 : 0.95,
-          maxWidth: 320, margin: '0 0 28px',
+          maxWidth: 360, margin: '0 0 28px',
           transition: 'opacity 1.2s ease 0.2s',
         }}>
           &ldquo;{star.answer}&rdquo;

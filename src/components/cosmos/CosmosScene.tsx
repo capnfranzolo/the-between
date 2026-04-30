@@ -21,6 +21,7 @@ export interface BondData {
 
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
+  turnRight: () => void;
 }
 
 interface CosmosSceneProps {
@@ -72,6 +73,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
+    const turnRightFnRef = useRef<(() => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -92,6 +94,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
+      turnRight: () => turnRightFnRef.current?.(),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -434,6 +437,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── CAMERA STATE ───
       let heading = 0;
       let targetHeading: number | null = null;
+      let flyTargetPos: THREE.Vector3 | null = null;
       let speed = 4;
       let clickBoostTime = 0;
       camera.position.set(0, 80, 0);
@@ -447,7 +451,23 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dx = g.position.x - camera.position.x;
         const dz = g.position.z - camera.position.z;
         targetHeading = Math.atan2(dx, -dz);
-        // No speed boost — camera pauses after selection
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const stopDist = 22;
+        if (dist > stopDist + 2) {
+          const t = (dist - stopDist) / dist;
+          flyTargetPos = new THREE.Vector3(
+            camera.position.x + dx * t,
+            g.position.y,
+            camera.position.z + dz * t,
+          );
+        } else {
+          flyTargetPos = null;
+        }
+      };
+
+      turnRightFnRef.current = () => {
+        targetHeading = heading + Math.PI / 2;
+        flyTargetPos = null;
       };
 
       // ─── INPUT ───
@@ -512,7 +532,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         const fwdX = Math.sin(heading);
         const fwdZ = -Math.cos(heading);
-        if (!isPaused) {
+        if (flyTargetPos) {
+          const fdx = flyTargetPos.x - camera.position.x;
+          const fdz = flyTargetPos.z - camera.position.z;
+          const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
+          if (fdist < 3) {
+            flyTargetPos = null;
+          } else {
+            const flyAmt = Math.min(fdist, 90 * dt);
+            camera.position.x += (fdx / fdist) * flyAmt;
+            camera.position.z += (fdz / fdist) * flyAmt;
+          }
+        } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
           camera.position.z += fwdZ * speed * dt;
         }
@@ -616,6 +647,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
+        turnRightFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
 
