@@ -79,6 +79,7 @@ export default function CosmosPage() {
       id: star.id,
       ...positions.get(star.id)!,
       emotionIndex: star.dimensions.emotionIndex,
+      dimensions: star.dimensions,
     }));
   }, [data, bonds]);
 
@@ -106,6 +107,11 @@ export default function CosmosPage() {
       .filter(b => b.from_id === selected || b.to_id === selected)
       .map(b => ({ reason: b.reason }));
   }, [selected, bonds]);
+
+  const userStarId = useMemo(() => {
+    if (!myShortcode || !data) return null;
+    return data.stars.find(s => s.shortcode === myShortcode)?.id ?? null;
+  }, [myShortcode, data]);
 
   const handleThoughtClick = (id: string) => {
     setSelected(id);
@@ -149,6 +155,8 @@ export default function CosmosPage() {
         ref={sceneRef}
         thoughts={thoughts}
         bonds={sceneBonds}
+        activeStar={selected}
+        userStar={userStarId}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
       />

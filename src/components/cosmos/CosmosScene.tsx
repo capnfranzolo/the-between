@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
-import { EMOTIONS } from '@/lib/spirograph/renderer';
+import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
 export interface ThoughtData {
   id: string;
@@ -9,6 +9,7 @@ export interface ThoughtData {
   y: number;
   z: number;
   emotionIndex: number;
+  dimensions: SpiroDimensions;
 }
 
 export interface BondData {
@@ -25,11 +26,30 @@ export interface CosmosSceneHandle {
 interface CosmosSceneProps {
   thoughts?: ThoughtData[];
   bonds?: BondData[];
+  activeStar?: string | null;
+  userStar?: string | null;
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
 }
 
-// Inline seeded random — avoids importing btw into a heavy Three.js module
+interface StarSpiro {
+  canvases: HTMLCanvasElement[];
+  textures: THREE.CanvasTexture[];
+  spriteA: THREE.Sprite;
+  spriteB: THREE.Sprite;
+  frameIdx: number;
+  nextFrameIdx: number;
+  crossfadeT: number;     // -1 = idle, 0–1 = transitioning
+  nextSwapAt: number;
+  swapInterval: number;
+  live: SpirographInstance | null;
+  liveTexture: THREE.CanvasTexture | null;
+  liveSprite: THREE.Sprite | null;
+  resolution: number;
+  distanceTier: number;   // 0=near(256), 1=mid(128), 2=far(no crossfade)
+  dims: SpiroDimensions;
+}
+
 function seededRand(seed: number) {
   let t = seed >>> 0;
   return () => {
@@ -50,11 +70,14 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
+const BAKED_TIMES = [2.0, 4.5, 7.0];
+const MAX_BAKED = 50;
+const CROSSFADE_DUR = 2.0;
+
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, onThoughtClick, onBackgroundClick }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Bridges from setup effect → prop-sync effects and imperative handle
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
@@ -63,7 +86,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const activeThoughtIds = useRef<Set<string>>(new Set());
     const activeBondIds = useRef<Set<string>>(new Set());
 
-    // Keep callback refs fresh without re-running setup
+    // Readable by the Three.js animation loop without re-running setup
+    const activeStarRef = useRef<string | null>(activeStar ?? null);
+    const userStarRef = useRef<string | null>(userStar ?? null);
+    useEffect(() => { activeStarRef.current = activeStar ?? null; }, [activeStar]);
+    useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
+
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
     const onBgClickRef = useRef(onBackgroundClick);
@@ -78,7 +106,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const container = containerRef.current;
       if (!container) return;
 
-      // ─── SETUP ───
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.5, 2000);
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -138,7 +165,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       skyDome.rotation.x = -8 * Math.PI / 180;
       scene.add(skyDome);
 
-      // ─── STARS ───
+      // ─── BACKGROUND STARS ───
       const starCount = 300;
       const starGeo = new THREE.BufferGeometry();
       const starPositions = new Float32Array(starCount * 3);
@@ -180,8 +207,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         `,
       });
-      const stars = new THREE.Points(starGeo, starMat);
-      scene.add(stars);
+      const bgStars = new THREE.Points(starGeo, starMat);
+      scene.add(bgStars);
 
       // ─── TERRAIN ───
       const TERRAIN_SIZE = 3200;
@@ -251,6 +278,73 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── THOUGHTS ───
       const thoughtGroups = new Map<string, THREE.Group>();
       const thoughtMeshes: THREE.Mesh[] = [];
+      let bakedStarCount = 0;
+
+      function bakeFrames(dims: SpiroDimensions, resolution: number): { canvases: HTMLCanvasElement[]; textures: THREE.CanvasTexture[] } {
+        const canvases: HTMLCanvasElement[] = [];
+        const textures: THREE.CanvasTexture[] = [];
+        for (const bt of BAKED_TIMES) {
+          const c = document.createElement('canvas');
+          const inst = createSpirograph(c, dims, { size: resolution, dpr: 1 });
+          inst.renderStatic(bt);
+          canvases.push(c);
+          textures.push(new THREE.CanvasTexture(c));
+        }
+        return { canvases, textures };
+      }
+
+      function startLive(g: THREE.Group, spiro: StarSpiro) {
+        if (spiro.live) return;
+        const liveCanvas = document.createElement('canvas');
+        const inst = createSpirograph(liveCanvas, spiro.dims, { size: spiro.resolution, dpr: 1 });
+        const liveTex = new THREE.CanvasTexture(liveCanvas);
+        const liveSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: liveTex, transparent: true, depthWrite: false, opacity: 1.0,
+        }));
+        liveSprite.scale.copy(spiro.spriteA.scale);
+        (spiro.spriteA.material as THREE.SpriteMaterial).opacity = 0;
+        (spiro.spriteB.material as THREE.SpriteMaterial).opacity = 0;
+        spiro.crossfadeT = -1;
+        g.add(liveSprite);
+        inst.start();
+        spiro.live = inst;
+        spiro.liveTexture = liveTex;
+        spiro.liveSprite = liveSprite;
+      }
+
+      function stopLive(g: THREE.Group, spiro: StarSpiro, currentTime: number) {
+        if (!spiro.live) return;
+        spiro.live.stop();
+        (spiro.spriteA.material as THREE.SpriteMaterial).opacity = 1.0;
+        (spiro.spriteB.material as THREE.SpriteMaterial).opacity = 0.0;
+        g.remove(spiro.liveSprite!);
+        (spiro.liveSprite!.material as THREE.SpriteMaterial).map?.dispose();
+        spiro.liveSprite!.material.dispose();
+        spiro.liveTexture!.dispose();
+        spiro.live = null;
+        spiro.liveTexture = null;
+        spiro.liveSprite = null;
+        spiro.nextSwapAt = currentTime + spiro.swapInterval;
+      }
+
+      function rebakeTextures(spiro: StarSpiro, newResolution: number) {
+        if (spiro.resolution === newResolution) return;
+        spiro.resolution = newResolution;
+        const newScale = newResolution === 256 ? 12 : 8;
+        const { canvases, textures } = bakeFrames(spiro.dims, newResolution);
+        spiro.textures.forEach(t => t.dispose());
+        spiro.canvases = canvases;
+        spiro.textures = textures;
+        const matA = spiro.spriteA.material as THREE.SpriteMaterial;
+        const matB = spiro.spriteB.material as THREE.SpriteMaterial;
+        matA.map = textures[spiro.frameIdx];
+        matA.needsUpdate = true;
+        matB.map = textures[(spiro.frameIdx + 1) % 3];
+        matB.needsUpdate = true;
+        spiro.spriteA.scale.set(newScale, newScale, 1);
+        spiro.spriteB.scale.set(newScale, newScale, 1);
+        if (spiro.liveSprite) spiro.liveSprite.scale.set(newScale, newScale, 1);
+      }
 
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
@@ -259,38 +353,63 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const color = (er << 16) | (eg << 8) | eb;
 
         const group = new THREE.Group();
-        const ringCount = 3 + Math.floor(rand() * 3); // 3–5 rings
 
-        for (let i = 0; i < ringCount; i++) {
-          const radius = 1.5 + rand() * 2.5;
-          const tube = 0.03 + rand() * 0.04;
-          const torusMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 - i * 0.12 });
-          const torus = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 16, 64), torusMat);
-          torus.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
-          torus.userData = { rx: (rand() - 0.5) * 0.4, ry: (rand() - 0.5) * 0.3 };
-          group.add(torus);
+        // Initial resolution from distance to camera start position (0, 80, 0)
+        const distSq = t.x * t.x + t.z * t.z;
+        const initialTier = distSq < 100 * 100 ? 0 : distSq < 200 * 200 ? 1 : 2;
+        const resolution = initialTier === 0 ? 256 : 128;
+
+        let spiro: StarSpiro | null = null;
+
+        if (bakedStarCount < MAX_BAKED) {
+          bakedStarCount++;
+          const { canvases, textures } = bakeFrames(t.dimensions, resolution);
+          const scale = resolution === 256 ? 12 : 8;
+
+          const spriteA = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: textures[0], transparent: true, depthWrite: false, opacity: 1.0,
+          }));
+          const spriteB = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: textures[1], transparent: true, depthWrite: false, opacity: 0.0,
+          }));
+          spriteA.scale.set(scale, scale, 1);
+          spriteB.scale.set(scale, scale, 1);
+          group.add(spriteA);
+          group.add(spriteB);
+
+          // Stagger crossfade timing deterministically from id hash
+          const stagger = (hashStr(t.id) % 1000) / 100;
+          const swapInterval = 8 + (hashStr(t.id + 's') % 200) / 100;
+
+          spiro = {
+            canvases, textures, spriteA, spriteB,
+            frameIdx: 0, nextFrameIdx: 1,
+            crossfadeT: -1,
+            nextSwapAt: stagger + swapInterval,
+            swapInterval,
+            live: null, liveTexture: null, liveSprite: null,
+            resolution, distanceTier: initialTier, dims: t.dimensions,
+          };
+        } else {
+          // Glowing dot fallback when baked cap is reached
+          const dc = document.createElement('canvas'); dc.width = 32; dc.height = 32;
+          const dctx = dc.getContext('2d')!;
+          const gr = dctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+          gr.addColorStop(0, `rgba(${er},${eg},${eb},1)`);
+          gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.5)`);
+          gr.addColorStop(1, 'rgba(0,0,0,0)');
+          dctx.fillStyle = gr; dctx.fillRect(0, 0, 32, 32);
+          const dot = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(dc), transparent: true, depthWrite: false,
+          }));
+          dot.scale.set(4, 4, 1);
+          group.add(dot);
         }
-
-        // Core glow sprite
-        const gc = document.createElement('canvas'); gc.width = 64; gc.height = 64;
-        const gx = gc.getContext('2d')!;
-        const col = new THREE.Color(color);
-        const gr = gx.createRadialGradient(32, 32, 0, 32, 32, 32);
-        gr.addColorStop(0, `rgba(${col.r * 255 | 0},${col.g * 255 | 0},${col.b * 255 | 0},0.9)`);
-        gr.addColorStop(0.3, `rgba(${col.r * 255 | 0},${col.g * 255 | 0},${col.b * 255 | 0},0.3)`);
-        gr.addColorStop(1, 'rgba(0,0,0,0)');
-        gx.fillStyle = gr; gx.fillRect(0, 0, 64, 64);
-        const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-          map: new THREE.CanvasTexture(gc), transparent: true, depthWrite: false,
-        }));
-        glowSprite.scale.set(6, 6, 1);
-        group.add(glowSprite);
 
         group.add(new THREE.PointLight(color, 0.8, 40));
 
-        // Invisible click sphere for raycasting
         const clickSphere = new THREE.Mesh(
-          new THREE.SphereGeometry(3, 8, 8),
+          new THREE.SphereGeometry(5, 8, 8),
           new THREE.MeshBasicMaterial({ visible: false }),
         );
         clickSphere.userData = { thoughtId: t.id, thoughtGroup: group };
@@ -307,6 +426,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           baseY: t.y,
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
+          spiro,
         };
 
         scene.add(group);
@@ -316,6 +436,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function destroyThought(id: string) {
         const group = thoughtGroups.get(id);
         if (!group) return;
+        const spiro = group.userData.spiro as StarSpiro | null;
+        if (spiro) {
+          if (spiro.live) spiro.live.stop();
+          spiro.textures.forEach(tx => tx.dispose());
+          spiro.liveTexture?.dispose();
+          (spiro.spriteA.material as THREE.SpriteMaterial).dispose();
+          (spiro.spriteB.material as THREE.SpriteMaterial).dispose();
+          if (spiro.liveSprite) (spiro.liveSprite.material as THREE.SpriteMaterial).dispose();
+          bakedStarCount--;
+        }
         scene.remove(group);
         group.children.forEach(child => {
           if (child instanceof THREE.Mesh) {
@@ -324,8 +454,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             else child.material.dispose();
           }
           if (child instanceof THREE.Sprite) {
-            (child.material as THREE.SpriteMaterial).map?.dispose();
-            child.material.dispose();
+            const isSpiroSprite = spiro && (
+              child === spiro.spriteA || child === spiro.spriteB || child === spiro.liveSprite
+            );
+            if (!isSpiroSprite) {
+              (child.material as THREE.SpriteMaterial).map?.dispose();
+              child.material.dispose();
+            }
           }
         });
         thoughtGroups.delete(id);
@@ -344,11 +479,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         const rand = seededRand(hashStr(b.id));
 
-        // Binary orbit — only assigned if neither star already orbits another
         if (!fromGroup.userData.orbit && !toGroup.userData.orbit) {
-          const orbitRadius = 8 + rand() * 4;   // 8–12 units
-          const period = 30 + rand() * 30;        // 30–60 s per revolution
-
+          const orbitRadius = 8 + rand() * 4;
+          const period = 30 + rand() * 30;
           const fromBase = fromGroup.userData.basePos as THREE.Vector3;
           const toBase   = toGroup.userData.basePos as THREE.Vector3;
           const center   = new THREE.Vector3(
@@ -356,12 +489,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             (fromBase.y + toBase.y) / 2,
             (fromBase.z + toBase.z) / 2,
           );
-
           fromGroup.userData.orbit = { center, radius: orbitRadius, period, phaseOffset: 0 };
           toGroup.userData.orbit   = { center, radius: orbitRadius, period, phaseOffset: Math.PI };
         }
 
-        // Bond line — dim average of both emotion colors
         const fromEI = fromGroup.userData.emotionIndex as number;
         const toEI   = toGroup.userData.emotionIndex as number;
         const [fr, fg, fb] = EMOTIONS[fromEI]?.rgb ?? [255, 255, 255];
@@ -375,11 +506,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const linePosArr = new Float32Array(6);
         const lineGeo = new THREE.BufferGeometry();
         lineGeo.setAttribute('position', new THREE.BufferAttribute(linePosArr, 3));
-
         const lineMat = new THREE.LineBasicMaterial({
           color: lineColor, transparent: true, opacity: 0.3, depthWrite: false,
         });
-
         const line = new THREE.Line(lineGeo, lineMat);
         scene.add(line);
         bondLines.set(b.id, { line, fromId: b.from_id, toId: b.to_id });
@@ -394,7 +523,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         bondLines.delete(id);
       }
 
-      // Expose to prop-sync effects and imperative handle
       addThoughtFnRef.current = createThought;
       removeThoughtFnRef.current = destroyThought;
       addBondFnRef.current = createBond;
@@ -426,7 +554,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
 
-      // Raycaster for thought clicks
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
       const onClickCanvas = (e: MouseEvent) => {
@@ -465,7 +592,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         skyMat.uniforms.uTime.value = time;
         skyDome.position.copy(camera.position);
-        stars.position.copy(camera.position);
+        bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
 
         const targetSpeed = keys['Space'] ? 25 : (clickBoostTime > 0 ? 18 : 4);
@@ -493,7 +620,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z + fwdZ * lookDist,
         ));
 
-        // Terrain snap
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
           lastSnapZ = Math.round(camera.position.z / 300) * 300;
@@ -503,8 +629,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           updateTerrainGeometry();
         }
 
-        // Animate thoughts — orbital or free-floating
+        // Animate thoughts
         thoughtGroups.forEach(g => {
+          const id = g.userData.id as string;
           const orbit = g.userData.orbit as { center: THREE.Vector3; radius: number; period: number; phaseOffset: number } | null;
           if (orbit) {
             const angle = (time / orbit.period) * Math.PI * 2 + orbit.phaseOffset;
@@ -515,12 +642,62 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
           }
           g.scale.setScalar(1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05);
-          g.children.forEach(child => {
-            if (child.userData.rx !== undefined) {
-              child.rotation.x += (child.userData.rx as number) * dt;
-              child.rotation.y += (child.userData.ry as number) * dt;
+
+          const spiro = g.userData.spiro as StarSpiro | null;
+          if (!spiro) return;
+
+          // Live animation: start/stop based on selection state
+          const shouldBeLive = id === activeStarRef.current || id === userStarRef.current;
+          if (shouldBeLive && !spiro.live) {
+            startLive(g, spiro);
+          } else if (!shouldBeLive && spiro.live) {
+            stopLive(g, spiro, time);
+          }
+
+          // Upload live canvas texture each frame
+          if (spiro.live && spiro.liveTexture) {
+            spiro.liveTexture.needsUpdate = true;
+          }
+
+          // Distance-based resolution swap
+          const cdx = g.position.x - camera.position.x;
+          const cdz = g.position.z - camera.position.z;
+          const distSq = cdx * cdx + cdz * cdz;
+          const newTier = distSq < 100 * 100 ? 0 : distSq < 200 * 200 ? 1 : 2;
+          if (newTier !== spiro.distanceTier) {
+            spiro.distanceTier = newTier;
+            if (!spiro.live) {
+              rebakeTextures(spiro, newTier === 0 ? 256 : 128);
             }
-          });
+          }
+
+          // Crossfade cycle — skip while live or when star is far (tier 2)
+          if (!spiro.live && newTier < 2) {
+            if (spiro.crossfadeT < 0 && time >= spiro.nextSwapAt) {
+              spiro.crossfadeT = 0;
+              spiro.nextFrameIdx = (spiro.frameIdx + 1) % 3;
+              const matB = spiro.spriteB.material as THREE.SpriteMaterial;
+              matB.map = spiro.textures[spiro.nextFrameIdx];
+              matB.needsUpdate = true;
+              matB.opacity = 0;
+            }
+            if (spiro.crossfadeT >= 0) {
+              spiro.crossfadeT += dt / CROSSFADE_DUR;
+              const t01 = Math.min(spiro.crossfadeT, 1.0);
+              (spiro.spriteA.material as THREE.SpriteMaterial).opacity = 1 - t01;
+              (spiro.spriteB.material as THREE.SpriteMaterial).opacity = t01;
+              if (spiro.crossfadeT >= 1.0) {
+                spiro.frameIdx = spiro.nextFrameIdx;
+                const matA = spiro.spriteA.material as THREE.SpriteMaterial;
+                matA.map = spiro.textures[spiro.frameIdx];
+                matA.opacity = 1.0;
+                matA.needsUpdate = true;
+                (spiro.spriteB.material as THREE.SpriteMaterial).opacity = 0.0;
+                spiro.crossfadeT = -1;
+                spiro.nextSwapAt = time + spiro.swapInterval;
+              }
+            }
+          }
         });
 
         // Update bond lines — endpoints + proximity brightness
@@ -528,18 +705,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const fromG = thoughtGroups.get(fromId);
           const toG   = thoughtGroups.get(toId);
           if (!fromG || !toG) return;
-
           const pos = line.geometry.attributes.position as THREE.BufferAttribute;
           pos.setXYZ(0, fromG.position.x, fromG.position.y, fromG.position.z);
           pos.setXYZ(1, toG.position.x,   toG.position.y,   toG.position.z);
           pos.needsUpdate = true;
-
-          // Proximity check: distance from camera to line midpoint
           const mx = (fromG.position.x + toG.position.x) / 2;
           const mz = (fromG.position.z + toG.position.z) / 2;
-          const dx = mx - camera.position.x;
-          const dz = mz - camera.position.z;
-          const nearby = (dx * dx + dz * dz) < 50 * 50;
+          const bdx = mx - camera.position.x;
+          const bdz = mz - camera.position.z;
+          const nearby = (bdx * bdx + bdz * bdz) < 50 * 50;
           const mat = line.material as THREE.LineBasicMaterial;
           mat.opacity += ((nearby ? 0.7 : 0.3) - mat.opacity) * dt * 3;
         });
@@ -548,9 +722,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         for (const cloud of clouds) {
           cloud.position.x += (cloud.userData.dx as number) * dt;
           cloud.position.z += (cloud.userData.dz as number) * dt;
-          const dx = cloud.position.x - camera.position.x;
-          const dz = cloud.position.z - camera.position.z;
-          if (dx * dx + dz * dz > 320 * 320) {
+          const cdx = cloud.position.x - camera.position.x;
+          const cdz = cloud.position.z - camera.position.z;
+          if (cdx * cdx + cdz * cdz > 320 * 320) {
             const a = Math.random() * Math.PI * 2;
             const d = 100 + Math.random() * 180;
             cloud.position.set(
