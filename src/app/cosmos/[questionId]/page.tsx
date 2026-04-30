@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
@@ -46,7 +47,6 @@ export default function CosmosPage() {
         }));
         setData({ ...d, stars });
 
-        // Restore any pending local bond for this user
         if (myShortcode) {
           const myStarId = stars.find(s => s.shortcode === myShortcode)?.id;
           if (myStarId) {
@@ -95,7 +95,6 @@ export default function CosmosPage() {
     return m;
   }, [allStars]);
 
-  // Compute userStarId before any hooks that depend on it
   const userStarId = useMemo(() => {
     if (!myShortcode) return null;
     return data?.stars.find(s => s.shortcode === myShortcode)?.id ?? null;
@@ -117,10 +116,12 @@ export default function CosmosPage() {
     if (!selected) return [];
     return bonds
       .filter(b => b.from_id === selected || b.to_id === selected)
-      .map(b => ({ reason: b.reason }));
+      .map(b => ({
+        reason: b.reason,
+        relatedStarId: b.from_id === selected ? b.to_id : b.from_id,
+      }));
   }, [selected, bonds]);
 
-  // Read localStorage for pending bond (no side effects — just read in render)
   const userHasOutgoingBond = useMemo(() => {
     if (!userStarId) return false;
     if (bonds.some(b => b.from_id === userStarId)) return true;
@@ -146,13 +147,11 @@ export default function CosmosPage() {
       reason: savedReason,
     };
 
-    // Optimistic update first so the UI always responds
     setLocalBonds(b => [...b, newBond]);
     setReason('');
     setConnecting(false);
     setConnectConfirmed(true);
 
-    // Persist in background
     try {
       const res = await fetch('/api/connect', {
         method: 'POST',
@@ -209,9 +208,12 @@ export default function CosmosPage() {
           <div style={{
             width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.34em', textTransform: 'uppercase', color: BTW.textDim }}>
+            <Link href="/" style={{
+              fontSize: 12, letterSpacing: '0.34em', textTransform: 'uppercase',
+              color: BTW.textDim, textDecoration: 'none', pointerEvents: 'auto',
+            }}>
               The Between
-            </div>
+            </Link>
             {data && (
               <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em' }}>
                 {data.stars.length} stars &middot; {bonds.length} bonds
@@ -221,13 +223,14 @@ export default function CosmosPage() {
           {data?.question?.text && (
             <div style={{
               fontFamily: SERIF, fontStyle: 'italic',
-              fontSize: 'clamp(14px, 2vw, 17px)',
-              color: BTW.textSec,
+              fontSize: 'clamp(38px, 5.5vw, 54px)',
+              color: BTW.textPri,
               letterSpacing: '0.01em',
               textAlign: 'center',
-              maxWidth: 700,
-              lineHeight: 1.4,
-              opacity: 0.9,
+              maxWidth: 900,
+              lineHeight: 1.2,
+              opacity: 0.09,
+              pointerEvents: 'none',
             }}>
               {data.question.text}
             </div>
@@ -247,6 +250,29 @@ export default function CosmosPage() {
           </div>
         )}
 
+        {/* Turn-right button */}
+        <button
+          onClick={() => sceneRef.current?.turnRight()}
+          style={{
+            position: 'absolute', right: 24, bottom: 24,
+            background: 'rgba(20,14,40,0.6)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            border: `1px solid ${BTW.textPri}33`,
+            color: BTW.textDim,
+            width: 40, height: 40,
+            borderRadius: '50%',
+            fontSize: 18,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'auto',
+            zIndex: 5,
+          }}
+          title="Turn right 90°"
+        >
+          ↻
+        </button>
+
         {/* Star detail panel */}
         {selectedStar && !connecting && !connectConfirmed && (
           <StarDetail
@@ -255,6 +281,7 @@ export default function CosmosPage() {
             userHasOutgoingBond={userHasOutgoingBond}
             onConnect={() => setConnecting(true)}
             connections={selectedConnections}
+            onConnectionClick={handleThoughtClick}
           />
         )}
 
@@ -279,11 +306,8 @@ export default function CosmosPage() {
               animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
             }}
           >
-            <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4, marginBottom: 10 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
-            </div>
-            <div style={{ fontSize: 13, color: BTW.textSec, letterSpacing: '0.08em' }}>
-              Awaiting the curator.
             </div>
             <button
               onClick={clearSelection}
