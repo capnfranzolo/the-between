@@ -103,15 +103,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const TERRAIN_BRIGHT = 1.00;
 
     // Tunable at runtime
-    const [dbgTerrainGlow, setDbgTerrainGlow] = useState(0.30);
+    const [dbgTerrainGlow, setDbgTerrainGlow] = useState(0.46);
     const [dbgStarDensity, setDbgStarDensity] = useState(0.70);
-    const [dbgStarSpeed,   setDbgStarSpeed]   = useState(1.00);
-    const dbgTerrainGlowRef = useRef(0.30);
+    const [dbgStarSpeed,   setDbgStarSpeed]   = useState(0.50);
+    const [dbgStarFloor,   setDbgStarFloor]   = useState(0.60);
+    const dbgTerrainGlowRef = useRef(0.46);
     const dbgStarDensityRef = useRef(0.70);
-    const dbgStarSpeedRef   = useRef(1.00);
+    const dbgStarSpeedRef   = useRef(0.50);
+    const dbgStarFloorRef   = useRef(0.60);
     useEffect(() => { dbgTerrainGlowRef.current = dbgTerrainGlow; }, [dbgTerrainGlow]);
     useEffect(() => { dbgStarDensityRef.current = dbgStarDensity; }, [dbgStarDensity]);
     useEffect(() => { dbgStarSpeedRef.current   = dbgStarSpeed;   }, [dbgStarSpeed]);
+    useEffect(() => { dbgStarFloorRef.current   = dbgStarFloor;   }, [dbgStarFloor]);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -177,13 +180,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           void main() {
             vec3 dir = normalize(vWorldDir);
 
-            // Elevation-driven t: uGradSteep controls band width, uGradLift its height
+            // Elevation-driven base gradient
             float t = clamp(dir.y * uGradSteep + uGradLift, 0.0, 1.0);
 
-            // Subtle azimuthal nudge near horizon in sun direction
+            // Concentrated sun glow: cubed dot product focuses warmth in a tight cone
+            // ahead of the camera; pow(3) means 45° away gets only 35% of the effect
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
             float horizBand = clamp(uGradLift - dir.y, 0.0, uGradLift) / max(uGradLift, 0.001);
-            t = clamp(t - sunAz * horizBand * 0.08, 0.0, 1.0);
+            float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
+            t = clamp(t - sunInfluence * 0.32, 0.0, 1.0);
 
             // Sample baked gradient texture — smooth, no GLSL banding
             vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
@@ -245,7 +250,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const starMat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
-        uniforms: { uTime: { value: 0 }, uStarDensity: { value: 0.70 }, uStarSpeed: { value: 1.0 } },
+        uniforms: {
+          uTime: { value: 0 },
+          uStarDensity: { value: 0.70 },
+          uStarSpeed:   { value: 0.50 },
+          uStarFloor:   { value: 0.60 },
+        },
         vertexShader: `
           attribute float size;
           varying float vSize;
@@ -260,12 +270,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform float uTime;
           uniform float uStarDensity;
           uniform float uStarSpeed;
+          uniform float uStarFloor;
           varying float vSize;
           void main() {
             float d = length(gl_PointCoord - vec2(0.5));
             if (d > 0.5) discard;
             float alpha = smoothstep(0.5, 0.0, d) * uStarDensity;
-            alpha *= 0.72 + 0.28 * sin(uTime * uStarSpeed * (0.08 + vSize * 0.025) + vSize * 10.0);
+            // Base rate ~1 rad/s so speed=1 gives ~6 second cycle; speed=3 gives ~2 seconds
+            float flicker = uStarFloor + (1.0 - uStarFloor) *
+              (0.5 + 0.5 * sin(uTime * uStarSpeed * (1.0 + vSize * 0.1) + vSize * 10.0));
+            alpha *= flicker;
             gl_FragColor = vec4(0.92, 0.88, 1.0, alpha);
           }
         `,
@@ -654,6 +668,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
+      let freeTargetY = 100; // camera holds this height when no star is selected
 
       function animate() {
         if (disposed) return;
@@ -662,9 +677,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const time = clock.getElapsedTime();
 
         skyMat.uniforms.uTime.value = time;
-        terrainMat.uniforms.uTerrainGlow.value    = dbgTerrainGlowRef.current;
-        starMat.uniforms.uStarDensity.value        = dbgStarDensityRef.current;
-        starMat.uniforms.uStarSpeed.value          = dbgStarSpeedRef.current;
+        terrainMat.uniforms.uTerrainGlow.value  = dbgTerrainGlowRef.current;
+        starMat.uniforms.uStarDensity.value     = dbgStarDensityRef.current;
+        starMat.uniforms.uStarSpeed.value       = dbgStarSpeedRef.current;
+        starMat.uniforms.uStarFloor.value       = dbgStarFloorRef.current;
         renderer.toneMappingExposure = EXPOSURE;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
@@ -675,7 +691,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Activate/deactivate high-res live texture as active star changes
         const currentActiveStar = activeStarRef.current;
         if (currentActiveStar !== prevActiveStar) {
-          if (prevActiveStar) deactivateLive(prevActiveStar);
+          if (prevActiveStar) {
+            deactivateLive(prevActiveStar);
+            if (!currentActiveStar) {
+              // Deselected — freeze camera at current height so it doesn't sink back to floor
+              freeTargetY = camera.position.y;
+            }
+          }
           if (currentActiveStar) activateLive(currentActiveStar);
           prevActiveStar = currentActiveStar;
         }
@@ -726,7 +748,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const ag = thoughtGroups.get(activeStarRef.current);
           camTargetY = ag ? Math.max(ag.position.y - 10, terrainFloor) : terrainFloor;
         } else {
-          camTargetY = terrainFloor;
+          // Hold the height we had when the star was deselected; terrain floor is the only floor
+          camTargetY = Math.max(freeTargetY, terrainFloor);
         }
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
 
@@ -930,9 +953,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }}>
           <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.5, textTransform: 'uppercase' }}>debug</div>
           {([
-            ['Terrain glow', dbgTerrainGlow, setDbgTerrainGlow, 0.00, 1.0, 0.02],
-            ['Stars',        dbgStarDensity, setDbgStarDensity, 0.10, 2.0, 0.05],
-            ['Twinkle spd',  dbgStarSpeed,   setDbgStarSpeed,   0.05, 8.0, 0.05],
+            ['Terrain glow', dbgTerrainGlow, setDbgTerrainGlow, 0.00, 1.00, 0.02],
+            ['Stars',        dbgStarDensity, setDbgStarDensity, 0.10, 2.00, 0.05],
+            ['Twinkle spd',  dbgStarSpeed,   setDbgStarSpeed,   0.05, 5.00, 0.05],
+            ['Star floor',   dbgStarFloor,   setDbgStarFloor,   0.00, 1.00, 0.02],
           ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
