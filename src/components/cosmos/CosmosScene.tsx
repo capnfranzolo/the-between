@@ -21,6 +21,7 @@ export interface BondData {
 
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
+  turnLeft: () => void;
   turnRight: () => void;
 }
 
@@ -80,6 +81,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
     const turnRightFnRef = useRef<(() => void) | null>(null);
+    const turnLeftFnRef  = useRef<(() => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -116,6 +118,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
+      turnLeft:  () => turnLeftFnRef.current?.(),
       turnRight: () => turnRightFnRef.current?.(),
     }), []);
 
@@ -595,8 +598,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         flyStarTargetY = Math.max(starPos.y - 14, 100);
       };
 
+      turnLeftFnRef.current = () => {
+        targetHeading = heading - Math.PI / 6;
+        flyTargetXZ = null;
+      };
+
       turnRightFnRef.current = () => {
-        targetHeading = heading + Math.PI / 2;
+        targetHeading = heading + Math.PI / 6;
         flyTargetXZ = null;
       };
 
@@ -610,16 +618,24 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
       const onClickCanvas = (e: MouseEvent) => {
-        mouse.x = (e.clientX / container.clientWidth) * 2 - 1;
+        const relX = e.clientX / container.clientWidth;
+        mouse.x = relX * 2 - 1;
         mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
         raycaster.setFromCamera(mouse, camera);
         const hits = raycaster.intersectObjects(thoughtMeshes);
         if (hits.length > 0) {
+          // Star click always takes priority over edge rotation zones
           const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
           const dx = thoughtGroup.position.x - camera.position.x;
           const dz = thoughtGroup.position.z - camera.position.z;
           targetHeading = Math.atan2(dx, -dz);
           onClickRef.current?.(thoughtId);
+        } else if (relX < 0.05) {
+          targetHeading = heading - Math.PI / 6;
+          flyTargetXZ = null;
+        } else if (relX > 0.95) {
+          targetHeading = heading + Math.PI / 6;
+          flyTargetXZ = null;
         } else {
           onBgClickRef.current?.();
         }
@@ -819,6 +835,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
+        turnLeftFnRef.current  = null;
         turnRightFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
