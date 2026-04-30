@@ -65,6 +65,8 @@ function hashStr(s: string): number {
 }
 
 const MAX_BAKED = 50;
+const LIVE_SIZE = 512;  // hi-res canvas for the selected/user star
+const SELECTED_SCALE_MULT = 1.4; // sprite scale boost when star is selected
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
   function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, onThoughtClick, onBackgroundClick }, ref) {
@@ -347,6 +349,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function destroyThought(id: string) {
         const group = thoughtGroups.get(id);
         if (!group) return;
+        // Dispose live texture first if this star is currently live
+        const live = liveStars.get(id);
+        if (live) {
+          live.texture.dispose();
+          liveStars.delete(id);
+          if (flyStarId === id) { flyStarId = null; flyStartDist = 0; }
+        }
         const spiro = group.userData.spiro as StarSpiro | null;
         if (spiro) {
           spiro.texture.dispose();
@@ -434,16 +443,62 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       addBondFnRef.current = createBond;
       removeBondFnRef.current = destroyBond;
 
+      // ─── LIVE TEXTURE MANAGEMENT ───
+      // At most 2 live hi-res canvases: selected star + user's own star.
+      // All other stars use baked static textures updated at ~30fps.
+      interface LiveEntry { canvas: HTMLCanvasElement; inst: SpirographInstance; texture: THREE.CanvasTexture }
+      const liveStars = new Map<string, LiveEntry>();
+
+      function activateLive(id: string, time: number) {
+        if (liveStars.has(id)) return;
+        const g = thoughtGroups.get(id);
+        if (!g) return;
+        const spiro = g.userData.spiro as StarSpiro | null;
+        if (!spiro) return;
+        const canvas = document.createElement('canvas');
+        const inst = createSpirograph(canvas, spiro.dims, { size: LIVE_SIZE, dpr: 1 });
+        inst.renderStatic(time + spiro.timeOffset);
+        const texture = new THREE.CanvasTexture(canvas);
+        const mat = spiro.sprite.material as THREE.SpriteMaterial;
+        mat.map = texture;
+        mat.needsUpdate = true;
+        liveStars.set(id, { canvas, inst, texture });
+      }
+
+      function deactivateLive(id: string, time: number) {
+        const live = liveStars.get(id);
+        if (!live) return;
+        const g = thoughtGroups.get(id);
+        if (g) {
+          const spiro = g.userData.spiro as StarSpiro | null;
+          if (spiro) {
+            spiro.inst.renderStatic(time + spiro.timeOffset);
+            spiro.texture.needsUpdate = true;
+            const mat = spiro.sprite.material as THREE.SpriteMaterial;
+            mat.map = spiro.texture;
+            mat.needsUpdate = true;
+            spiro.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+          }
+        }
+        live.texture.dispose();
+        liveStars.delete(id);
+      }
+
       // ─── CAMERA STATE ───
       let heading = 0;
       let targetHeading: number | null = null;
       let flyTargetPos: THREE.Vector3 | null = null;
+      let flyStarId: string | null = null;  // star we're flying toward
+      let flyStartDist = 0;                 // total distance at click time
       let speed = 4;
       let clickBoostTime = 0;
       camera.position.set(0, 80, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
+      // Track prev active/user star to detect changes in the animation loop
+      let prevActiveStar: string | null = null;
+      let prevUserStar: string | null = null;
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
@@ -452,6 +507,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dz = g.position.z - camera.position.z;
         targetHeading = Math.atan2(dx, -dz);
         const dist = Math.sqrt(dx * dx + dz * dz);
+        flyStarId = id;
+        flyStartDist = dist;
         const stopDist = 22;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
@@ -461,7 +518,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             camera.position.z + dz * t,
           );
         } else {
+          // Already close — activate immediately
           flyTargetPos = null;
+          flyStartDist = 0;
         }
       };
 
@@ -530,6 +589,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           if (Math.abs(diff) < 0.05) targetHeading = null;
         }
 
+        // ── Live texture: sync user star and detect active star changes ──
+        const curUser = userStarRef.current;
+        const curActive = activeStarRef.current;
+        if (curUser !== prevUserStar) {
+          if (prevUserStar && liveStars.has(prevUserStar) && prevUserStar !== curActive) {
+            deactivateLive(prevUserStar, time);
+          }
+          if (curUser && !liveStars.has(curUser)) {
+            activateLive(curUser, time);
+          }
+          prevUserStar = curUser;
+        }
+        if (curActive !== prevActiveStar) {
+          if (prevActiveStar && liveStars.has(prevActiveStar) && prevActiveStar !== curUser) {
+            deactivateLive(prevActiveStar, time);
+          }
+          if (!curActive) {
+            flyStarId = null;
+            flyStartDist = 0;
+          }
+          prevActiveStar = curActive;
+        }
+
         const fwdX = Math.sin(heading);
         const fwdZ = -Math.cos(heading);
         if (flyTargetPos) {
@@ -538,10 +620,30 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
           if (fdist < 3) {
             flyTargetPos = null;
+            // Activate at arrival if not yet live (e.g. short distances)
+            if (flyStarId && !liveStars.has(flyStarId)) {
+              activateLive(flyStarId, time);
+              const g = thoughtGroups.get(flyStarId);
+              if (g) {
+                const s = g.userData.spiro as StarSpiro | null;
+                if (s) s.sprite.scale.set(SPRITE_SCALE * SELECTED_SCALE_MULT, SPRITE_SCALE * SELECTED_SCALE_MULT, 1);
+              }
+            }
+            flyStartDist = 0;
           } else {
             const flyAmt = Math.min(fdist, 90 * dt);
             camera.position.x += (fdx / fdist) * flyAmt;
             camera.position.z += (fdz / fdist) * flyAmt;
+            // At 50% of the original distance, swap to hi-res
+            if (flyStarId && flyStartDist > 0 && fdist < flyStartDist * 0.5 && !liveStars.has(flyStarId)) {
+              activateLive(flyStarId, time);
+              const g = thoughtGroups.get(flyStarId);
+              if (g) {
+                const s = g.userData.spiro as StarSpiro | null;
+                if (s) s.sprite.scale.set(SPRITE_SCALE * SELECTED_SCALE_MULT, SPRITE_SCALE * SELECTED_SCALE_MULT, 1);
+              }
+              flyStartDist = 0;
+            }
           }
         } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
@@ -593,13 +695,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const spiro = g.userData.spiro as StarSpiro | null;
           if (!spiro) return;
 
-          // All stars animate continuously. Active/user stars update every frame;
-          // others update every other frame (~30fps) to spread GPU texture uploads.
-          const isActive = id === activeStarRef.current || id === userStarRef.current;
-          spiro.frameCount++;
-          if (isActive || spiro.frameCount % 2 === 0) {
-            spiro.inst.renderStatic(time + spiro.timeOffset);
-            spiro.texture.needsUpdate = true;
+          const live = liveStars.get(id);
+          if (live) {
+            // Hi-res live canvas — render every frame, no throttle
+            live.inst.renderStatic(time + spiro.timeOffset);
+            live.texture.needsUpdate = true;
+          } else {
+            // Baked canvas — active/user stars every frame, others at ~30fps
+            const isSpecial = id === activeStarRef.current || id === userStarRef.current;
+            spiro.frameCount++;
+            if (isSpecial || spiro.frameCount % 2 === 0) {
+              spiro.inst.renderStatic(time + spiro.timeOffset);
+              spiro.texture.needsUpdate = true;
+            }
           }
         });
 
@@ -656,6 +764,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
 
+        liveStars.forEach(live => live.texture.dispose());
+        liveStars.clear();
         bondLines.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
 
