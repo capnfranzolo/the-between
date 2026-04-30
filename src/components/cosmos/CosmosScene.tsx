@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react';
+import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
@@ -95,26 +95,22 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
-    // Baked-in sky/terrain values (dialled in)
+    // Baked-in sky/terrain values
     const EXPOSURE    = 0.90;
     const SKY_BRIGHT  = 1.10;
     const GRAD_STEEP  = 1.30;
     const GRAD_LIFT   = 0.18;
     const TERRAIN_BRIGHT = 1.00;
+    // Standard cruising altitude — camera returns here after deselecting a star
+    const BASE_CAM_Y  = 100;
 
-    // Tunable at runtime
-    const [dbgTerrainGlow, setDbgTerrainGlow] = useState(0.46);
-    const [dbgStarDensity, setDbgStarDensity] = useState(0.70);
-    const [dbgStarSpeed,   setDbgStarSpeed]   = useState(0.50);
-    const [dbgStarFloor,   setDbgStarFloor]   = useState(0.60);
+    // Baked star/terrain tweaks (no runtime sliders)
     const dbgTerrainGlowRef = useRef(0.46);
-    const dbgStarDensityRef = useRef(0.70);
+    const dbgStarDensityRef = useRef(0.80);
     const dbgStarSpeedRef   = useRef(0.50);
-    const dbgStarFloorRef   = useRef(0.60);
-    useEffect(() => { dbgTerrainGlowRef.current = dbgTerrainGlow; }, [dbgTerrainGlow]);
-    useEffect(() => { dbgStarDensityRef.current = dbgStarDensity; }, [dbgStarDensity]);
-    useEffect(() => { dbgStarSpeedRef.current   = dbgStarSpeed;   }, [dbgStarSpeed]);
-    useEffect(() => { dbgStarFloorRef.current   = dbgStarFloor;   }, [dbgStarFloor]);
+    const dbgStarFloorRef   = useRef(0.65);
+    // Live camera readout — updated directly from animate loop, no React re-renders
+    const camDisplayRef = useRef<HTMLPreElement>(null);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -209,19 +205,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         gc.width = 256; gc.height = 1;
         const gx = gc.getContext('2d')!;
         const grd = gx.createLinearGradient(0, 0, 256, 0);
-        // t=0 is below-horizon (mostly blocked by terrain), t=1 is zenith.
-        // Matches the comp: dark space-blue sky, narrow dusty-rose horizon strip.
-        grd.addColorStop(0.000, '#5A2410'); // dark muted ember (deep below horizon)
-        grd.addColorStop(0.055, '#9A4828'); // muted rust-amber  (narrow sun-glow zone)
-        grd.addColorStop(0.120, '#8A4448'); // warm rose-rust
-        grd.addColorStop(0.200, '#703C60'); // dusty rose-purple (visible horizon strip)
-        grd.addColorStop(0.300, '#562C70'); // mauve-purple
-        grd.addColorStop(0.420, '#3C1A60'); // deep purple
-        grd.addColorStop(0.540, '#281050'); // dark purple
-        grd.addColorStop(0.650, '#1C0C3C'); // very dark blue-purple
-        grd.addColorStop(0.760, '#130828'); // near void
-        grd.addColorStop(0.870, '#0C0620'); // space
-        grd.addColorStop(1.000, '#060412'); // void
+        // t=0 is deep below horizon (blocked by terrain); t=1 is zenith.
+        // Original gold palette, but now with corrected lift=0.18 so the amber
+        // only shows near the actual sun-direction horizon, not flooding the sky.
+        grd.addColorStop(0.000, '#D09038'); // amber-gold  (deep below horizon, mostly hidden)
+        grd.addColorStop(0.055, '#C07840'); // amber
+        grd.addColorStop(0.110, '#AE6450'); // amber-peach
+        grd.addColorStop(0.185, '#9A5460'); // peach-rose
+        grd.addColorStop(0.280, '#804070'); // mauve-pink
+        grd.addColorStop(0.390, '#622C7A'); // warm purple
+        grd.addColorStop(0.510, '#481E70'); // purple
+        grd.addColorStop(0.630, '#321460'); // deep blue-purple
+        grd.addColorStop(0.730, '#241048'); // dark blue
+        grd.addColorStop(0.830, '#1A0C38'); // space blue
+        grd.addColorStop(0.920, '#0E0828'); // deep space
+        grd.addColorStop(1.000, '#080618'); // near-black
         gx.fillStyle = grd;
         gx.fillRect(0, 0, 256, 1);
         const skyGradTex = new THREE.CanvasTexture(gc);
@@ -586,12 +584,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // Initial heading toward SUN_DIRECTION (sunset straight ahead)
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let targetHeading: number | null = null;
+      let pitchTarget: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
-      let flyStarTargetY = 90; // camera Y to aim for during flyTo
-      let camTargetY = 120;
+      let flyStarTargetY = BASE_CAM_Y;
+      let camTargetY = BASE_CAM_Y;
       let speed = 4;
-      let pitch = 0.05; // radians; slight upward tilt to show more sky
-      camera.position.set(0, 120, 0);
+      let pitch = 0.05;
+      camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
@@ -639,17 +638,22 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const mouse = new THREE.Vector2();
       const onClickCanvas = (e: MouseEvent) => {
         const relX = e.clientX / container.clientWidth;
+        const relY = e.clientY / container.clientHeight;
         mouse.x = relX * 2 - 1;
-        mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
+        mouse.y = -(relY) * 2 + 1;
         raycaster.setFromCamera(mouse, camera);
         const hits = raycaster.intersectObjects(thoughtMeshes);
         if (hits.length > 0) {
-          // Star click always takes priority over edge rotation zones
+          // Stars always win over all edge zones
           const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
           const dx = thoughtGroup.position.x - camera.position.x;
           const dz = thoughtGroup.position.z - camera.position.z;
           targetHeading = Math.atan2(dx, -dz);
           onClickRef.current?.(thoughtId);
+        } else if (relY < 0.05) {
+          pitchTarget = Math.min(pitch + Math.PI / 8, 0.70);
+        } else if (relY > 0.95) {
+          pitchTarget = Math.max(pitch - Math.PI / 8, -0.40);
         } else if (relX < 0.05) {
           targetHeading = heading - Math.PI / 6;
           flyTargetXZ = null;
@@ -672,7 +676,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
-      let freeTargetY = 120; // camera holds this height when no star is selected
+      let freeTargetY = BASE_CAM_Y;
 
       function animate() {
         if (disposed) return;
@@ -698,8 +702,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           if (prevActiveStar) {
             deactivateLive(prevActiveStar);
             if (!currentActiveStar) {
-              // Deselected — freeze camera at current height so it doesn't sink back to floor
-              freeTargetY = camera.position.y;
+              // Deselected — float back to standard cruising altitude
+              freeTargetY = BASE_CAM_Y;
             }
           }
           if (currentActiveStar) activateLive(currentActiveStar);
@@ -744,15 +748,20 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z += fwdZ * speed * dt;
         }
 
-        // Camera Y — smooth lerp; tracks terrain floor in free mode, star approach Y in flyTo
-        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 60, 110);
+        // Camera Y — standard altitude is BASE_CAM_Y; descend only for stars below it
+        const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 45, 90);
         if (flyTargetXZ) {
           camTargetY = Math.max(flyStarTargetY, terrainFloor);
         } else if (activeStarRef.current) {
           const ag = thoughtGroups.get(activeStarRef.current);
-          camTargetY = ag ? Math.max(ag.position.y - 10, terrainFloor) : terrainFloor;
+          if (ag) {
+            // Descend toward stars that sit below standard altitude; for stars above, stay at BASE
+            const starY = ag.position.y - 10;
+            camTargetY = Math.max(starY < BASE_CAM_Y ? starY : BASE_CAM_Y, terrainFloor);
+          } else {
+            camTargetY = Math.max(BASE_CAM_Y, terrainFloor);
+          }
         } else {
-          // Hold the height we had when the star was deselected; terrain floor is the only floor
           camTargetY = Math.max(freeTargetY, terrainFloor);
         }
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
@@ -769,7 +778,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
           }
         } else {
-          pitch += (0.05 - pitch) * Math.min(dt * 1.5, 1);
+          const restP = pitchTarget !== null ? pitchTarget : 0.05;
+          pitch += (restP - pitch) * Math.min(dt * 1.5, 1);
+          if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
+        }
+
+        // Live camera readout — direct DOM write, no React re-renders
+        if (camDisplayRef.current) {
+          const hdg = (((heading * 180 / Math.PI) % 360) + 360) % 360;
+          camDisplayRef.current.textContent =
+            `x ${Math.round(camera.position.x).toString().padStart(6)}  ` +
+            `y ${Math.round(camera.position.y).toString().padStart(5)}  ` +
+            `z ${Math.round(camera.position.z).toString().padStart(6)}\n` +
+            `hdg ${hdg.toFixed(1).padStart(6)}°   pitch ${(pitch * 180 / Math.PI).toFixed(1).padStart(5)}°`;
         }
         const cosP = Math.cos(pitch);
         const sinP = Math.sin(pitch);
@@ -945,37 +966,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     return (
       <>
         <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
-        <div style={{
-          position: 'fixed', bottom: 24, left: 24, zIndex: 20,
-          background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 12, padding: '14px 18px',
-          fontFamily: 'ui-monospace, monospace', fontSize: 12,
-          color: 'rgba(255,255,255,0.8)', minWidth: 220,
-          display: 'flex', flexDirection: 'column', gap: 10,
-          pointerEvents: 'auto',
-        }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.5, textTransform: 'uppercase' }}>debug</div>
-          {([
-            ['Terrain glow', dbgTerrainGlow, setDbgTerrainGlow, 0.00, 1.00, 0.02],
-            ['Stars',        dbgStarDensity, setDbgStarDensity, 0.10, 2.00, 0.05],
-            ['Twinkle spd',  dbgStarSpeed,   setDbgStarSpeed,   0.05, 5.00, 0.05],
-            ['Star floor',   dbgStarFloor,   setDbgStarFloor,   0.00, 1.00, 0.02],
-          ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
-            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{label}</span>
-                <span style={{ color: '#a0e0ff' }}>{val.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={min} max={max} step={step}
-                value={val}
-                onChange={e => set(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: '#7060c0' }}
-              />
-            </div>
-          ))}
-        </div>
+        <pre ref={camDisplayRef} style={{
+          position: 'fixed', bottom: 20, left: 20, zIndex: 20,
+          margin: 0, padding: '10px 14px',
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+          border: '1px solid rgba(255,255,255,0.09)',
+          borderRadius: 10,
+          fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.6,
+          color: 'rgba(255,255,255,0.55)',
+          pointerEvents: 'none',
+          userSelect: 'none',
+          whiteSpace: 'pre',
+        }} />
       </>
     );
   },

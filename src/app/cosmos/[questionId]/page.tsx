@@ -239,7 +239,7 @@ export default function CosmosPage() {
               textAlign: 'center',
               maxWidth: 900,
               lineHeight: 1.2,
-              opacity: 0.09,
+              opacity: 0.20,
               pointerEvents: 'none',
             }}>
               {data.question.text}
@@ -260,7 +260,7 @@ export default function CosmosPage() {
           </div>
         )}
 
-        {/* Left / right edge rotation zones — pointer-events none; canvas handles actual click */}
+        {/* Edge hotspot indicators — pointer-events none; canvas handles actual click */}
         <div style={{
           position: 'absolute', left: 0, top: 0, width: '5%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -274,6 +274,20 @@ export default function CosmosPage() {
           pointerEvents: 'none', zIndex: 2,
         }}>
           <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>›</span>
+        </div>
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '5%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>∧</span>
+        </div>
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: '5%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', zIndex: 2,
+        }}>
+          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>∨</span>
         </div>
 
         {/* Star detail panel */}
