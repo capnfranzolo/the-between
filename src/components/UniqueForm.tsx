@@ -71,7 +71,7 @@ export default function UniqueForm({ shortcode }: UniqueFormProps) {
         letterSpacing: '0.04em',
       }}>
         <span style={{ opacity: text.length ? 1 : 0, transition: 'opacity .3s' }}>
-          {tooLong ? 'a little shorter' : 'optional, but specific helps'}
+          {tooLong ? 'a little shorter' : 'optional, anonymous, simple'}
         </span>
         <span>{text.length} / {MAX_UNIQUE_LENGTH}</span>
       </div>

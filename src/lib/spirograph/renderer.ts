@@ -99,13 +99,13 @@ export interface SpirographInstance {
 // ═══════════════════════════════════════════════════════
 
 export const EMOTIONS: EmotionDef[] = [
-  { name: 'Anger / Passion',      rgb: [240, 144, 154] },  // 0  #F0909A
-  { name: 'Joy / Delight',        rgb: [240, 176, 144] },  // 1  #F0B090
-  { name: 'Hope / Anticipation',  rgb: [240, 216, 160] },  // 2  #F0D8A0
-  { name: 'Peace / Acceptance',   rgb: [136, 216, 184] },  // 3  #88D8B8
-  { name: 'Sadness / Longing',    rgb: [144, 184, 232] },  // 4  #90B8E8
-  { name: 'Fear / Awe',           rgb: [168, 152, 216] },  // 5  #A898D8
-  { name: 'Love / Tenderness',    rgb: [200, 152, 216] },  // 6  #C898D8
+  { name: 'Anger / Passion',      rgb: [232,  80, 106] },  // 0  #E8506A
+  { name: 'Joy / Delight',        rgb: [232, 132,  90] },  // 1  #E8845A
+  { name: 'Hope / Anticipation',  rgb: [232, 200, 120] },  // 2  #E8C878
+  { name: 'Peace / Acceptance',   rgb: [ 90, 184, 154] },  // 3  #5AB89A
+  { name: 'Sadness / Longing',    rgb: [ 90, 138, 224] },  // 4  #5A8AE0
+  { name: 'Fear / Awe',           rgb: [123, 104, 200] },  // 5  #7B68C8
+  { name: 'Love / Tenderness',    rgb: [176, 104, 200] },  // 6  #B068C8
 ];
 
 export const CURVE_TYPES: CurveType[] = [
