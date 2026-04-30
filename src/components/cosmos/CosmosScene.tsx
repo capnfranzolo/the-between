@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
@@ -91,6 +91,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
+    const [dbgExposure, setDbgExposure] = useState(0.75);
+    const [dbgSkyBright, setDbgSkyBright] = useState(1.0);
+    const [dbgAmbient, setDbgAmbient] = useState(0.8);
+    const dbgExposureRef = useRef(0.75);
+    const dbgSkyBrightRef = useRef(1.0);
+    const dbgAmbientRef = useRef(0.8);
+    useEffect(() => { dbgExposureRef.current = dbgExposure; }, [dbgExposure]);
+    useEffect(() => { dbgSkyBrightRef.current = dbgSkyBright; }, [dbgSkyBright]);
+    useEffect(() => { dbgAmbientRef.current = dbgAmbient; }, [dbgAmbient]);
+
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
     const onBgClickRef = useRef(onBackgroundClick);
@@ -116,7 +126,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       container.appendChild(renderer.domElement);
 
       // ─── LIGHTING ───
-      scene.add(new THREE.AmbientLight(0x6B4D8A, 0.8));
+      const ambientLight = new THREE.AmbientLight(0x6B4D8A, 0.8);
+      scene.add(ambientLight);
       const dirLight = new THREE.DirectionalLight(0xF0C080, 0.4);
       dirLight.position.set(0, 5, -200);
       scene.add(dirLight);
@@ -126,7 +137,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const skyGeo = new THREE.SphereGeometry(900, 64, 64);
       const skyMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
-        uniforms: { uTime: { value: 0 }, uSunDir: { value: SUN_DIRECTION } },
+        uniforms: { uTime: { value: 0 }, uSunDir: { value: SUN_DIRECTION }, uBrightness: { value: 1.0 } },
         vertexShader: `
           varying vec3 vWorldDir;
           void main() {
@@ -137,6 +148,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         fragmentShader: `
           uniform vec3  uSunDir;
           uniform float uTime;
+          uniform float uBrightness;
           varying vec3  vWorldDir;
 
           vec3 twiGrad(float t) {
@@ -173,7 +185,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             color += vec3(0.18, 0.08, 0.22) * haze * 3.0;
             // Very gentle breathing pulse
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
-            gl_FragColor = vec4(color, 1.0);
+            gl_FragColor = vec4(color * uBrightness, 1.0);
           }
         `,
       });
@@ -605,6 +617,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const time = clock.getElapsedTime();
 
         skyMat.uniforms.uTime.value = time;
+        skyMat.uniforms.uBrightness.value = dbgSkyBrightRef.current;
+        renderer.toneMappingExposure = dbgExposureRef.current;
+        ambientLight.intensity = dbgAmbientRef.current;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
@@ -868,10 +883,39 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     }, [bonds]);
 
     return (
-      <div
-        ref={containerRef}
-        style={{ position: 'fixed', inset: 0, zIndex: 0 }}
-      />
+      <>
+        <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
+        <div style={{
+          position: 'fixed', bottom: 24, left: 24, zIndex: 20,
+          background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 12, padding: '14px 18px',
+          fontFamily: 'ui-monospace, monospace', fontSize: 12,
+          color: 'rgba(255,255,255,0.8)', minWidth: 220,
+          display: 'flex', flexDirection: 'column', gap: 10,
+          pointerEvents: 'auto',
+        }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.5, textTransform: 'uppercase' }}>debug</div>
+          {([
+            ['Exposure', dbgExposure, setDbgExposure, 0.1, 2.0, 0.05] as const,
+            ['Sky bright', dbgSkyBright, setDbgSkyBright, 0.1, 2.0, 0.05] as const,
+            ['Ambient', dbgAmbient, setDbgAmbient, 0.0, 2.0, 0.05] as const,
+          ]).map(([label, val, set, min, max, step]) => (
+            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>{label}</span>
+                <span style={{ color: '#a0e0ff' }}>{val.toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={min} max={max} step={step}
+                value={val}
+                onChange={e => set(parseFloat(e.target.value))}
+                style={{ width: '100%', accentColor: '#7060c0' }}
+              />
+            </div>
+          ))}
+        </div>
+      </>
     );
   },
 );
