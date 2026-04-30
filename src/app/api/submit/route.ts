@@ -8,7 +8,7 @@ import { hashString } from '@/lib/btw';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { answer } = body;
+  const { answer, question_id } = body;
 
   if (!answer || typeof answer !== 'string') {
     return Response.json({ error: 'Missing answer' }, { status: 400 });
@@ -17,14 +17,21 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Answer length out of range' }, { status: 400 });
   }
 
-  const { data: question } = await supabaseServer
-    .from('questions')
-    .select('id')
-    .eq('active', true)
-    .single();
-
-  if (!question) {
-    return Response.json({ error: 'No active question' }, { status: 503 });
+  let questionId: string;
+  if (question_id && typeof question_id === 'string') {
+    questionId = question_id;
+  } else {
+    const { data: fallbackQuestion } = await supabaseServer
+      .from('questions')
+      .select('id')
+      .eq('active', true)
+      .order('display_order')
+      .limit(1)
+      .single();
+    if (!fallbackQuestion) {
+      return Response.json({ error: 'No active question' }, { status: 503 });
+    }
+    questionId = fallbackQuestion.id;
   }
 
   const rawIp =
@@ -47,7 +54,7 @@ export async function POST(req: NextRequest) {
     .insert({
       shortcode,
       answer,
-      question_id: question.id,
+      question_id: questionId,
       status: 'pending',
       ip_hash: ipHash,
       dimensions,
@@ -58,5 +65,5 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Failed to save' }, { status: 500 });
   }
 
-  return Response.json({ shortcode, questionId: question.id, dimensions });
+  return Response.json({ shortcode, questionId, dimensions });
 }

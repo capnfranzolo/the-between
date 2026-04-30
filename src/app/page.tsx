@@ -2,9 +2,8 @@
 import TwilightSky from '@/components/TwilightSky';
 import AmbientField from '@/components/AmbientField';
 import Terrain from '@/components/Terrain';
-import QuestionForm from '@/components/QuestionForm';
-import { BTW, SERIF, SANS } from '@/lib/btw';
-import { QUESTION_TEXT } from '@/lib/constants';
+import QuestionCycler from '@/components/QuestionCycler';
+import { BTW, SANS } from '@/lib/btw';
 
 export default function LandingPage() {
   return (
@@ -30,19 +29,7 @@ export default function LandingPage() {
           The Between
         </div>
 
-        <h1 style={{
-          fontFamily: SERIF, fontWeight: 400,
-          fontSize: 'clamp(24px, 5vw, 32px)', lineHeight: 1.18,
-          margin: 0, color: BTW.textPri,
-          maxWidth: 360,
-          letterSpacing: '0.005em',
-          textShadow: '0 1px 24px rgba(30,24,64,0.6)',
-        }}>
-          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>What do you know is true</span>
-          <span style={{ display: 'block', whiteSpace: 'nowrap' }}>but you can&rsquo;t prove?</span>
-        </h1>
-
-        <QuestionForm />
+        <QuestionCycler />
       </div>
     </div>
   );
