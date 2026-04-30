@@ -157,6 +157,7 @@ export default function CosmosPage() {
         bonds={sceneBonds}
         activeStar={selected}
         userStar={userStarId}
+        paused={!!selected}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
       />

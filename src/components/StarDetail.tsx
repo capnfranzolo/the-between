@@ -48,9 +48,9 @@ export default function StarDetail({ star, hasMystar, onConnect, connections }: 
         animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
       }}
     >
-      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
         <div style={{ flexShrink: 0 }}>
-          <Spirograph dimensions={star.dimensions} size={88} animate />
+          <Spirograph dimensions={star.dimensions} size={200} animate />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
