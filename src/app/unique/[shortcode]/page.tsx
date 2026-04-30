@@ -42,7 +42,7 @@ export default function UniquePage() {
         </h1>
 
         <div style={{ marginTop: 14, fontSize: 13, color: BTW.textDim, maxWidth: 280, lineHeight: 1.5 }}>
-          A small detail. Strangers will see this beside your star.
+          How do you identify? What&rsquo;s a favorite thing?
         </div>
 
         <UniqueForm shortcode={shortcode} />

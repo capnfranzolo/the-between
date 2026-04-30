@@ -11,12 +11,20 @@ export interface ThoughtData {
   emotionIndex: number;
 }
 
+export interface BondData {
+  id: string;
+  from_id: string;
+  to_id: string;
+  reason?: string;
+}
+
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
 }
 
 interface CosmosSceneProps {
   thoughts?: ThoughtData[];
+  bonds?: BondData[];
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
 }
@@ -43,14 +51,17 @@ function hashStr(s: string): number {
 }
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, onThoughtClick, onBackgroundClick }, ref) {
+  function CosmosScene({ thoughts, bonds, onThoughtClick, onBackgroundClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Bridges from setup effect → prop-sync effects and imperative handle
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
+    const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
+    const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
+    const activeBondIds = useRef<Set<string>>(new Set());
 
     // Keep callback refs fresh without re-running setup
     const onClickRef = useRef(onThoughtClick);
@@ -244,7 +255,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
         const rand = seededRand(hashStr(t.id));
-        const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [180, 120, 200];
+        const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [255, 255, 255];
         const color = (er << 16) | (eg << 8) | eb;
 
         const group = new THREE.Group();
@@ -289,10 +300,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         group.position.set(t.x, t.y, t.z);
         group.userData = {
           id: t.id,
+          emotionIndex: t.emotionIndex,
+          basePos: new THREE.Vector3(t.x, t.y, t.z),
           bobPhase: rand() * Math.PI * 2,
           bobSpeed: 0.2 + rand() * 0.3,
           baseY: t.y,
           pulsePhase: rand() * Math.PI * 2,
+          orbit: null,
         };
 
         scene.add(group);
@@ -319,9 +333,72 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (idx >= 0) thoughtMeshes.splice(idx, 1);
       }
 
-      // Expose to prop-sync effect and imperative handle
+      // ─── BONDS ───
+      interface BondLineEntry { line: THREE.Line; fromId: string; toId: string }
+      const bondLines = new Map<string, BondLineEntry>();
+
+      function createBond(b: BondData) {
+        const fromGroup = thoughtGroups.get(b.from_id);
+        const toGroup = thoughtGroups.get(b.to_id);
+        if (!fromGroup || !toGroup || bondLines.has(b.id)) return;
+
+        const rand = seededRand(hashStr(b.id));
+
+        // Binary orbit — only assigned if neither star already orbits another
+        if (!fromGroup.userData.orbit && !toGroup.userData.orbit) {
+          const orbitRadius = 8 + rand() * 4;   // 8–12 units
+          const period = 30 + rand() * 30;        // 30–60 s per revolution
+
+          const fromBase = fromGroup.userData.basePos as THREE.Vector3;
+          const toBase   = toGroup.userData.basePos as THREE.Vector3;
+          const center   = new THREE.Vector3(
+            (fromBase.x + toBase.x) / 2,
+            (fromBase.y + toBase.y) / 2,
+            (fromBase.z + toBase.z) / 2,
+          );
+
+          fromGroup.userData.orbit = { center, radius: orbitRadius, period, phaseOffset: 0 };
+          toGroup.userData.orbit   = { center, radius: orbitRadius, period, phaseOffset: Math.PI };
+        }
+
+        // Bond line — dim average of both emotion colors
+        const fromEI = fromGroup.userData.emotionIndex as number;
+        const toEI   = toGroup.userData.emotionIndex as number;
+        const [fr, fg, fb] = EMOTIONS[fromEI]?.rgb ?? [255, 255, 255];
+        const [tr, tg, tb] = EMOTIONS[toEI]?.rgb ?? [255, 255, 255];
+        const lineColor = new THREE.Color(
+          ((fr + tr) / 2 / 255) * 0.55,
+          ((fg + tg) / 2 / 255) * 0.55,
+          ((fb + tb) / 2 / 255) * 0.55,
+        );
+
+        const linePosArr = new Float32Array(6);
+        const lineGeo = new THREE.BufferGeometry();
+        lineGeo.setAttribute('position', new THREE.BufferAttribute(linePosArr, 3));
+
+        const lineMat = new THREE.LineBasicMaterial({
+          color: lineColor, transparent: true, opacity: 0.3, depthWrite: false,
+        });
+
+        const line = new THREE.Line(lineGeo, lineMat);
+        scene.add(line);
+        bondLines.set(b.id, { line, fromId: b.from_id, toId: b.to_id });
+      }
+
+      function destroyBond(id: string) {
+        const entry = bondLines.get(id);
+        if (!entry) return;
+        scene.remove(entry.line);
+        entry.line.geometry.dispose();
+        (entry.line.material as THREE.LineBasicMaterial).dispose();
+        bondLines.delete(id);
+      }
+
+      // Expose to prop-sync effects and imperative handle
       addThoughtFnRef.current = createThought;
       removeThoughtFnRef.current = destroyThought;
+      addBondFnRef.current = createBond;
+      removeBondFnRef.current = destroyBond;
 
       // ─── CAMERA STATE ───
       let heading = 0;
@@ -426,22 +503,51 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           updateTerrainGeometry();
         }
 
-        // Animate thoughts
+        // Animate thoughts — orbital or free-floating
         thoughtGroups.forEach(g => {
-          g.position.y = g.userData.baseY + Math.sin(time * g.userData.bobSpeed + g.userData.bobPhase) * 1.0;
-          g.scale.setScalar(1.0 + Math.sin(time * 0.8 + g.userData.pulsePhase) * 0.05);
+          const orbit = g.userData.orbit as { center: THREE.Vector3; radius: number; period: number; phaseOffset: number } | null;
+          if (orbit) {
+            const angle = (time / orbit.period) * Math.PI * 2 + orbit.phaseOffset;
+            g.position.x = orbit.center.x + Math.cos(angle) * orbit.radius;
+            g.position.z = orbit.center.z + Math.sin(angle) * orbit.radius;
+            g.position.y = orbit.center.y + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
+          } else {
+            g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
+          }
+          g.scale.setScalar(1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05);
           g.children.forEach(child => {
             if (child.userData.rx !== undefined) {
-              child.rotation.x += child.userData.rx * dt;
-              child.rotation.y += child.userData.ry * dt;
+              child.rotation.x += (child.userData.rx as number) * dt;
+              child.rotation.y += (child.userData.ry as number) * dt;
             }
           });
         });
 
+        // Update bond lines — endpoints + proximity brightness
+        bondLines.forEach(({ line, fromId, toId }) => {
+          const fromG = thoughtGroups.get(fromId);
+          const toG   = thoughtGroups.get(toId);
+          if (!fromG || !toG) return;
+
+          const pos = line.geometry.attributes.position as THREE.BufferAttribute;
+          pos.setXYZ(0, fromG.position.x, fromG.position.y, fromG.position.z);
+          pos.setXYZ(1, toG.position.x,   toG.position.y,   toG.position.z);
+          pos.needsUpdate = true;
+
+          // Proximity check: distance from camera to line midpoint
+          const mx = (fromG.position.x + toG.position.x) / 2;
+          const mz = (fromG.position.z + toG.position.z) / 2;
+          const dx = mx - camera.position.x;
+          const dz = mz - camera.position.z;
+          const nearby = (dx * dx + dz * dz) < 50 * 50;
+          const mat = line.material as THREE.LineBasicMaterial;
+          mat.opacity += ((nearby ? 0.7 : 0.3) - mat.opacity) * dt * 3;
+        });
+
         // Clouds
         for (const cloud of clouds) {
-          cloud.position.x += cloud.userData.dx * dt;
-          cloud.position.z += cloud.userData.dz * dt;
+          cloud.position.x += (cloud.userData.dx as number) * dt;
+          cloud.position.z += (cloud.userData.dz as number) * dt;
           const dx = cloud.position.x - camera.position.x;
           const dz = cloud.position.z - camera.position.z;
           if (dx * dx + dz * dz > 320 * 320) {
@@ -464,12 +570,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
+        addBondFnRef.current = null;
+        removeBondFnRef.current = null;
 
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
 
+        bondLines.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
 
         renderer.dispose();
@@ -491,7 +600,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     }, []);
 
     // ─── THOUGHTS SYNC ────────────────────────────────────────────────────
-    // Diffs the thoughts prop against what's currently in the scene.
     useEffect(() => {
       const add = addThoughtFnRef.current;
       const remove = removeThoughtFnRef.current;
@@ -513,6 +621,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
       }
     }, [thoughts]);
+
+    // ─── BONDS SYNC ───────────────────────────────────────────────────────
+    useEffect(() => {
+      const add = addBondFnRef.current;
+      const remove = removeBondFnRef.current;
+      if (!add || !remove) return;
+
+      const next = new Set(bonds?.map(b => b.id) ?? []);
+
+      for (const b of (bonds ?? [])) {
+        if (!activeBondIds.current.has(b.id)) {
+          add(b);
+          activeBondIds.current.add(b.id);
+        }
+      }
+
+      for (const id of [...activeBondIds.current]) {
+        if (!next.has(id)) {
+          remove(id);
+          activeBondIds.current.delete(id);
+        }
+      }
+    }, [bonds]);
 
     return (
       <div

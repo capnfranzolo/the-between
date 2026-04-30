@@ -22,9 +22,10 @@ interface StarDetailProps {
   star: CosmosStarData;
   hasMystar: boolean;
   onConnect: () => void;
+  connections?: Array<{ reason: string }>;
 }
 
-export default function StarDetail({ star, hasMystar, onConnect }: StarDetailProps) {
+export default function StarDetail({ star, hasMystar, onConnect, connections }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
 
   return (
@@ -73,6 +74,28 @@ export default function StarDetail({ star, hasMystar, onConnect }: StarDetailPro
             something unique
           </span>
           {star.unique_fact}
+        </div>
+      )}
+
+      {connections && connections.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{
+            fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase',
+            color: BTW.horizon[3], opacity: 0.8, marginBottom: 8,
+          }}>
+            connected because
+          </div>
+          {connections.map((c, i) => (
+            <div key={i} style={{
+              paddingLeft: 14,
+              borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
+              fontFamily: SANS, fontSize: 13,
+              lineHeight: 1.45, color: BTW.textSec,
+              marginBottom: i < connections.length - 1 ? 8 : 0,
+            }}>
+              {c.reason}
+            </div>
+          ))}
         </div>
       )}
 

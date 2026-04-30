@@ -1,7 +1,7 @@
 'use client';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import CosmosScene, { type ThoughtData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
+import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import { type CosmosBond } from '@/components/BondCurves';
@@ -95,6 +95,18 @@ export default function CosmosPage() {
     return myShortcode ? { ...star, mine: star.shortcode === myShortcode } : star;
   }, [selected, byId, myShortcode]);
 
+  const sceneBonds = useMemo<BondData[]>(
+    () => bonds.map(b => ({ id: b.id, from_id: b.from_id, to_id: b.to_id, reason: b.reason })),
+    [bonds],
+  );
+
+  const selectedConnections = useMemo(() => {
+    if (!selected) return [];
+    return bonds
+      .filter(b => b.from_id === selected || b.to_id === selected)
+      .map(b => ({ reason: b.reason }));
+  }, [selected, bonds]);
+
   const handleThoughtClick = (id: string) => {
     setSelected(id);
     setConnecting(false);
@@ -136,6 +148,7 @@ export default function CosmosPage() {
       <CosmosScene
         ref={sceneRef}
         thoughts={thoughts}
+        bonds={sceneBonds}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
       />
@@ -182,6 +195,7 @@ export default function CosmosPage() {
             star={selectedStar}
             hasMystar={!!myShortcode}
             onConnect={() => setConnecting(true)}
+            connections={selectedConnections}
           />
         )}
 

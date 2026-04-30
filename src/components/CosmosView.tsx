@@ -113,7 +113,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
           const isSel = selected === t.id;
           const isActive = isHov || isSel;
           const dimmed = !!(active && !isActive);
-          const emotionRGB = EMOTIONS[t.dimensions.emotionIndex]?.rgb ?? [180, 120, 200];
+          const emotionRGB = EMOTIONS[t.dimensions.emotionIndex]?.rgb ?? [255, 255, 255];
           const emotionColor = `rgb(${emotionRGB[0]},${emotionRGB[1]},${emotionRGB[2]})`;
 
           return (

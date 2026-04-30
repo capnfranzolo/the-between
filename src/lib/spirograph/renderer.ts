@@ -99,13 +99,13 @@ export interface SpirographInstance {
 // ═══════════════════════════════════════════════════════
 
 export const EMOTIONS: EmotionDef[] = [
-  { name: 'Anger / Passion',      rgb: [230,  57,  70] },  // 0
-  { name: 'Joy / Delight',        rgb: [247, 127,   0] },  // 1
-  { name: 'Hope / Anticipation',  rgb: [252, 191,  73] },  // 2
-  { name: 'Peace / Acceptance',   rgb: [ 42, 157, 143] },  // 3
-  { name: 'Sadness / Longing',    rgb: [ 69, 123, 157] },  // 4
-  { name: 'Fear / Awe',           rgb: [ 92,  75, 138] },  // 5
-  { name: 'Love / Tenderness',    rgb: [155,  93, 229] },  // 6
+  { name: 'Anger / Passion',      rgb: [240, 144, 154] },  // 0  #F0909A
+  { name: 'Joy / Delight',        rgb: [240, 176, 144] },  // 1  #F0B090
+  { name: 'Hope / Anticipation',  rgb: [240, 216, 160] },  // 2  #F0D8A0
+  { name: 'Peace / Acceptance',   rgb: [136, 216, 184] },  // 3  #88D8B8
+  { name: 'Sadness / Longing',    rgb: [144, 184, 232] },  // 4  #90B8E8
+  { name: 'Fear / Awe',           rgb: [168, 152, 216] },  // 5  #A898D8
+  { name: 'Love / Tenderness',    rgb: [200, 152, 216] },  // 6  #C898D8
 ];
 
 export const CURVE_TYPES: CurveType[] = [
@@ -383,7 +383,7 @@ export function createSpirograph(
   const ctx = canvas.getContext('2d')!;
   let currentDims = { ...dims };
   let geo = computeGeometry(currentDims);
-  let baseRGB: [number, number, number] = EMOTIONS[currentDims.emotionIndex]?.rgb ?? [180, 120, 200];
+  let baseRGB: [number, number, number] = EMOTIONS[currentDims.emotionIndex]?.rgb ?? [255, 255, 255];
   let animId: number | null = null;
   let startTime = Date.now();
 
@@ -409,7 +409,7 @@ export function createSpirograph(
     update(newDims: SpiroDimensions) {
       currentDims = { ...newDims };
       geo = computeGeometry(currentDims);
-      baseRGB = EMOTIONS[currentDims.emotionIndex]?.rgb ?? [180, 120, 200];
+      baseRGB = EMOTIONS[currentDims.emotionIndex]?.rgb ?? [255, 255, 255];
     },
     renderStatic(time = 2.5) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
