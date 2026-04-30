@@ -339,16 +339,14 @@ function renderFrame(
       ctx.stroke();
     }
 
-    // Head glow
+    // Head glow — palette color at low alpha; no white boost, NormalBlending handles compositing
     const headProj = pj(ev(headTheta));
-    const glowR = 14 * headProj.scale;
+    const glowR = 24 * headProj.scale;
     const grad = ctx.createRadialGradient(headProj.sx, headProj.sy, 0, headProj.sx, headProj.sy, glowR);
-    const wr = Math.min(255, baseRGB[0] + 100);
-    const wg = Math.min(255, baseRGB[1] + 100);
-    const wb = Math.min(255, baseRGB[2] + 100);
-    grad.addColorStop(0, `rgba(${wr},${wg},${wb},1)`);
-    grad.addColorStop(0.3, `rgba(${Math.min(255, baseRGB[0]+50)},${Math.min(255, baseRGB[1]+50)},${Math.min(255, baseRGB[2]+50)},0.6)`);
-    grad.addColorStop(1, `rgba(${baseRGB[0]},${baseRGB[1]},${baseRGB[2]},0)`);
+    const [gr, gg, gb] = baseRGB;
+    grad.addColorStop(0,   `rgba(${gr},${gg},${gb},0.22)`);
+    grad.addColorStop(0.4, `rgba(${gr},${gg},${gb},0.10)`);
+    grad.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
     ctx.beginPath();
     ctx.fillStyle = grad;
     ctx.arc(headProj.sx, headProj.sy, glowR, 0, Math.PI * 2);

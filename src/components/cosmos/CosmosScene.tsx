@@ -260,8 +260,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           void main() {
             float d = length(gl_PointCoord - vec2(0.5));
             if (d > 0.5) discard;
-            float alpha = smoothstep(0.5, 0.0, d) * 0.85;
-            alpha *= 0.6 + 0.4 * sin(uTime * (1.0 + vSize * 0.5) + vSize * 10.0);
+            float alpha = smoothstep(0.5, 0.0, d) * 0.88;
+            // Slow gentle shimmer — never dims below 60%, full cycle ~30-80 seconds
+            alpha *= 0.72 + 0.28 * sin(uTime * (0.08 + vSize * 0.025) + vSize * 10.0);
             gl_FragColor = vec4(0.9, 0.85, 1.0, alpha);
           }
         `,
@@ -296,9 +297,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             vec3 flatColor  = vec3(80.0,  56.0, 104.0) / 255.0; // #503868
             vec3 slopeColor = vec3(50.0,  36.0,  70.0) / 255.0; // darker
             vec3 color = mix(slopeColor, flatColor, vFlatness * vFlatness) * uTerrainBright;
-            // Fade to dark silhouette at distance — no transparent discard, so warm sky
-            // can never bleed through distant valley pixels
-            vec3 silColor = vec3(8.0, 6.0, 18.0) / 255.0;
+            // Fade to warm-dark silhouette — blocks sky spill without stark black
+            vec3 silColor = vec3(26.0, 11.0, 8.0) / 255.0;
             float silFade = smoothstep(350.0, 900.0, vDistFromCam);
             color = mix(color, silColor, silFade);
             gl_FragColor = vec4(color, 1.0);
@@ -411,11 +411,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           inst.renderStatic(timeOffset);
           const texture = new THREE.CanvasTexture(canvas);
           const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: texture, transparent: true, depthWrite: false, opacity: 0.92,
-            blending: THREE.CustomBlending,
-            blendEquation: THREE.AddEquation,
-            blendSrc: THREE.OneFactor,
-            blendDst: THREE.OneMinusSrcColorFactor,
+            map: texture, transparent: true, depthWrite: false, opacity: 1.0,
           }));
           sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
           group.add(sprite);
@@ -594,8 +590,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else {
           flyTargetXZ = null;
         }
-        // Camera stops slightly below star so star sits in the upper viewport
-        flyStarTargetY = Math.max(starPos.y - 14, 100);
+        // Camera tracks star elevation in both directions; terrain floor clamps in animate
+        flyStarTargetY = starPos.y - 10;
       };
 
       turnLeftFnRef.current = () => {
@@ -723,7 +719,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camTargetY = Math.max(flyStarTargetY, terrainFloor);
         } else if (activeStarRef.current) {
           const ag = thoughtGroups.get(activeStarRef.current);
-          camTargetY = ag ? Math.max(ag.position.y - 14, terrainFloor) : terrainFloor;
+          camTargetY = ag ? Math.max(ag.position.y - 10, terrainFloor) : terrainFloor;
         } else {
           camTargetY = terrainFloor;
         }
