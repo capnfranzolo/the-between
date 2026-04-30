@@ -1,6 +1,7 @@
 'use client';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
+import Spirograph from './Spirograph';
 import { SITE_URL } from '@/lib/constants';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
@@ -45,8 +46,15 @@ export default function StarDetail({ star, hasMystar, onConnect }: StarDetailPro
         animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
       }}
     >
-      <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 24, lineHeight: 1.4, color: BTW.textPri }}>
-        &ldquo;{star.text}&rdquo;
+      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+        <div style={{ flexShrink: 0 }}>
+          <Spirograph dimensions={star.dimensions} size={88} animate />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
+            &ldquo;{star.text}&rdquo;
+          </div>
+        </div>
       </div>
 
       {star.unique_fact && (
