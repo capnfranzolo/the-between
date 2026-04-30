@@ -18,6 +18,7 @@ export interface CosmosSceneHandle {
 interface CosmosSceneProps {
   thoughts?: ThoughtData[];
   onThoughtClick?: (id: string) => void;
+  onBackgroundClick?: () => void;
 }
 
 // Inline seeded random — avoids importing btw into a heavy Three.js module
@@ -42,7 +43,7 @@ function hashStr(s: string): number {
 }
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, onThoughtClick }, ref) {
+  function CosmosScene({ thoughts, onThoughtClick, onBackgroundClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Bridges from setup effect → prop-sync effects and imperative handle
@@ -51,9 +52,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
 
-    // Keep callback ref fresh without re-running setup
+    // Keep callback refs fresh without re-running setup
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
+    const onBgClickRef = useRef(onBackgroundClick);
+    useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
@@ -361,6 +364,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           targetHeading = Math.atan2(dx, -dz);
           clickBoostTime = 1.5;
           onClickRef.current?.(thoughtId);
+        } else {
+          onBgClickRef.current?.();
         }
       };
       renderer.domElement.addEventListener('click', onClickCanvas);

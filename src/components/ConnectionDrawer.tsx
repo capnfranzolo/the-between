@@ -28,6 +28,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
         padding: '22px 26px',
         color: BTW.textPri,
         zIndex: 7,
+        pointerEvents: 'auto',
       }}
     >
       <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, marginBottom: 14 }}>

@@ -137,14 +137,14 @@ export default function CosmosPage() {
         ref={sceneRef}
         thoughts={thoughts}
         onThoughtClick={handleThoughtClick}
+        onBackgroundClick={clearSelection}
       />
 
       <div
         style={{
           position: 'relative', zIndex: 1, height: '100vh', overflow: 'hidden',
-          fontFamily: SANS, color: BTW.textPri,
+          fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
-        onClick={clearSelection}
       >
         {/* Top chrome */}
         <div style={{

@@ -43,6 +43,7 @@ export default function StarDetail({ star, hasMystar, onConnect }: StarDetailPro
         padding: '24px 28px',
         color: BTW.textPri,
         zIndex: 6,
+        pointerEvents: 'auto',
         animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
       }}
     >
