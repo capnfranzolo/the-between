@@ -1,128 +1,754 @@
 'use client';
-import { useState } from 'react';
-import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import TwilightSky from '@/components/TwilightSky';
-import Terrain from '@/components/Terrain';
-import AdminQueue from '@/components/AdminQueue';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import type { CurveType } from '@/lib/spirograph/renderer';
+import type { DimensionResult } from '@/lib/dimensions/prompt';
 
-export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [checking, setChecking] = useState(false);
-  const [pendingStars] = useState([
-    { id: 'mock-1', shortcode: 'xq3p', answer: 'People are fundamentally trying their best, even when they fail spectacularly.', created_at: new Date().toISOString(), status: 'pending' as const },
-    { id: 'mock-2', shortcode: 'mn7t', answer: 'The moments right before sleep are when we are most honest with ourselves.', created_at: new Date().toISOString(), status: 'pending' as const },
-  ]);
-  const [pendingConnections] = useState([
-    { id: 'conn-1', from_star_id: 'a3pm', to_star_id: '7kx2', reason: "Both speak to what we carry without knowing.", created_at: new Date().toISOString(), status: 'pending' as const },
-  ]);
+const Spirograph = dynamic(() => import('@/components/Spirograph'), { ssr: false });
 
-  const handleAuth = async () => {
-    setChecking(true);
-    setError('');
-    try {
-      const res = await fetch('/api/admin/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      if (res.ok) {
-        setAuthed(true);
-      } else {
-        setError('Incorrect password.');
-      }
-    } catch {
-      setError('Connection error.');
-    } finally {
-      setChecking(false);
-    }
-  };
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-  const handleAction = async (type: 'star' | 'connection', id: string, action: 'approve' | 'reject', edit?: string) => {
-    await fetch('/api/admin/moderate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, id, action, edit }),
+interface Question { id: string; slug: string; text: string }
+
+interface AdminStar {
+  id: string;
+  shortcode: string;
+  answer: string;
+  unique_fact: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  question_id: string;
+  ip_hash: string;
+  ip_count: number;
+  connection_count: number;
+  created_at: string;
+  approved_at: string | null;
+  dimensions: (DimensionResult & { curveType: CurveType; reasoning: string }) | null;
+  questions?: { id: string; slug: string; text: string } | null;
+}
+
+interface AdminConnection {
+  id: string;
+  from_star_id: string;
+  to_star_id: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  question_id: string;
+  created_at: string;
+  from_star: AdminStar | null;
+  to_star: AdminStar | null;
+}
+
+interface Stats {
+  totalStars: number;
+  pendingStars: number;
+  approvedStars: number;
+  rejectedStars: number;
+  totalConnections: number;
+  pendingConnections: number;
+  approvedConnections: number;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+function trunc(s: string, n: number) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  pending:  { bg: '#332200', color: '#ffaa00', label: 'pending' },
+  approved: { bg: '#002200', color: '#00cc44', label: 'approved' },
+  rejected: { bg: '#220000', color: '#cc4444', label: 'rejected' },
+};
+
+// ─── Shared styles ───────────────────────────────────────────────────────────
+
+const S = {
+  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
+  topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 16, position: 'sticky' as const, top: 0, zIndex: 100 },
+  tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
+  btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
+    padding: '5px 12px', border: `1px solid ${variant === 'danger' ? '#cc4444' : '#444'}`,
+    borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12,
+    background: variant === 'primary' ? '#1a472a' : variant === 'danger' ? '#2a0000' : 'transparent',
+    color: variant === 'danger' ? '#cc4444' : '#ccc',
+  }),
+  iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, padding: '2px 6px', color: '#888' },
+  input:   { background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '6px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none' },
+  textarea:{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '8px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none', resize: 'vertical' as const, width: '100%', boxSizing: 'border-box' as const },
+  row:     { borderBottom: '1px solid #1a1a1a', display: 'grid' as const, alignItems: 'center', padding: '6px 8px', gap: 8 },
+  mono:    { fontFamily: 'monospace', fontSize: 12 },
+};
+
+// ─── StatusBadge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_STYLE[status] ?? { bg: '#222', color: '#aaa', label: status };
+  return <span style={{ background: s.bg, color: s.color, padding: '2px 7px', borderRadius: 3, fontSize: 11, fontFamily: 'monospace' }}>{s.label}</span>;
+}
+
+// ─── DimTable ─────────────────────────────────────────────────────────────────
+
+type DimsShape = (DimensionResult & { curveType: CurveType; reasoning: string }) | null;
+
+function DimTable({ dims, before }: { dims: DimsShape; before?: DimsShape }) {
+  if (!dims) return <span style={{ color: '#555' }}>no dimensions</span>;
+  const keys = ['certainty', 'warmth', 'tension', 'vulnerability', 'scope', 'rootedness', 'emotionIndex', 'curveType'] as const;
+  return (
+    <table style={{ fontSize: 11, fontFamily: 'monospace', color: '#aaa', lineHeight: 1.6 }}>
+      <tbody>
+        {keys.map(k => {
+          const val = dims[k as keyof typeof dims];
+          const prev = before?.[k as keyof typeof before];
+          const changed = before !== undefined && prev !== val;
+          return (
+            <tr key={k}>
+              <td style={{ color: '#555', paddingRight: 12 }}>{k}</td>
+              <td style={{ color: changed ? '#ffaa00' : '#ccc' }}>
+                {typeof val === 'number' ? val.toFixed(3) : String(val)}
+                {changed && prev !== undefined && (
+                  <span style={{ color: '#555', marginLeft: 8 }}>
+                    (was {typeof prev === 'number' ? prev.toFixed(3) : String(prev)})
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// ─── StarDetailPanel ─────────────────────────────────────────────────────────
+
+function StarDetailPanel({
+  star, onClose, onSaved, onDeleted,
+}: {
+  star: AdminStar;
+  onClose: () => void;
+  onSaved: (updated: AdminStar) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [answer, setAnswer] = useState(star.answer);
+  const [byline, setByline] = useState(star.unique_fact ?? '');
+  const [status, setStatus] = useState(star.status);
+  const [saving, setSaving] = useState(false);
+  const [regenning, setRegenning] = useState(false);
+  const [regenDiff, setRegenDiff] = useState<{ before: DimsShape; after: DimsShape } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dims, setDims] = useState(star.dimensions);
+  const answerChanged = answer !== star.answer;
+
+  async function save() {
+    setSaving(true);
+    const body: Record<string, unknown> = { status };
+    if (answerChanged) body.answer = answer;
+    if (byline !== (star.unique_fact ?? '')) body.uniqueFact = byline;
+    const res = await fetch(`/api/admin/stars/${star.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
-  };
+    const data = await res.json();
+    setSaving(false);
+    if (data.ok) { setDims(data.star.dimensions); onSaved(data.star); }
+  }
+
+  async function regen() {
+    setRegenning(true);
+    const res = await fetch(`/api/admin/stars/${star.id}/regen`, { method: 'POST' });
+    const data = await res.json();
+    setRegenning(false);
+    if (data.ok) {
+      setDims(data.after);
+      setRegenDiff({ before: data.before, after: data.after });
+      setTimeout(() => setRegenDiff(null), 5000);
+    }
+  }
+
+  async function doDelete() {
+    const res = await fetch(`/api/admin/stars/${star.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) onDeleted(star.id);
+  }
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh', overflow: 'hidden', fontFamily: SANS, color: BTW.textPri }}>
-      <TwilightSky style={{ position: 'fixed' }}>
-        <Terrain height={100} />
-      </TwilightSky>
-
-      <div style={{ position: 'relative', zIndex: 2, minHeight: '100vh' }}>
-        {/* Header */}
-        <div style={{
-          padding: '24px 30px 20px',
-          borderBottom: `1px solid ${withAlpha(BTW.textPri, 0.1)}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <div style={{ fontSize: 12, letterSpacing: '0.32em', textTransform: 'uppercase', color: BTW.textDim }}>
-            The Between · Admin
-          </div>
-          {authed && (
-            <div style={{ fontSize: 11, color: BTW.horizon[3], letterSpacing: '0.2em', textTransform: 'uppercase' }}>
-              ● authenticated
+    <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Answer</div>
+            <textarea value={answer} onChange={e => setAnswer(e.target.value.slice(0, 500))} rows={4} style={S.textarea} />
+            <div style={{ fontSize: 11, color: answer.length > 450 ? '#ffaa00' : '#555', textAlign: 'right' }}>
+              {answer.length}/500{answerChanged && <span style={{ color: '#ffaa00', marginLeft: 8 }}>⚡ will regen dimensions</span>}
             </div>
+          </div>
+          <div>
+            <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Byline</div>
+            <input value={byline} onChange={e => setByline(e.target.value.slice(0, 120))} style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ color: '#666', fontSize: 11 }}>Status</div>
+            <select value={status} onChange={e => setStatus(e.target.value as AdminStar['status'])} style={S.input}>
+              <option value="pending">pending</option>
+              <option value="approved">approved</option>
+              <option value="rejected">rejected</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+            <button onClick={save} disabled={saving} style={S.btn('primary')}>{saving ? 'Saving…' : 'Save changes'}</button>
+            <button onClick={regen} disabled={regenning} style={S.btn()}>{regenning ? 'Regenerating…' : '🔄 Regen star'}</button>
+            <a href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.btn(), textDecoration: 'none', display: 'inline-block' }}>👁 Preview</a>
+            {!confirmDelete
+              ? <button onClick={() => setConfirmDelete(true)} style={S.btn('danger')}>🗑 Delete</button>
+              : <>
+                  <span style={{ color: '#cc4444', fontSize: 12 }}>
+                    Delete?{star.connection_count > 0 && ` (removes ${star.connection_count} connections)`}
+                  </span>
+                  <button onClick={doDelete} style={S.btn('danger')}>Confirm</button>
+                  <button onClick={() => setConfirmDelete(false)} style={S.btn()}>Cancel</button>
+                </>}
+          </div>
+          <div>
+            <div style={{ color: '#555', fontSize: 11, marginBottom: 4 }}>
+              Dimensions {regenDiff && <span style={{ color: '#ffaa00' }}>— showing diff for 5s</span>}
+            </div>
+            {regenDiff ? <DimTable dims={regenDiff.after} before={regenDiff.before} /> : <DimTable dims={dims} />}
+          </div>
+          <div style={{ ...S.mono, color: '#555', fontSize: 11, lineHeight: 1.8 }}>
+            <div>shortcode: <span style={{ color: '#aaa' }}>{star.shortcode}</span> · <a href={`/s/${star.shortcode}`} target="_blank" rel="noreferrer" style={{ color: '#6af' }}>/s/{star.shortcode}</a></div>
+            <div>ip_hash: {star.ip_hash} · {star.ip_count} submission{star.ip_count !== 1 ? 's' : ''} from this IP</div>
+            <div>created: {new Date(star.created_at).toLocaleString()}</div>
+            {star.approved_at && <div>approved: {new Date(star.approved_at).toLocaleString()}</div>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          {dims && <Spirograph dimensions={dims} size={200} animate={true} />}
+          <button onClick={onClose} style={{ ...S.btn(), fontSize: 11 }}>✕ close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ConnectionDetailPanel ────────────────────────────────────────────────────
+
+function ConnectionDetailPanel({
+  conn, onClose, onSaved, onDeleted,
+}: {
+  conn: AdminConnection;
+  onClose: () => void;
+  onSaved: (updated: AdminConnection) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [status, setStatus] = useState(conn.status);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    const res = await fetch(`/api/admin/connections/${conn.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (data.ok) onSaved(data.connection);
+  }
+
+  async function doDelete() {
+    const res = await fetch(`/api/admin/connections/${conn.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) onDeleted(conn.id);
+  }
+
+  return (
+    <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
+        {([conn.from_star, conn.to_star] as const).map((star, i) => star && (
+          <div key={i}>
+            <div style={{ color: '#555', fontSize: 11, marginBottom: 4 }}>{i === 0 ? '↑ From (orbiter)' : '↓ To (anchor)'}</div>
+            <div style={{ ...S.mono, color: '#6af', marginBottom: 4 }}>{star.shortcode}</div>
+            <div style={{ color: '#ddd', fontSize: 13, marginBottom: 8 }}>{star.answer}</div>
+            {star.unique_fact && <div style={{ color: '#888', fontSize: 12 }}>{star.unique_fact}</div>}
+            {star.dimensions && (
+              <div style={{ marginTop: 8 }}>
+                <Spirograph dimensions={star.dimensions} size={160} animate={true} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ color: '#aaa', fontStyle: 'italic', fontSize: 13, marginBottom: 12 }}>"{conn.reason}"</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <select value={status} onChange={e => setStatus(e.target.value as AdminConnection['status'])} style={S.input}>
+          <option value="pending">pending</option>
+          <option value="approved">approved</option>
+          <option value="rejected">rejected</option>
+        </select>
+        <button onClick={save} disabled={saving} style={S.btn('primary')}>{saving ? 'Saving…' : 'Save'}</button>
+        {!confirmDelete
+          ? <button onClick={() => setConfirmDelete(true)} style={S.btn('danger')}>🗑 Delete</button>
+          : <>
+              <button onClick={doDelete} style={S.btn('danger')}>Confirm delete</button>
+              <button onClick={() => setConfirmDelete(false)} style={S.btn()}>Cancel</button>
+            </>}
+        <button onClick={onClose} style={{ ...S.btn(), marginLeft: 'auto' }}>✕ close</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── StarsTab ────────────────────────────────────────────────────────────────
+
+function StarsTab({ questionFilter }: { questionFilter: string }) {
+  const [stars, setStars] = useState<AdminStar[]>([]);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+
+  const load = useCallback(async (pg = 0, reset = false) => {
+    setLoading(true);
+    const params = new URLSearchParams({
+      status: statusFilter, page: String(pg), limit: '50',
+      ...(search && { search }),
+      ...(questionFilter && { questionId: questionFilter }),
+    });
+    const res = await fetch(`/api/admin/stars?${params}`);
+    const data = await res.json();
+    const rows: AdminStar[] = data.stars ?? [];
+    setStars(prev => reset ? rows : [...prev, ...rows]);
+    setHasMore(rows.length === 50);
+    setPage(pg);
+    setLoading(false);
+  }, [statusFilter, search, questionFilter]);
+
+  useEffect(() => { load(0, true); setSelected(new Set()); setExpanded(null); }, [statusFilter, search, questionFilter, load]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (selected.size === 0) return;
+      if (e.key === 'a') { e.preventDefault(); bulkAction('approve'); }
+      if (e.key === 'r') { e.preventDefault(); bulkAction('reject'); }
+      if (e.key === 'd') { e.preventDefault(); setBulkConfirm(true); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  async function quickAction(id: string, status: 'approved' | 'rejected') {
+    setStars(prev => prev.map(s => s.id === id ? { ...s, status } : s));
+    const res = await fetch(`/api/admin/stars/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+    });
+    if (!res.ok) load(page, true);
+  }
+
+  async function quickDelete(id: string) {
+    setStars(prev => prev.filter(s => s.id !== id));
+    await fetch(`/api/admin/stars/${id}`, { method: 'DELETE' });
+  }
+
+  async function bulkAction(action: 'approve' | 'reject' | 'delete') {
+    const ids = [...selected];
+    if (action === 'approve') {
+      setStars(prev => prev.map(s => selected.has(s.id) ? { ...s, status: 'approved' } : s));
+    } else if (action === 'reject') {
+      setStars(prev => prev.map(s => selected.has(s.id) ? { ...s, status: 'rejected' } : s));
+    } else {
+      setStars(prev => prev.filter(s => !selected.has(s.id)));
+    }
+    setSelected(new Set()); setBulkConfirm(false);
+    await fetch('/api/admin/bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, type: 'star', ids }),
+    });
+  }
+
+  const allChecked = stars.length > 0 && stars.every(s => selected.has(s.id));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
+        ))}
+        <input placeholder="Search answer or byline…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 240 }} />
+      </div>
+
+      {selected.size > 0 && (
+        <div style={{ background: '#1a1400', padding: '8px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ color: '#ffaa00', fontSize: 12 }}>{selected.size} selected · a=approve r=reject d=delete</span>
+          {!bulkConfirm ? (
+            <>
+              <button onClick={() => bulkAction('approve')} style={S.btn('primary')}>Approve selected</button>
+              <button onClick={() => bulkAction('reject')} style={S.btn()}>Reject selected</button>
+              <button onClick={() => setBulkConfirm(true)} style={S.btn('danger')}>Delete selected</button>
+              <button onClick={() => setSelected(new Set())} style={S.btn()}>Deselect</button>
+            </>
+          ) : (
+            <>
+              <span style={{ color: '#cc4444', fontSize: 12 }}>Delete {selected.size} stars and their connections?</span>
+              <button onClick={() => bulkAction('delete')} style={S.btn('danger')}>Confirm delete</button>
+              <button onClick={() => setBulkConfirm(false)} style={S.btn()}>Cancel</button>
+            </>
           )}
         </div>
+      )}
 
-        {!authed ? (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', minHeight: 'calc(100vh - 72px)',
-            padding: '0 28px', textAlign: 'center',
-          }}>
-            <h1 style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 400, color: BTW.textPri, marginBottom: 32 }}>
-              Admin Access
-            </h1>
-            <div style={{ width: '100%', maxWidth: 300 }}>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleAuth(); }}
-                placeholder="Password"
-                style={{
-                  width: '100%',
-                  background: 'rgba(240,232,224,0.06)',
-                  border: `1px solid ${withAlpha(BTW.textPri, 0.2)}`,
-                  borderRadius: 10, color: BTW.textPri,
-                  fontSize: 16, padding: '12px 16px',
-                  outline: 'none', boxSizing: 'border-box',
-                }}
-              />
-              {error && <div style={{ color: '#F0B878', fontSize: 13, marginTop: 8 }}>{error}</div>}
-              <button
-                onClick={handleAuth}
-                disabled={checking}
-                style={{
-                  marginTop: 16, width: '100%',
-                  background: 'transparent',
-                  border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-                  color: BTW.horizon[3], padding: '12px 24px', borderRadius: 999,
-                  fontFamily: SANS, fontSize: 13, fontWeight: 500,
-                  letterSpacing: '0.08em', textTransform: 'uppercase',
-                  cursor: 'pointer',
-                }}
-              >
-                {checking ? 'Checking…' : 'Enter →'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ padding: '32px 0 80px' }}>
-            <AdminQueue
-              pendingStars={pendingStars}
-              pendingConnections={pendingConnections}
-              onAction={handleAction}
-            />
-          </div>
-        )}
+      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+        <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(stars.map(s => s.id)) : new Set())} />
+        <span>status</span><span>code</span><span>answer</span><span>byline</span><span>question</span><span>ips</span><span>age</span><span>actions</span>
       </div>
+
+      {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
+
+      {stars.map(star => (
+        <div key={star.id}>
+          <div
+            style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            onClick={() => setExpanded(e => e === star.id ? null : star.id)}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(star.id)}
+              onClick={e => e.stopPropagation()}
+              onChange={e => { const s = new Set(selected); e.target.checked ? s.add(star.id) : s.delete(star.id); setSelected(s); }}
+            />
+            <StatusBadge status={star.status} />
+            <a
+              href={`/cosmos/${star.question_id}?star=${star.shortcode}`}
+              target="_blank" rel="noreferrer"
+              style={{ ...S.mono, color: '#6af', textDecoration: 'none' }}
+              onClick={e => e.stopPropagation()}
+            >{star.shortcode}</a>
+            <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={star.answer}>{trunc(star.answer, 80)}</span>
+            <span style={{ color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={star.unique_fact ?? ''}>{trunc(star.unique_fact ?? '—', 40)}</span>
+            <span style={{ ...S.mono, color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {(star.questions as Question | null | undefined)?.slug ?? star.question_id.slice(0, 8)}
+            </span>
+            <span style={{ ...S.mono, color: star.ip_count > 5 ? '#cc4444' : '#666' }}>{star.ip_count}</span>
+            <span style={{ color: '#555' }}>{relTime(star.created_at)}</span>
+            <span style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>
+              <button title="approve" onClick={() => quickAction(star.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button title="reject" onClick={() => quickAction(star.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <button title="expand" onClick={() => setExpanded(e => e === star.id ? null : star.id)} style={S.iconBtn}>✎</button>
+              <a title="preview" href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.iconBtn, textDecoration: 'none' }}>👁</a>
+              <button title="delete" onClick={() => quickDelete(star.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </span>
+          </div>
+          {expanded === star.id && (
+            <StarDetailPanel
+              star={star}
+              onClose={() => setExpanded(null)}
+              onSaved={updated => setStars(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s))}
+              onDeleted={id => { setStars(prev => prev.filter(s => s.id !== id)); setExpanded(null); }}
+            />
+          )}
+        </div>
+      ))}
+
+      {!loading && stars.length === 0 && (
+        <div style={{ padding: 32, color: '#444', textAlign: 'center' }}>No stars found.</div>
+      )}
+
+      {hasMore && (
+        <div style={{ padding: '12px 16px' }}>
+          <button onClick={() => load(page + 1)} style={S.btn()}>Load more</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ConnectionsTab ───────────────────────────────────────────────────────────
+
+function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
+  const [connections, setConnections] = useState<AdminConnection[]>([]);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+
+  const load = useCallback(async (pg = 0, reset = false) => {
+    setLoading(true);
+    const params = new URLSearchParams({
+      status: statusFilter, page: String(pg), limit: '50',
+      ...(questionFilter && { questionId: questionFilter }),
+    });
+    const res = await fetch(`/api/admin/connections?${params}`);
+    const data = await res.json();
+    const rows: AdminConnection[] = data.connections ?? [];
+    setConnections(prev => reset ? rows : [...prev, ...rows]);
+    setHasMore(rows.length === 50);
+    setPage(pg);
+    setLoading(false);
+  }, [statusFilter, questionFilter]);
+
+  useEffect(() => { load(0, true); setSelected(new Set()); setExpanded(null); }, [statusFilter, questionFilter, load]);
+
+  async function quickAction(id: string, status: 'approved' | 'rejected') {
+    setConnections(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+    const res = await fetch(`/api/admin/connections/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+    });
+    if (!res.ok) load(page, true);
+  }
+
+  async function quickDelete(id: string) {
+    setConnections(prev => prev.filter(c => c.id !== id));
+    await fetch(`/api/admin/connections/${id}`, { method: 'DELETE' });
+  }
+
+  async function bulkAction(action: 'approve' | 'reject' | 'delete') {
+    const ids = [...selected];
+    if (action === 'approve') {
+      setConnections(prev => prev.map(c => selected.has(c.id) ? { ...c, status: 'approved' } : c));
+    } else if (action === 'reject') {
+      setConnections(prev => prev.map(c => selected.has(c.id) ? { ...c, status: 'rejected' } : c));
+    } else {
+      setConnections(prev => prev.filter(c => !selected.has(c.id)));
+    }
+    setSelected(new Set()); setBulkConfirm(false);
+    await fetch('/api/admin/bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, type: 'connection', ids }),
+    });
+  }
+
+  const allChecked = connections.length > 0 && connections.every(c => selected.has(c.id));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a' }}>
+        {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
+        ))}
+      </div>
+
+      {selected.size > 0 && (
+        <div style={{ background: '#1a1400', padding: '8px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ color: '#ffaa00', fontSize: 12 }}>{selected.size} selected</span>
+          {!bulkConfirm ? (
+            <>
+              <button onClick={() => bulkAction('approve')} style={S.btn('primary')}>Approve</button>
+              <button onClick={() => bulkAction('reject')} style={S.btn()}>Reject</button>
+              <button onClick={() => setBulkConfirm(true)} style={S.btn('danger')}>Delete</button>
+              <button onClick={() => setSelected(new Set())} style={S.btn()}>Deselect</button>
+            </>
+          ) : (
+            <>
+              <span style={{ color: '#cc4444', fontSize: 12 }}>Delete {selected.size} connections?</span>
+              <button onClick={() => bulkAction('delete')} style={S.btn('danger')}>Confirm</button>
+              <button onClick={() => setBulkConfirm(false)} style={S.btn()}>Cancel</button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+        <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(connections.map(c => c.id)) : new Set())} />
+        <span>status</span><span>from</span><span>to</span><span>reason</span><span>question</span><span>age</span><span>actions</span>
+      </div>
+
+      {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
+
+      {connections.map(conn => (
+        <div key={conn.id}>
+          <div
+            style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
+            onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(conn.id)}
+              onClick={e => e.stopPropagation()}
+              onChange={e => { const s = new Set(selected); e.target.checked ? s.add(conn.id) : s.delete(conn.id); setSelected(s); }}
+            />
+            <StatusBadge status={conn.status} />
+            <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.from_star?.shortcode}</span>{' '}
+              {trunc(conn.from_star?.answer ?? '', 50)}
+            </span>
+            <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.to_star?.shortcode}</span>{' '}
+              {trunc(conn.to_star?.answer ?? '', 50)}
+            </span>
+            <span style={{ color: '#aaa', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conn.reason}</span>
+            <span style={{ ...S.mono, color: '#555', fontSize: 11 }}>{conn.question_id.slice(0, 6)}</span>
+            <span style={{ color: '#555' }}>{relTime(conn.created_at)}</span>
+            <span style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>
+              <button onClick={() => quickAction(conn.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button onClick={() => quickAction(conn.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <button onClick={() => quickDelete(conn.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </span>
+          </div>
+          {expanded === conn.id && (
+            <ConnectionDetailPanel
+              conn={conn}
+              onClose={() => setExpanded(null)}
+              onSaved={updated => setConnections(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c))}
+              onDeleted={id => { setConnections(prev => prev.filter(c => c.id !== id)); setExpanded(null); }}
+            />
+          )}
+        </div>
+      ))}
+
+      {!loading && connections.length === 0 && (
+        <div style={{ padding: 32, color: '#444', textAlign: 'center' }}>No connections found.</div>
+      )}
+
+      {hasMore && (
+        <div style={{ padding: '12px 16px' }}>
+          <button onClick={() => load(page + 1)} style={S.btn()}>Load more</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+
+export default function AdminPage() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [tab, setTab] = useState<'stars' | 'connections'>('stars');
+  const [questionFilter, setQuestionFilter] = useState('');
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const prevPending = useRef(0);
+  const [pendingPulse, setPendingPulse] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/admin/auth').then(r => setAuthed(r.ok));
+  }, []);
+
+  const loadStats = useCallback(async () => {
+    const res = await fetch('/api/admin/stats');
+    if (!res.ok) return;
+    const data: Stats = await res.json();
+    if (data.pendingStars > prevPending.current) {
+      setPendingPulse(true);
+      setTimeout(() => setPendingPulse(false), 2000);
+    }
+    prevPending.current = data.pendingStars;
+    setStats(data);
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    loadStats();
+    const interval = setInterval(loadStats, 30000);
+
+    // Load questions
+    fetch('/api/admin/stars?status=all&limit=200').then(async r => {
+      if (!r.ok) return;
+      const d = await r.json();
+      const seen = new Set<string>();
+      const qs: Question[] = [];
+      for (const s of (d.stars ?? []) as AdminStar[]) {
+        const q = s.questions as Question | null | undefined;
+        if (q && !seen.has(q.id)) { seen.add(q.id); qs.push(q); }
+      }
+      setQuestions(qs);
+    });
+
+    return () => clearInterval(interval);
+  }, [authed, loadStats]);
+
+  async function handleAuth() {
+    setChecking(true); setAuthError('');
+    const res = await fetch('/api/admin/auth', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }),
+    });
+    setChecking(false);
+    if (res.ok) { setAuthed(true); } else { setAuthError('Incorrect password.'); }
+  }
+
+  async function logout() {
+    await fetch('/api/admin/auth', { method: 'DELETE' });
+    setAuthed(false);
+  }
+
+  if (authed === null) {
+    return <div style={{ ...S.page, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#444' }}>…</div>;
+  }
+
+  if (!authed) {
+    return (
+      <div style={{ ...S.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 280 }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.1em', color: '#555', marginBottom: 24, textAlign: 'center' }}>THE BETWEEN — ADMIN</div>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAuth()}
+            placeholder="Password"
+            autoFocus
+            style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const, marginBottom: 8 }}
+          />
+          {authError && <div style={{ color: '#cc4444', fontSize: 12, marginBottom: 8 }}>{authError}</div>}
+          <button onClick={handleAuth} disabled={checking} style={{ ...S.btn('primary'), width: '100%', padding: '10px' }}>
+            {checking ? 'Checking…' : 'Enter →'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={S.topbar}>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.08em', color: '#666', marginRight: 8, whiteSpace: 'nowrap' as const }}>THE BETWEEN — ADMIN</span>
+        {stats && (
+          <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' as const }}>
+            <span style={{ color: pendingPulse ? '#ffaa00' : '#888', fontWeight: pendingPulse ? 700 : 400, transition: 'color .3s' }}>
+              {stats.pendingStars} pending
+            </span>
+            {' · '}{stats.approvedStars} approved · {stats.rejectedStars} rejected
+            {' · '}{stats.totalConnections} connections ({stats.pendingConnections} pending)
+          </span>
+        )}
+        <select value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ ...S.input, marginLeft: 'auto' }}>
+          <option value="">All questions</option>
+          {questions.map(q => <option key={q.id} value={q.id}>{q.slug}</option>)}
+        </select>
+        <button onClick={logout} style={S.btn()}>Logout</button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, padding: '8px 16px', borderBottom: '1px solid #1a1a1a', background: '#0d0d0d' }}>
+        <button onClick={() => setTab('stars')} style={S.tab(tab === 'stars')}>
+          Stars{stats && stats.pendingStars > 0 && tab !== 'stars' && <span style={{ color: '#ffaa00', marginLeft: 4 }}>({stats.pendingStars})</span>}
+        </button>
+        <button onClick={() => setTab('connections')} style={S.tab(tab === 'connections')}>
+          Connections{stats && stats.pendingConnections > 0 && tab !== 'connections' && <span style={{ color: '#ffaa00', marginLeft: 4 }}>({stats.pendingConnections})</span>}
+        </button>
+      </div>
+
+      {tab === 'stars' && <StarsTab questionFilter={questionFilter} />}
+      {tab === 'connections' && <ConnectionsTab questionFilter={questionFilter} />}
     </div>
   );
 }
