@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH, QUESTION_TEXT } from '@/lib/constants';
 import { supabaseClient } from '@/lib/supabase/client';
+import type { CurveType } from '@/lib/spirograph/renderer';
+import type { DimensionResult } from '@/lib/dimensions/prompt';
 
 interface Question {
   id: string;
@@ -11,9 +13,15 @@ interface Question {
 
 const FALLBACK: Question[] = [{ id: 'fallback', text: QUESTION_TEXT }];
 
+export type ValidatedPayload = {
+  answer: string;
+  questionId: string;
+  dimensions: DimensionResult & { curveType: CurveType };
+};
+
 interface QuestionCyclerProps {
   onQuestionChange?: (questionId: string) => void;
-  onValidated?: (data: { answer: string; questionId: string }) => void;
+  onValidated?: (data: ValidatedPayload) => void;
   validationError?: string | null;
   onClearError?: () => void;
 }
@@ -70,7 +78,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
       });
       const data = await res.json();
       if (data.valid) {
-        onValidated?.({ answer: text.trim(), questionId: questions[currentIndex].id });
+        onValidated?.({ answer: text.trim(), questionId: questions[currentIndex].id, dimensions: data.dimensions });
       } else {
         setInlineError(data.reason ?? 'Something went wrong.');
       }

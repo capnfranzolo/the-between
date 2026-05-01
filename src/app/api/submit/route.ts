@@ -8,7 +8,7 @@ import { hashString } from '@/lib/btw';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { answer, question_id, unique_fact } = body;
+  const { answer, question_id, unique_fact, dimensions: providedDimensions } = body;
 
   if (!answer || typeof answer !== 'string') {
     return Response.json({ error: 'Missing answer' }, { status: 400 });
@@ -41,27 +41,33 @@ export async function POST(req: NextRequest) {
   const ipHash = hashString(rawIp).toString(16);
 
   const shortcode = generateShortcode(4);
-  const dimensionResult = await extractDimensions(answer);
-  const curveType = randomCurveType();
+  const dimensionResult = providedDimensions ?? await extractDimensions(answer);
+  const curveType = providedDimensions?.curveType ?? randomCurveType();
 
   const dimensions = {
     ...dimensionResult,
     curveType,
   };
 
-  const { error } = await supabaseServer
+  const baseInsert = {
+    shortcode,
+    answer,
+    question_id: questionId,
+    status: 'approved',
+    approved_at: new Date().toISOString(),
+    ip_hash: ipHash,
+    dimensions,
+    unique_fact: unique_fact ?? null,
+  };
+
+  let { error } = await supabaseServer
     .from('stars')
-    .insert({
-      shortcode,
-      answer,
-      question_id: questionId,
-      status: 'approved',
-      approved_at: new Date().toISOString(),
-      ip_hash: ipHash,
-      dimensions,
-      unique_fact: unique_fact ?? null,
-      answer_hash: hashString(answer.trim().toLowerCase()).toString(16),
-    });
+    .insert({ ...baseInsert, answer_hash: hashString(answer.trim().toLowerCase()).toString(16) });
+
+  // Retry without answer_hash if the column doesn't exist yet (migration pending)
+  if (error && (error.message?.includes('answer_hash') || error.code === '42703')) {
+    ({ error } = await supabaseServer.from('stars').insert(baseInsert));
+  }
 
   if (!error) {
     try {

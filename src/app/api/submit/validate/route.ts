@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
 import { supabaseServer } from '@/lib/supabase/server';
 import { hashString } from '@/lib/btw';
+import { extractDimensions } from '@/lib/dimensions/extract';
+import { randomCurveType } from '@/lib/spirograph/renderer';
 
 function shannonEntropy(text: string): number {
   const freq: Record<string, number> = {};
@@ -69,5 +71,7 @@ export async function POST(req: NextRequest) {
     } catch { /* answer_hash column may not exist yet */ }
   }
 
-  return Response.json({ valid: true });
+  const dimResult = await extractDimensions(answer);
+  const dimensions = { ...dimResult, curveType: randomCurveType() };
+  return Response.json({ valid: true, dimensions });
 }

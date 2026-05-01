@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import CosmosScene, { type ThoughtData } from '@/components/cosmos/CosmosScene';
-import QuestionCycler from '@/components/QuestionCycler';
+import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
 import { BTW, SANS, mulberry32, hashString } from '@/lib/btw';
 
@@ -22,7 +22,7 @@ interface CosmosStarRaw {
 export default function LandingPage() {
   const [questionId, setQuestionId] = useState<string | null>(null);
   const [thoughts, setThoughts] = useState<ThoughtData[]>([]);
-  const [pending, setPending] = useState<{ answer: string; questionId: string } | null>(null);
+  const [pending, setPending] = useState<ValidatedPayload | null>(null);
 
   useEffect(() => {
     if (!questionId || questionId === 'fallback') return;
@@ -71,6 +71,7 @@ export default function LandingPage() {
         <UniqueOverlay
           answer={pending.answer}
           questionId={pending.questionId}
+          dimensions={pending.dimensions}
           onBack={() => setPending(null)}
         />
       )}
