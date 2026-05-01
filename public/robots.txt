@@ -1,0 +1,11 @@
+# Allow all well-behaved crawlers
+User-agent: *
+Allow: /
+
+# Explicitly allow Facebook's link-preview crawler
+# (needed to fetch og:image and og:description for shared links)
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Facebot
+Allow: /
