@@ -31,6 +31,7 @@ interface CosmosSceneProps {
   activeStar?: string | null;
   userStar?: string | null;
   paused?: boolean;
+  mode?: 'passive' | 'active';
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
 }
@@ -74,8 +75,9 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, onThoughtClick, onBackgroundClick }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, mode, onThoughtClick, onBackgroundClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const modeRef = useRef<'passive' | 'active'>('active');
 
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
@@ -94,6 +96,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { activeStarRef.current = activeStar ?? null; }, [activeStar]);
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
+    useEffect(() => { modeRef.current = mode ?? 'active'; }, [mode]);
 
     // Baked-in sky/terrain values
     const SKY_BRIGHT  = 1.10;
@@ -425,6 +428,30 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const group = new THREE.Group();
         let spiro: StarSpiro | null = null;
 
+        if (modeRef.current === 'passive') {
+          // Blurred glow dot — 64×64 soft radial gradient
+          const dc = document.createElement('canvas'); dc.width = 64; dc.height = 64;
+          const dctx = dc.getContext('2d')!;
+          const gr = dctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+          gr.addColorStop(0,   `rgba(${er},${eg},${eb},0.75)`);
+          gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.28)`);
+          gr.addColorStop(0.8, `rgba(${er},${eg},${eb},0.05)`);
+          gr.addColorStop(1,   `rgba(${er},${eg},${eb},0)`);
+          dctx.fillStyle = gr; dctx.fillRect(0, 0, 64, 64);
+          const passiveTex = new THREE.CanvasTexture(dc);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (passiveTex as any).encoding = 3001;
+          const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: passiveTex, transparent: true, depthWrite: false }));
+          dot.scale.set(8, 8, 1);
+          group.add(dot);
+          // No spiro, no clickSphere — passive stars are non-interactive
+          group.position.set(t.x, t.y, t.z);
+          group.userData = { id: t.id, baseY: t.y, bobPhase: rand() * Math.PI * 2, bobSpeed: 0.2 + rand() * 0.3, scaleMult: 1.0, spiro: null, orbit: null, pulsePhase: 0 };
+          scene.add(group);
+          thoughtGroups.set(t.id, group);
+          return;
+        }
+
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
           const canvas = document.createElement('canvas');
@@ -637,12 +664,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const keys: Record<string, boolean> = {};
       const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; };
       const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
-      window.addEventListener('keydown', onKeyDown);
-      window.addEventListener('keyup', onKeyUp);
+      if (modeRef.current !== 'passive') {
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+      }
 
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
       const onClickCanvas = (e: MouseEvent) => {
+        if (modeRef.current === 'passive') return;
         const relX = e.clientX / container.clientWidth;
         const relY = e.clientY / container.clientHeight;
         mouse.x = relX * 2 - 1;

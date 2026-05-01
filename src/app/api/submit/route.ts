@@ -8,7 +8,7 @@ import { hashString } from '@/lib/btw';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { answer, question_id } = body;
+  const { answer, question_id, unique_fact } = body;
 
   if (!answer || typeof answer !== 'string') {
     return Response.json({ error: 'Missing answer' }, { status: 400 });
@@ -59,7 +59,18 @@ export async function POST(req: NextRequest) {
       approved_at: new Date().toISOString(),
       ip_hash: ipHash,
       dimensions,
+      unique_fact: unique_fact ?? null,
+      answer_hash: hashString(answer.trim().toLowerCase()).toString(16),
     });
+
+  if (!error) {
+    try {
+      await supabaseServer.from('rate_limits').insert({
+        ip_hash: ipHash,
+        action: 'star_create',
+      });
+    } catch { /* table may not exist yet */ }
+  }
 
   if (error) {
     console.error('Insert star error:', error);

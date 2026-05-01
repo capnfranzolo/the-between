@@ -1,6 +1,5 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH, QUESTION_TEXT } from '@/lib/constants';
 import { supabaseClient } from '@/lib/supabase/client';
@@ -12,14 +11,21 @@ interface Question {
 
 const FALLBACK: Question[] = [{ id: 'fallback', text: QUESTION_TEXT }];
 
-export default function QuestionCycler() {
+interface QuestionCyclerProps {
+  onQuestionChange?: (questionId: string) => void;
+  onValidated?: (data: { answer: string; questionId: string }) => void;
+  validationError?: string | null;
+  onClearError?: () => void;
+}
+
+export default function QuestionCycler({ onQuestionChange, onValidated, validationError, onClearError }: QuestionCyclerProps) {
   const [questions, setQuestions] = useState<Question[]>(FALLBACK);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [fadingOut, setFadingOut] = useState(false);
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const router = useRouter();
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
     supabaseClient
@@ -31,6 +37,12 @@ export default function QuestionCycler() {
         if (data && data.length > 0) setQuestions(data as Question[]);
       });
   }, []);
+
+  useEffect(() => {
+    if (questions[currentIndex]?.id && questions[currentIndex].id !== 'fallback') {
+      onQuestionChange?.(questions[currentIndex].id);
+    }
+  }, [questions, currentIndex, onQuestionChange]);
 
   const nextQuestion = useCallback(() => {
     if (fadingOut) return;
@@ -49,18 +61,22 @@ export default function QuestionCycler() {
   const handleSubmit = async () => {
     if (!ready || tooLong || submitting) return;
     setSubmitting(true);
+    onClearError?.();
     try {
-      const res = await fetch('/api/submit', {
+      const res = await fetch('/api/submit/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answer: text.trim(), question_id: questions[currentIndex].id }),
+        body: JSON.stringify({ answer: text.trim(), questionId: questions[currentIndex].id }),
       });
       const data = await res.json();
-      if (data.shortcode) {
-        localStorage.setItem('my_star', data.shortcode);
-        router.push(`/s/${data.shortcode}`);
+      if (data.valid) {
+        onValidated?.({ answer: text.trim(), questionId: questions[currentIndex].id });
+      } else {
+        setInlineError(data.reason ?? 'Something went wrong.');
       }
     } catch {
+      setInlineError('Something went wrong. Try again.');
+    } finally {
       setSubmitting(false);
     }
   };
@@ -82,7 +98,7 @@ export default function QuestionCycler() {
           textWrap: 'pretty',
           transition: 'opacity 400ms ease',
           opacity: fadingOut ? 0 : 1,
-        }}
+        } as React.CSSProperties}
       >
         {question.text}
       </h1>
@@ -91,7 +107,7 @@ export default function QuestionCycler() {
       <div style={{ width: '100%', maxWidth: 340, marginTop: 44 }}>
         <textarea
           value={text}
-          onChange={e => setText(e.target.value.slice(0, 600))}
+          onChange={e => { setText(e.target.value.slice(0, 600)); if (inlineError) setInlineError(null); }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSubmit(); }}
@@ -156,10 +172,20 @@ export default function QuestionCycler() {
             onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
           >
-            {submitting ? 'Sending…' : 'See your thought →'}
+            {submitting ? 'Checking…' : 'See your thought →'}
           </button>
 
           <div id="turnstile-widget" style={{ marginTop: 16 }} />
+
+          {(inlineError || validationError) && (
+            <div style={{
+              marginTop: 12, fontSize: 13, color: '#E07060',
+              fontFamily: SANS, letterSpacing: '0.02em',
+              lineHeight: 1.4, maxWidth: 320, textAlign: 'center',
+            }}>
+              {inlineError || validationError}
+            </div>
+          )}
 
           {questions.length > 1 && (
             <button
