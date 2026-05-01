@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react';
+import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
@@ -106,13 +106,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const dbgStarSpeedRef   = useRef(0.50);
     const dbgStarFloorRef   = useRef(0.65);
 
-    // Sky gradient sliders — state drives display, refs drive the animate loop
-    const [gradLift,  setGradLift]  = useState(0.23);
-    const [gradSteep, setGradSteep] = useState(1.25);
-    const [sunShift,  setSunShift]  = useState(0.11);
-    const gradLiftRef  = useRef(0.23);
-    const gradSteepRef = useRef(1.25);
-    const sunShiftRef  = useRef(0.11);
+    const gradLiftRef  = useRef(0.22);
+    const gradSteepRef = useRef(1.85);
+    const sunShiftRef  = useRef(0.05);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -158,9 +154,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
           uBrightness:{ value: SKY_BRIGHT },
-          uGradSteep: { value: 1.25 },
-          uGradLift:  { value: 0.23 },
-          uSunShift:  { value: 0.11 },
+          uGradSteep: { value: 1.85 },
+          uGradLift:  { value: 0.22 },
+          uSunShift:  { value: 0.05 },
           uSkyGrad:   { value: null as THREE.Texture | null },
         },
         vertexShader: `
@@ -953,40 +949,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
     }, [bonds]);
 
-    return (
-      <>
-        <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
-        <div style={{
-          position: 'fixed', bottom: 20, left: 20, zIndex: 20,
-          background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.10)',
-          borderRadius: 12, padding: '14px 18px',
-          fontFamily: 'ui-monospace, monospace', fontSize: 12,
-          color: 'rgba(255,255,255,0.8)', minWidth: 230,
-          display: 'flex', flexDirection: 'column', gap: 10,
-          pointerEvents: 'auto',
-        }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.4, textTransform: 'uppercase' }}>sky</div>
-          {([
-            ['Grad lift',  gradLift,  (v: number) => { setGradLift(v);  gradLiftRef.current  = v; }, 0.00, 0.40, 0.01],
-            ['Grad steep', gradSteep, (v: number) => { setGradSteep(v); gradSteepRef.current = v; }, 0.40, 3.00, 0.05],
-            ['Sun shift',  sunShift,  (v: number) => { setSunShift(v);  sunShiftRef.current  = v; }, 0.00, 0.50, 0.01],
-          ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
-            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ opacity: 0.7 }}>{label}</span>
-                <span style={{ color: '#a0c8ff' }}>{val.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={min} max={max} step={step} value={val}
-                onChange={e => set(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: '#7060c0' }}
-              />
-            </div>
-          ))}
-        </div>
-      </>
-    );
+    return <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;
   },
 );
 
