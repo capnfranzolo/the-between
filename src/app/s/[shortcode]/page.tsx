@@ -63,14 +63,31 @@ export default async function StarPage({ params }: Props) {
   const { shortcode } = await params;
   const { data: star } = await supabaseServer
     .from('stars')
-    .select('question_id')
+    .select('answer, unique_fact, question_id')
     .eq('shortcode', shortcode)
     .eq('status', 'approved')
     .single();
+
+  let questionText: string | null = null;
+  if (star?.question_id) {
+    const { data: q } = await supabaseServer
+      .from('questions')
+      .select('text')
+      .eq('id', star.question_id)
+      .single();
+    if (q?.text) questionText = q.text;
+  }
 
   const to = star
     ? `/cosmos/${star.question_id}?star=${shortcode}`
     : '/';
 
-  return <StarRedirectClient to={to} />;
+  return (
+    <StarRedirectClient
+      to={to}
+      answer={star?.answer ?? null}
+      byline={star?.unique_fact ?? null}
+      question={questionText}
+    />
+  );
 }
