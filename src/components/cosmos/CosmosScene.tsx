@@ -96,7 +96,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
 
     // Baked-in sky/terrain values
-    const EXPOSURE    = 0.90;
     const SKY_BRIGHT  = 1.10;
     const TERRAIN_BRIGHT = 1.00;
     const BASE_CAM_Y  = 65;
@@ -108,12 +107,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const dbgStarFloorRef   = useRef(0.65);
 
     // Sky gradient sliders — state drives display, refs drive the animate loop
-    const [gradLift,  setGradLift]  = useState(0.12);
-    const [gradSteep, setGradSteep] = useState(1.30);
-    const [sunShift,  setSunShift]  = useState(0.16);
-    const gradLiftRef  = useRef(0.12);
-    const gradSteepRef = useRef(1.30);
-    const sunShiftRef  = useRef(0.16);
+    const [gradLift,  setGradLift]  = useState(0.23);
+    const [gradSteep, setGradSteep] = useState(1.25);
+    const [sunShift,  setSunShift]  = useState(0.11);
+    const gradLiftRef  = useRef(0.23);
+    const gradSteepRef = useRef(1.25);
+    const sunShiftRef  = useRef(0.11);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -136,8 +135,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.90;
+      renderer.toneMapping = THREE.NoToneMapping;
+      // sRGBEncoding matches the browser canvas color space — spirographs look as vivid in 3D as in 2D
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (renderer as any).outputEncoding = 3001; // THREE.sRGBEncoding
+      renderer.toneMappingExposure = 1.0;
       container.appendChild(renderer.domElement);
 
       // ─── LIGHTING ───
@@ -156,9 +158,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
           uBrightness:{ value: SKY_BRIGHT },
-          uGradSteep: { value: 1.30 },
-          uGradLift:  { value: 0.12 },
-          uSunShift:  { value: 0.16 },
+          uGradSteep: { value: 1.25 },
+          uGradLift:  { value: 0.23 },
+          uSunShift:  { value: 0.11 },
           uSkyGrad:   { value: null as THREE.Texture | null },
         },
         vertexShader: `
@@ -227,6 +229,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         skyGradTex.minFilter = THREE.LinearFilter;
         skyGradTex.magFilter = THREE.LinearFilter;
         skyGradTex.wrapS = THREE.ClampToEdgeWrapping;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (skyGradTex as any).encoding = 3001; // THREE.sRGBEncoding
         skyMat.uniforms.uSkyGrad.value = skyGradTex;
       }
 
@@ -428,11 +432,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
           const canvas = document.createElement('canvas');
-          const inst = createSpirograph(canvas, t.dimensions, { size: SPIRO_SIZE, dpr: 1 });
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const inst = createSpirograph(canvas, t.dimensions, { size: SPIRO_SIZE, dpr });
           // Per-star time offset so animations don't all sync up
           const timeOffset = (hashStr(t.id) % 10000) / 1000;
           inst.renderStatic(timeOffset);
           const texture = new THREE.CanvasTexture(canvas);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (texture as any).encoding = 3001; // THREE.sRGBEncoding
           const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
             map: texture, transparent: true, depthWrite: false, opacity: 1.0,
           }));
@@ -494,6 +501,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr });
         inst.start();
         const texture = new THREE.CanvasTexture(canvas);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (texture as any).encoding = 3001; // THREE.sRGBEncoding
         const mat = spiro.sprite.material as THREE.SpriteMaterial;
         const origTexture = mat.map!;
         mat.map = texture;
@@ -693,7 +702,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         starMat.uniforms.uStarDensity.value    = dbgStarDensityRef.current;
         starMat.uniforms.uStarSpeed.value      = dbgStarSpeedRef.current;
         starMat.uniforms.uStarFloor.value      = dbgStarFloorRef.current;
-        renderer.toneMappingExposure = EXPOSURE;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
