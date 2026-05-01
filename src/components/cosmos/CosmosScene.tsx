@@ -728,6 +728,126 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       };
       renderer.domElement.addEventListener('click', onClickCanvas);
 
+      // ─── TOUCH CONTROLS ─────────────────────────────────────────────────
+      // Swipe → yaw/pitch with momentum, pinch → zoom, tap → select, double-tap → boost
+      const touch = {
+        active: false,
+        startX: 0, startY: 0,
+        lastX: 0, lastY: 0,
+        startTime: 0,
+        lastTapTime: 0,   // for double-tap detection
+        velX: 0,           // heading velocity (rad/frame), decays with friction
+        velY: 0,           // pitch velocity (rad/frame), decays with friction
+        pinchDist: 0,
+        pinchVel: 0,       // forward/backward velocity (units/frame), decays
+      };
+
+      const raycastAtPoint = (clientX: number, clientY: number) => {
+        const relX = clientX / container.clientWidth;
+        const relY = clientY / container.clientHeight;
+        mouse.x = relX * 2 - 1;
+        mouse.y = -(relY) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        // Expand raycaster sphere threshold for easier finger targeting
+        const hits = raycaster.intersectObjects(thoughtMeshes);
+        return hits[0] ?? null;
+      };
+
+      const onTouchStart = (e: TouchEvent) => {
+        if (modeRef.current === 'passive') return;
+        // Always prevent default — stops pull-to-refresh and page rubber-band
+        e.preventDefault();
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          touch.active = true;
+          touch.startX = touch.lastX = t.clientX;
+          touch.startY = touch.lastY = t.clientY;
+          touch.startTime = Date.now();
+          touch.velX = 0;
+          touch.velY = 0;
+        } else if (e.touches.length === 2) {
+          // Pinch start — record initial distance
+          const dx = e.touches[1].clientX - e.touches[0].clientX;
+          const dy = e.touches[1].clientY - e.touches[0].clientY;
+          touch.pinchDist = Math.sqrt(dx * dx + dy * dy);
+          touch.active = false; // cancel any pending single-touch state
+        }
+      };
+
+      const onTouchMove = (e: TouchEvent) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && touch.active) {
+          const t = e.touches[0];
+          const dx = t.clientX - touch.lastX;
+          const dy = t.clientY - touch.lastY;
+          touch.lastX = t.clientX;
+          touch.lastY = t.clientY;
+
+          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
+          const sensX = (Math.PI * 1.4) / container.clientWidth;
+          const sensY = (Math.PI * 0.7) / container.clientHeight;
+
+          // Immediately apply delta (no lag) AND store as velocity for momentum
+          heading += dx * sensX;
+          if (!activeStarRef.current) {
+            // Don't override pitch when locked to a selected star
+            pitch = Math.max(-0.4, Math.min(0.7, pitch - dy * sensY));
+          }
+          touch.velX = dx * sensX;
+          touch.velY = -dy * sensY;
+
+          // Clear any keyboard-triggered targetHeading so swipe takes over
+          targetHeading = null;
+
+        } else if (e.touches.length === 2) {
+          const dx = e.touches[1].clientX - e.touches[0].clientX;
+          const dy = e.touches[1].clientY - e.touches[0].clientY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const delta = dist - touch.pinchDist;
+          touch.pinchDist = dist;
+          // Pinch out (dist grows) → move forward; pinch in → pull back
+          touch.pinchVel = delta * 0.22;
+        }
+      };
+
+      const onTouchEnd = (e: TouchEvent) => {
+        if (!touch.active) return;
+        const moveDist = Math.sqrt(
+          (touch.lastX - touch.startX) ** 2 + (touch.lastY - touch.startY) ** 2,
+        );
+        const duration = Date.now() - touch.startTime;
+        touch.active = false;
+
+        // Tap: < 12px movement and < 300ms — treat as a click
+        if (moveDist < 12 && duration < 300) {
+          const now = Date.now();
+          const isDoubleTap = now - touch.lastTapTime < 350;
+          touch.lastTapTime = now;
+
+          if (isDoubleTap) {
+            // Double-tap: temporary speed boost (replaces Space bar)
+            speed = 28;
+          } else {
+            // Single tap: raycast for star selection
+            const hit = raycastAtPoint(touch.lastX, touch.lastY);
+            if (hit) {
+              const { thoughtId, thoughtGroup } = hit.object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
+              const tdx = thoughtGroup.position.x - camera.position.x;
+              const tdz = thoughtGroup.position.z - camera.position.z;
+              targetHeading = Math.atan2(tdx, -tdz);
+              onClickRef.current?.(thoughtId);
+            } else {
+              onBgClickRef.current?.();
+            }
+          }
+        }
+        // If it was a swipe, velX/velY are already set — momentum decays in animate loop
+      };
+
+      renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+      renderer.domElement.addEventListener('touchmove',  onTouchMove,  { passive: false });
+      renderer.domElement.addEventListener('touchend',   onTouchEnd,   { passive: false });
+
       const onResize = () => {
         camera.aspect = container.clientWidth / container.clientHeight;
         camera.updateProjectionMatrix();
@@ -773,6 +893,24 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           if (currentActiveStar) activateLive(currentActiveStar);
           prevActiveStar = currentActiveStar;
         }
+
+        // ── Touch momentum — coasts after swipe / pinch ends ──────────────────
+        if (Math.abs(touch.velX) > 0.0002) {
+          heading += touch.velX;
+          touch.velX *= 0.87; // friction: ~12 frames to stop from a medium swipe
+        } else { touch.velX = 0; }
+        if (Math.abs(touch.velY) > 0.0002 && !activeStarRef.current) {
+          pitch = Math.max(-0.4, Math.min(0.7, pitch + touch.velY));
+          touch.velY *= 0.87;
+        } else { touch.velY = 0; }
+        if (Math.abs(touch.pinchVel) > 0.05) {
+          // Pinch moves camera forward/backward — clamped so you can't enter terrain
+          const fwdX2 = Math.sin(heading);
+          const fwdZ2 = -Math.cos(heading);
+          camera.position.x += fwdX2 * touch.pinchVel;
+          camera.position.z += fwdZ2 * touch.pinchVel;
+          touch.pinchVel *= 0.82;
+        } else { touch.pinchVel = 0; }
 
         // Heading: smooth toward target, or very slow drift when idle
         if (targetHeading !== null) {
@@ -964,6 +1102,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
+        renderer.domElement.removeEventListener('touchstart', onTouchStart);
+        renderer.domElement.removeEventListener('touchmove',  onTouchMove);
+        renderer.domElement.removeEventListener('touchend',   onTouchEnd);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
