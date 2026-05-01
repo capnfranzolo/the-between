@@ -32,6 +32,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const ogImageUrl = `https://${SITE_URL}/api/og/${shortcode}`;
 
+  const pageUrl = `https://${SITE_URL}/s/${shortcode}`;
+
   return {
     title: `The Between — ${questionText}`,
     description,
@@ -40,6 +42,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       siteName: 'The Between',
       type: 'website',
+      url: pageUrl,
       images: [{
         url: ogImageUrl,
         width: 1200,

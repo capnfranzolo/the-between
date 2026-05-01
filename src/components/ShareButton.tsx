@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BTW, withAlpha } from '@/lib/btw';
 
 interface ShareButtonProps {
@@ -70,16 +70,36 @@ const CheckIcon = () => (
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+// Tray dimensions (keep in sync with actual rendered size)
+const TRAY_WIDTH  = 164;
+const TRAY_HEIGHT = 252; // ~5 items × ~44px + 8px padding × 2
+
 export default function ShareButton({ url, style }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Fixed coordinates for the tray (set when opening)
+  const [trayPos, setTrayPos] = useState<{ top: number; left: number } | null>(null);
+
+  const openTray = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    // Position tray above the trigger, right-aligned
+    const top  = rect.top - TRAY_HEIGHT - 10;
+    const left = rect.right - TRAY_WIDTH;
+    setTrayPos({ top: Math.max(8, top), left: Math.max(8, left) });
+    setOpen(true);
+  }, []);
 
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const tray = document.getElementById('btw-share-tray');
+      if (
+        tray && !tray.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
@@ -131,10 +151,11 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
   ];
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex', ...style }}>
+    <div style={{ position: 'relative', display: 'inline-flex', ...style }}>
       {/* Trigger button */}
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={triggerRef}
+        onClick={() => open ? setOpen(false) : openTray()}
         title="Share this star"
         aria-label="Share this star"
         aria-expanded={open}
@@ -168,24 +189,25 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
         <ShareIcon />
       </button>
 
-      {/* Slide-out tray — opens upward above the trigger */}
-      {open && (
+      {/* Slide-out tray — fixed positioning escapes any overflow:auto parent */}
+      {open && trayPos && (
         <div
+          id="btw-share-tray"
           style={{
-            position: 'absolute',
-            bottom: 'calc(100% + 10px)',
-            right: 0,
+            position: 'fixed',
+            top: trayPos.top,
+            left: trayPos.left,
             display: 'flex',
             flexDirection: 'column',
             gap: 4,
-            background: 'rgba(14,10,32,0.92)',
-            backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)',
-            border: `1px solid ${withAlpha(BTW.textPri, 0.1)}`,
+            background: 'rgba(14,10,32,0.96)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: `1px solid ${withAlpha(BTW.textPri, 0.13)}`,
             borderRadius: 14,
             padding: '8px 6px',
-            zIndex: 20,
-            minWidth: 148,
+            zIndex: 9999,
+            width: TRAY_WIDTH,
             animation: 'shareSlideUp .2s cubic-bezier(.2,.8,.3,1)',
           }}
         >

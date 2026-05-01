@@ -32,6 +32,7 @@ export default function CosmosPage() {
   const searchParams = useSearchParams();
   const starParam = searchParams.get('star');
   const [data, setData] = useState<CosmosData | null>(null);
+  const [allQuestions, setAllQuestions] = useState<{ id: string }[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectConfirmed, setConnectConfirmed] = useState(false);
@@ -43,6 +44,14 @@ export default function CosmosPage() {
   const [showAbout, setShowAbout] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
+
+  // Fetch all questions so we can cycle to the next one
+  useEffect(() => {
+    fetch('/api/questions')
+      .then(r => r.json())
+      .then(d => setAllQuestions(d.questions ?? []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch(`/api/cosmos/${questionId}`)
@@ -229,6 +238,40 @@ export default function CosmosPage() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
+        {/* Next question — upper right */}
+        {allQuestions.length > 1 && (() => {
+          const idx = allQuestions.findIndex(q => q.id === questionId);
+          const next = allQuestions[(idx + 1) % allQuestions.length];
+          return (
+            <div style={{
+              position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 16px)', right: 20,
+              pointerEvents: 'auto', zIndex: 3,
+            }}>
+              <button
+                onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: BTW.textDim,
+                  fontSize: 11,
+                  letterSpacing: '0.22em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  padding: '6px 0',
+                  fontFamily: SANS,
+                  opacity: 0.55,
+                  transition: 'opacity .2s',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '0.55'; }}
+              >
+                Next question ›
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Top chrome */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0,

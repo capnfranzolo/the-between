@@ -686,6 +686,7 @@ function SettingsTab() {
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [authError, setAuthError] = useState('');
   const [checking, setChecking] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -755,15 +756,29 @@ export default function AdminPage() {
       <div style={{ ...S.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ width: 280 }}>
           <div style={{ fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.1em', color: '#555', marginBottom: 24, textAlign: 'center' }}>THE BETWEEN — ADMIN</div>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAuth()}
-            placeholder="Password"
-            autoFocus
-            style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const, marginBottom: 8 }}
-          />
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <input
+              type={showPass ? 'text' : 'password'}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAuth()}
+              placeholder="Password"
+              autoFocus
+              style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const, paddingRight: 36 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPass(s => !s)}
+              title={showPass ? 'Hide password' : 'Show password'}
+              style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: showPass ? '#aaa' : '#555', padding: 2, lineHeight: 1, fontSize: 14,
+              }}
+            >
+              {showPass ? '🙈' : '👁'}
+            </button>
+          </div>
           {authError && <div style={{ color: '#cc4444', fontSize: 12, marginBottom: 8 }}>{authError}</div>}
           <button onClick={handleAuth} disabled={checking} style={{ ...S.btn('primary'), width: '100%', padding: '10px' }}>
             {checking ? 'Checking…' : 'Enter →'}
