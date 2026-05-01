@@ -5,6 +5,7 @@ import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } 
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import AboutModal from '@/components/AboutModal';
+import AddToHomeScreen from '@/components/AddToHomeScreen';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString } from '@/lib/btw';
 
@@ -304,6 +305,7 @@ export default function CosmosPage() {
             onConnect={() => setConnecting(true)}
             connections={selectedConnections}
             onConnectionClick={handleThoughtClick}
+            onDismiss={clearSelection}
           />
         )}
 
@@ -359,7 +361,8 @@ export default function CosmosPage() {
 
         {/* Bottom-left: brand */}
         <div style={{
-          position: 'absolute', left: 24, bottom: 24,
+          position: 'absolute', left: 24,
+          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
           pointerEvents: 'auto', zIndex: 3,
         }}>
           <button
@@ -367,7 +370,8 @@ export default function CosmosPage() {
             style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
               fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
-              color: BTW.textDim, padding: 0,
+              color: BTW.textDim, padding: '6px 0',
+              minHeight: 44,
               transition: 'color .2s',
             }}
             onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
@@ -379,17 +383,18 @@ export default function CosmosPage() {
 
         {/* Bottom-right: add star */}
         <div style={{
-          position: 'absolute', right: 24, bottom: 24,
+          position: 'absolute', right: 24,
+          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
           pointerEvents: 'auto', zIndex: 3,
         }}>
           <button
             onClick={() => { window.location.href = '/'; }}
             title="Add your thought"
             style={{
-              width: 32, height: 32, borderRadius: '50%',
+              width: 44, height: 44, borderRadius: '50%',
               background: 'rgba(240,232,224,0.07)',
               border: '1px solid rgba(240,232,224,0.18)',
-              color: BTW.textDim, fontSize: 20, lineHeight: '30px',
+              color: BTW.textDim, fontSize: 22,
               cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
               transition: 'background .2s, border-color .2s',
             }}
@@ -407,6 +412,8 @@ export default function CosmosPage() {
           }
         `}</style>
       </div>
+
+      <AddToHomeScreen />
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>

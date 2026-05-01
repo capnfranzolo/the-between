@@ -44,26 +44,40 @@ export default function LandingPage() {
     <>
       <CosmosScene mode="passive" thoughts={thoughts} bonds={[]} />
 
+      {/*
+        On desktop: vertically centred.
+        On mobile: placed at ~55% from top so it sits in the natural thumb zone,
+        clear of the status bar (top safe-area) and the bottom sheet / home bar.
+      */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 1,
         display: 'flex', flexDirection: 'column',
-        justifyContent: 'center', alignItems: 'center',
-        padding: '0 28px', textAlign: 'center',
+        alignItems: 'center',
+        paddingTop: 'max(env(safe-area-inset-top, 0px) + 16px, clamp(40px, 20vh, 180px))',
+        padding: '0 clamp(16px, 5vw, 40px)',
+        textAlign: 'center',
         fontFamily: SANS, color: BTW.textPri,
         pointerEvents: 'none',
+        // Push content down on mobile to the ~55% thumb-reach zone
+        justifyContent: 'center',
       }}>
         <div style={{
-          fontSize: 11, letterSpacing: '0.32em',
-          textTransform: 'uppercase', color: BTW.textDim,
-          marginBottom: 36, pointerEvents: 'none',
+          // Nudge downward on small screens so the form sits in thumb reach
+          marginTop: 'min(0px, 10vh)',
         }}>
-          The Between
-        </div>
-        <div style={{ pointerEvents: 'auto' }}>
-          <QuestionCycler
-            onQuestionChange={setQuestionId}
-            onValidated={setPending}
-          />
+          <div style={{
+            fontSize: 11, letterSpacing: '0.32em',
+            textTransform: 'uppercase', color: BTW.textDim,
+            marginBottom: 36, pointerEvents: 'none',
+          }}>
+            The Between
+          </div>
+          <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: 640 }}>
+            <QuestionCycler
+              onQuestionChange={setQuestionId}
+              onValidated={setPending}
+            />
+          </div>
         </div>
       </div>
 

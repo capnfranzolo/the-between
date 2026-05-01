@@ -1,4 +1,5 @@
 'use client';
+import { useRef, useEffect } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
@@ -24,114 +25,181 @@ interface StarDetailProps {
   onConnect: () => void;
   connections?: Array<{ reason: string; relatedStarId?: string }>;
   onConnectionClick?: (id: string) => void;
+  onDismiss?: () => void;
 }
 
-export default function StarDetail({ star, hasMystar, userHasOutgoingBond, onConnect, connections, onConnectionClick }: StarDetailProps) {
+export default function StarDetail({
+  star, hasMystar, userHasOutgoingBond, onConnect,
+  connections, onConnectionClick, onDismiss,
+}: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ active: false, startY: 0, startScrollTop: 0 });
+
+  // Swipe-down-to-dismiss on the drag handle
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || !onDismiss) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      // Only react to touches starting on the drag handle (top 44px of panel)
+      const rect = panel.getBoundingClientRect();
+      const touchY = e.touches[0].clientY - rect.top;
+      if (touchY > 44) return;
+      dragRef.current = { active: true, startY: e.touches[0].clientY, startScrollTop: panel.scrollTop };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!dragRef.current.active) return;
+      const dy = e.touches[0].clientY - dragRef.current.startY;
+      if (dy > 60) {
+        dragRef.current.active = false;
+        onDismiss();
+      }
+    };
+    const onTouchEnd = () => { dragRef.current.active = false; };
+
+    panel.addEventListener('touchstart', onTouchStart, { passive: true });
+    panel.addEventListener('touchmove',  onTouchMove,  { passive: true });
+    panel.addEventListener('touchend',   onTouchEnd,   { passive: true });
+    return () => {
+      panel.removeEventListener('touchstart', onTouchStart);
+      panel.removeEventListener('touchmove',  onTouchMove);
+      panel.removeEventListener('touchend',   onTouchEnd);
+    };
+  }, [onDismiss]);
 
   return (
     <div
+      ref={panelRef}
       onClick={e => e.stopPropagation()}
       style={{
         position: 'absolute',
-        left: '50%', bottom: 28,
+        left: '50%',
+        bottom: 0,
         transform: 'translateX(-50%)',
-        width: 'min(560px, 90%)',
-        background: 'rgba(20,14,40,0.72)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        border: `1px solid ${withAlpha(BTW.textPri, 0.18)}`,
-        borderRadius: 18,
-        padding: '24px 28px',
+        width: 'min(560px, 100%)',
+        // Slide up from bottom, max 50vh so the star stays visible above
+        maxHeight: '50vh',
+        overflowY: 'auto',
+        background: 'rgba(20,14,40,0.82)',
+        backdropFilter: 'blur(18px)',
+        WebkitBackdropFilter: 'blur(18px)',
+        border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
+        borderBottom: 'none',
+        borderRadius: '18px 18px 0 0',
+        // Bottom padding accounts for home indicator bar on iPhone
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
         color: BTW.textPri,
         zIndex: 6,
         pointerEvents: 'auto',
-        animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
+        animation: 'btwRise .38s cubic-bezier(.2,.8,.3,1)',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
-      <div style={{ fontFamily: SERIF, fontWeight: 400, fontSize: 22, lineHeight: 1.4, color: BTW.textPri }}>
-        &ldquo;{star.text}&rdquo;
+      {/* Drag handle */}
+      <div style={{
+        display: 'flex', justifyContent: 'center',
+        padding: '12px 0 6px',
+        cursor: 'grab',
+        flexShrink: 0,
+      }}>
+        <div style={{
+          width: 40, height: 4,
+          borderRadius: 2,
+          background: withAlpha(BTW.textPri, 0.25),
+        }} />
       </div>
 
-      {star.unique_fact && (
+      <div style={{ padding: '4px 24px 20px' }}>
+        {/* Answer text */}
         <div style={{
-          marginTop: 10,
-          paddingLeft: 18,
-          fontFamily: SANS, fontSize: 13,
-          lineHeight: 1.45, color: BTW.textSec,
-          fontStyle: 'italic',
+          fontFamily: SERIF, fontWeight: 400,
+          fontSize: 'clamp(18px, 4vw, 22px)',
+          lineHeight: 1.45, color: BTW.textPri,
         }}>
-          — {star.unique_fact}
+          &ldquo;{star.text}&rdquo;
         </div>
-      )}
 
-      {connections && connections.length > 0 && (
-        <div style={{ marginTop: 16 }}>
+        {/* Byline */}
+        {star.unique_fact && (
           <div style={{
-            fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase',
-            color: BTW.horizon[3], opacity: 0.8, marginBottom: 8,
+            marginTop: 10,
+            paddingLeft: 16,
+            fontFamily: SANS, fontSize: 13,
+            lineHeight: 1.45, color: BTW.textSec,
+            fontStyle: 'italic',
           }}>
-            connected
-          </div>
-          <div style={{
-            maxHeight: 160, overflowY: 'auto',
-            display: 'flex', flexDirection: 'column', gap: 6,
-          }}>
-            {connections.map((c, i) => (
-              <div
-                key={i}
-                onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
-                style={{
-                  paddingLeft: 14,
-                  borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
-                  fontFamily: SANS, fontSize: 13,
-                  lineHeight: 1.45, color: BTW.textSec,
-                  cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
-                  transition: 'color .2s',
-                }}
-                onMouseEnter={e => {
-                  if (c.relatedStarId && onConnectionClick)
-                    (e.currentTarget as HTMLDivElement).style.color = BTW.textPri;
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLDivElement).style.color = BTW.textSec;
-                }}
-              >
-                {c.reason}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div style={{
-        marginTop: 18, display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', gap: 16,
-      }}>
-        <ShareButton url={url} />
-        {hasMystar && !star.mine && !userHasOutgoingBond && (
-          <button
-            onClick={onConnect}
-            style={{
-              background: 'transparent',
-              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-              color: BTW.horizon[3],
-              padding: '10px 18px', borderRadius: 999,
-              fontSize: 12, fontWeight: 500, letterSpacing: '0.08em',
-              textTransform: 'uppercase', whiteSpace: 'nowrap',
-              cursor: 'pointer', fontFamily: SANS,
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            Connect your star to this →
-          </button>
-        )}
-        {star.mine && (
-          <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-            your star
+            — {star.unique_fact}
           </div>
         )}
+
+        {/* Connections */}
+        {connections && connections.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{
+              fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase',
+              color: BTW.horizon[3], opacity: 0.8, marginBottom: 8,
+            }}>
+              connected
+            </div>
+            <div style={{
+              maxHeight: 130, overflowY: 'auto',
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}>
+              {connections.map((c, i) => (
+                <div
+                  key={i}
+                  onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
+                  style={{
+                    paddingLeft: 14,
+                    borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
+                    fontFamily: SANS, fontSize: 13,
+                    lineHeight: 1.45, color: BTW.textSec,
+                    // Ensure minimum 44px tap target height
+                    minHeight: 44, display: 'flex', alignItems: 'center',
+                    cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
+                  }}
+                >
+                  {c.reason}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Actions row — share + connect at the bottom, within thumb reach */}
+        <div style={{
+          marginTop: 20,
+          display: 'flex', justifyContent: 'space-between',
+          alignItems: 'center', gap: 12,
+        }}>
+          <ShareButton url={url} />
+          {hasMystar && !star.mine && !userHasOutgoingBond && (
+            <button
+              onClick={onConnect}
+              style={{
+                background: 'transparent',
+                border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+                color: BTW.horizon[3],
+                // 44px min height for Apple HIG touch targets
+                padding: '12px 18px', minHeight: 44,
+                borderRadius: 999,
+                fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
+                textTransform: 'uppercase', whiteSpace: 'nowrap',
+                cursor: 'pointer', fontFamily: SANS,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              Connect your star →
+            </button>
+          )}
+          {star.mine && (
+            <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+              your star
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
