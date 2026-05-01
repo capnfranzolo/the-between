@@ -146,6 +146,8 @@ function StarDetailPanel({
   const [regenning, setRegenning] = useState(false);
   const [regenDiff, setRegenDiff] = useState<{ before: DimsShape; after: DimsShape } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [dims, setDims] = useState(star.dimensions);
   const answerChanged = answer !== star.answer;
 
@@ -175,9 +177,23 @@ function StarDetailPanel({
   }
 
   async function doDelete() {
-    const res = await fetch(`/api/admin/stars/${star.id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.ok) onDeleted(star.id);
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/stars/${star.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.ok) {
+        onDeleted(star.id);
+      } else {
+        setDeleteError(data.error ?? 'Delete failed');
+        setDeleting(false);
+        setConfirmDelete(false);
+      }
+    } catch {
+      setDeleteError('Network error');
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   }
 
   return (
@@ -207,14 +223,17 @@ function StarDetailPanel({
             <button onClick={save} disabled={saving} style={S.btn('primary')}>{saving ? 'Saving…' : 'Save changes'}</button>
             <button onClick={regen} disabled={regenning} style={S.btn()}>{regenning ? 'Regenerating…' : '🔄 Regen star'}</button>
             <a href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.btn(), textDecoration: 'none', display: 'inline-block' }}>👁 Preview</a>
+            {deleteError && <span style={{ color: '#ff6666', fontSize: 12 }}>⚠ {deleteError}</span>}
             {!confirmDelete
-              ? <button onClick={() => setConfirmDelete(true)} style={S.btn('danger')}>🗑 Delete</button>
+              ? <button onClick={() => { setDeleteError(null); setConfirmDelete(true); }} style={S.btn('danger')}>🗑 Delete</button>
               : <>
                   <span style={{ color: '#cc4444', fontSize: 12 }}>
                     Delete?{star.connection_count > 0 && ` (removes ${star.connection_count} connections)`}
                   </span>
-                  <button onClick={doDelete} style={S.btn('danger')}>Confirm</button>
-                  <button onClick={() => setConfirmDelete(false)} style={S.btn()}>Cancel</button>
+                  <button onClick={doDelete} disabled={deleting} style={S.btn('danger')}>
+                    {deleting ? 'Deleting…' : 'Confirm'}
+                  </button>
+                  <button onClick={() => setConfirmDelete(false)} disabled={deleting} style={S.btn()}>Cancel</button>
                 </>}
           </div>
           <div>
@@ -695,8 +714,8 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
 
 function SettingsTab() {
   const [about, setAbout] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState('');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -711,13 +730,25 @@ function SettingsTab() {
   }, []);
 
   async function save() {
-    setSaving(true); setSaved(false);
-    await fetch('/api/admin/settings', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'about', value: about }),
-    });
-    setSaving(false); setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    setSaveState('saving');
+    setSaveError('');
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'about', value: about }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSaveState('saved');
+        setTimeout(() => setSaveState('idle'), 3000);
+      } else {
+        setSaveError(data.error ?? 'Unknown error');
+        setSaveState('error');
+      }
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Network error');
+      setSaveState('error');
+    }
   }
 
   return (
@@ -731,16 +762,17 @@ function SettingsTab() {
       </div>
       <textarea
         value={loaded ? about : 'Loading…'}
-        onChange={e => setAbout(e.target.value)}
+        onChange={e => { setAbout(e.target.value); if (saveState === 'error') setSaveState('idle'); }}
         disabled={!loaded}
         rows={16}
         style={{ ...S.textarea, width: '100%', fontSize: 14, lineHeight: 1.7 }}
       />
       <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button onClick={save} disabled={saving || !loaded} style={S.btn('primary')}>
-          {saving ? 'Saving…' : 'Save'}
+        <button onClick={save} disabled={saveState === 'saving' || !loaded} style={S.btn('primary')}>
+          {saveState === 'saving' ? 'Saving…' : 'Save'}
         </button>
-        {saved && <span style={{ color: '#00cc44', fontSize: 12 }}>Saved.</span>}
+        {saveState === 'saved' && <span style={{ color: '#00cc44', fontSize: 12 }}>Saved.</span>}
+        {saveState === 'error' && <span style={{ color: '#ff6666', fontSize: 12 }}>⚠ {saveError}</span>}
       </div>
     </div>
   );
