@@ -783,9 +783,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.lastX = t.clientX;
           touch.lastY = t.clientY;
 
-          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
-          const sensX = (Math.PI * 1.4) / container.clientWidth;
-          const sensY = (Math.PI * 0.7) / container.clientHeight;
+          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 90°.
+          const sensX = (Math.PI * 0.65) / container.clientWidth;
+          const sensY = (Math.PI * 0.32) / container.clientHeight;
 
           // Immediately apply delta (no lag) AND store as velocity for momentum
           heading += dx * sensX;

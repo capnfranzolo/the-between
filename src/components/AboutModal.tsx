@@ -74,7 +74,7 @@ export default function AboutModal({ onClose }: AboutModalProps) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%', maxWidth: 560,
+          width: '100%', maxWidth: 840,
           maxHeight: '80vh',
           background: 'rgba(18,14,40,0.92)',
           border: `1px solid ${withAlpha(BTW.textPri, 0.1)}`,
@@ -92,7 +92,7 @@ export default function AboutModal({ onClose }: AboutModalProps) {
         </div>
 
         <div style={{
-          fontFamily: SERIF, fontSize: 16,
+          fontFamily: SERIF, fontSize: 18,
           color: BTW.textPri, opacity: 0.88,
         }}>
           {content === null ? (

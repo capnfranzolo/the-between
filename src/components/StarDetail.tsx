@@ -68,6 +68,8 @@ export default function StarDetail({
     };
   }, [onDismiss]);
 
+  const showConnect = hasMystar && !star.mine && !userHasOutgoingBond;
+
   return (
     <div
       ref={panelRef}
@@ -78,25 +80,24 @@ export default function StarDetail({
         bottom: 0,
         transform: 'translateX(-50%)',
         width: 'min(560px, 100%)',
-        // Slide up from bottom, max 50vh so the star stays visible above
-        maxHeight: '50vh',
-        overflowY: 'auto',
+        // Use flex column so the footer is always visible — only the
+        // content area scrolls. Cap at 52vh so the star stays visible.
+        maxHeight: '52vh',
+        display: 'flex',
+        flexDirection: 'column',
         background: 'rgba(20,14,40,0.82)',
         backdropFilter: 'blur(18px)',
         WebkitBackdropFilter: 'blur(18px)',
         border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
         borderBottom: 'none',
         borderRadius: '18px 18px 0 0',
-        // Bottom padding accounts for home indicator bar on iPhone
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
         color: BTW.textPri,
         zIndex: 6,
         pointerEvents: 'auto',
         animation: 'btwRise .38s cubic-bezier(.2,.8,.3,1)',
-        WebkitOverflowScrolling: 'touch',
       }}
     >
-      {/* Drag handle */}
+      {/* Drag handle — flex-shrink: 0 so it never scrolls away */}
       <div style={{
         display: 'flex', justifyContent: 'center',
         padding: '12px 0 6px',
@@ -110,7 +111,13 @@ export default function StarDetail({
         }} />
       </div>
 
-      <div style={{ padding: '4px 24px 20px' }}>
+      {/* Scrollable content area */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch' as React.CSSProperties['WebkitOverflowScrolling'],
+        padding: '4px 24px 12px',
+      }}>
         {/* Answer text */}
         <div style={{
           fontFamily: SERIF, fontWeight: 400,
@@ -142,10 +149,7 @@ export default function StarDetail({
             }}>
               connected
             </div>
-            <div style={{
-              maxHeight: 130, overflowY: 'auto',
-              display: 'flex', flexDirection: 'column', gap: 6,
-            }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {connections.map((c, i) => (
                 <div
                   key={i}
@@ -155,7 +159,6 @@ export default function StarDetail({
                     borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
                     fontFamily: SANS, fontSize: 13,
                     lineHeight: 1.45, color: BTW.textSec,
-                    // Ensure minimum 44px tap target height
                     minHeight: 44, display: 'flex', alignItems: 'center',
                     cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
                   }}
@@ -166,40 +169,48 @@ export default function StarDetail({
             </div>
           </div>
         )}
+      </div>
 
-        {/* Actions row — share + connect at the bottom, within thumb reach */}
-        <div style={{
-          marginTop: 20,
-          display: 'flex', justifyContent: 'space-between',
-          alignItems: 'center', gap: 12,
-        }}>
-          <ShareButton url={url} />
-          {hasMystar && !star.mine && !userHasOutgoingBond && (
-            <button
-              onClick={onConnect}
-              style={{
-                background: 'transparent',
-                border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-                color: BTW.horizon[3],
-                // 44px min height for Apple HIG touch targets
-                padding: '12px 18px', minHeight: 44,
-                borderRadius: 999,
-                fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
-                textTransform: 'uppercase', whiteSpace: 'nowrap',
-                cursor: 'pointer', fontFamily: SANS,
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              Connect your star →
-            </button>
-          )}
-          {star.mine && (
-            <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-              your star
-            </div>
-          )}
-        </div>
+      {/* ── Sticky footer — always visible above the home indicator ── */}
+      <div style={{
+        flexShrink: 0,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 24px',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+        borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
+      }}>
+        <ShareButton url={url} />
+
+        {showConnect && (
+          <button
+            onClick={onConnect}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+              color: BTW.horizon[3],
+              padding: '12px 18px', minHeight: 44,
+              borderRadius: 999,
+              fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+              cursor: 'pointer', fontFamily: SANS,
+              // Explicit touch-action so iOS doesn't eat the tap
+              touchAction: 'manipulation',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            Connect your star →
+          </button>
+        )}
+
+        {star.mine && (
+          <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+            your star
+          </div>
+        )}
       </div>
     </div>
   );
