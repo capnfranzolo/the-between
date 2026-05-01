@@ -235,15 +235,6 @@ export default function CosmosPage() {
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           pointerEvents: 'none',
         }}>
-          <div style={{
-            width: '100%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-          }}>
-            {data && (
-              <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em' }}>
-                {data.stars.length} stars &middot; {bonds.length} bonds
-              </div>
-            )}
-          </div>
           {data?.question?.text && (
             <div style={{
               fontFamily: SERIF, fontStyle: 'italic',
@@ -366,29 +357,11 @@ export default function CosmosPage() {
           />
         )}
 
-        {/* Bottom-left: brand + add-star button */}
+        {/* Bottom-left: brand */}
         <div style={{
           position: 'absolute', left: 24, bottom: 24,
-          display: 'flex', alignItems: 'center', gap: 12,
           pointerEvents: 'auto', zIndex: 3,
         }}>
-          <button
-            onClick={() => { window.location.href = '/'; }}
-            title="Add your thought"
-            style={{
-              width: 32, height: 32, borderRadius: '50%',
-              background: 'rgba(240,232,224,0.07)',
-              border: '1px solid rgba(240,232,224,0.18)',
-              color: BTW.textDim, fontSize: 20, lineHeight: '30px',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background .2s, border-color .2s',
-              flexShrink: 0,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.14)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.35)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.07)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.18)'; }}
-          >
-            +
-          </button>
           <button
             onClick={() => setShowAbout(true)}
             style={{
@@ -401,6 +374,29 @@ export default function CosmosPage() {
             onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
           >
             The Between
+          </button>
+        </div>
+
+        {/* Bottom-right: add star */}
+        <div style={{
+          position: 'absolute', right: 24, bottom: 24,
+          pointerEvents: 'auto', zIndex: 3,
+        }}>
+          <button
+            onClick={() => { window.location.href = '/'; }}
+            title="Add your thought"
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: 'rgba(240,232,224,0.07)',
+              border: '1px solid rgba(240,232,224,0.18)',
+              color: BTW.textDim, fontSize: 20, lineHeight: '30px',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background .2s, border-color .2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.14)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.35)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.07)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.18)'; }}
+          >
+            +
           </button>
         </div>
 
