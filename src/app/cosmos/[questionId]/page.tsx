@@ -296,7 +296,7 @@ export default function CosmosPage() {
           )}
         </div>
 
-        {/* Bottom hint */}
+        {/* Bottom hint — desktop only (keyboard shortcut is meaningless on mobile) */}
         {!selected && !connecting && (
           <div style={{
             position: 'absolute', left: '50%', bottom: 28,
@@ -304,7 +304,9 @@ export default function CosmosPage() {
             fontSize: 13, color: BTW.textDim,
             letterSpacing: '0.18em', textTransform: 'uppercase',
             whiteSpace: 'nowrap', pointerEvents: 'none',
-          }}>
+          }}
+            className="btw-desktop-hint"
+          >
             hold space to drift faster &middot; click a star to read it
           </div>
         )}
@@ -402,58 +404,69 @@ export default function CosmosPage() {
           />
         )}
 
-        {/* Bottom-left: brand */}
-        <div style={{
-          position: 'absolute', left: 24,
-          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
-          pointerEvents: 'auto', zIndex: 3,
-        }}>
-          <button
-            onClick={() => setShowAbout(true)}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
-              color: BTW.textDim, padding: '6px 0',
-              minHeight: 44,
-              transition: 'color .2s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
-            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
-          >
-            The Between
-          </button>
-        </div>
-
-        {/* Bottom-right: add star */}
-        <div style={{
-          position: 'absolute', right: 24,
-          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 18px)',
-          pointerEvents: 'auto', zIndex: 3,
-        }}>
-          <button
-            onClick={() => { window.location.href = '/'; }}
-            title="Add your thought"
-            style={{
-              width: 44, height: 44, borderRadius: '50%',
-              background: 'rgba(240,232,224,0.07)',
-              border: '1px solid rgba(240,232,224,0.18)',
-              color: BTW.textDim, fontSize: 22,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background .2s, border-color .2s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.14)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.35)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.07)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.18)'; }}
-          >
-            +
-          </button>
-        </div>
-
         <style>{`
           @keyframes btwRise {
             from { opacity: 0; transform: translateX(-50%) translateY(20px); }
             to   { opacity: 1; transform: translateX(-50%) translateY(0); }
           }
+          @media (hover: none) and (pointer: coarse) {
+            .btw-desktop-hint { display: none !important; }
+          }
         `}</style>
+      </div>
+
+      {/* ── Bottom chrome — rendered OUTSIDE the overflow:hidden overlay so
+          it is never clipped on iOS Safari. zIndex 5 sits above the cosmos
+          scene (0) and overlay (1) but below StarDetail (6). ── */}
+      <div style={{
+        position: 'fixed',
+        left: 0, right: 0,
+        bottom: 0,
+        height: 'calc(env(safe-area-inset-bottom, 0px) + 62px)',
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        padding: '0 24px',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+        zIndex: 5,
+        pointerEvents: 'none',
+      }}>
+        {/* Brand / about */}
+        <button
+          onClick={() => setShowAbout(true)}
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
+            color: BTW.textDim, padding: '6px 0',
+            minHeight: 44,
+            transition: 'color .2s',
+            pointerEvents: 'auto',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
+          onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
+        >
+          The Between
+        </button>
+
+        {/* Add star */}
+        <button
+          onClick={() => { window.location.href = '/'; }}
+          title="Add your thought"
+          style={{
+            width: 44, height: 44, borderRadius: '50%',
+            background: 'rgba(240,232,224,0.07)',
+            border: '1px solid rgba(240,232,224,0.18)',
+            color: BTW.textDim, fontSize: 22,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background .2s, border-color .2s',
+            pointerEvents: 'auto',
+            touchAction: 'manipulation',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.14)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.35)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.07)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.18)'; }}
+        >
+          +
+        </button>
       </div>
 
       <AddToHomeScreen />

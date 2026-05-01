@@ -3,8 +3,17 @@ import { ImageResponse } from 'next/og';
 import { supabaseServer } from '@/lib/supabase/server';
 import { BTW, withAlpha } from '@/lib/btw';
 import { SITE_URL } from '@/lib/constants';
-import { renderSpirographToBase64 } from '@/lib/spirograph/server-render';
 import type { SpiroDimensions } from '@/lib/spirograph/renderer';
+
+// Dynamic import so the route still works when @napi-rs/canvas isn't installed.
+async function tryRenderSpiro(dims: SpiroDimensions, size: number): Promise<string | null> {
+  try {
+    const { renderSpirographToBase64 } = await import('@/lib/spirograph/server-render');
+    return await renderSpirographToBase64(dims, size);
+  } catch {
+    return null;
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -96,12 +105,7 @@ export async function GET(
   const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
 
   // 3. Render spirograph to base64 PNG (480×480, then display at 240×240)
-  let spiroBg: string | null = null;
-  try {
-    spiroBg = await renderSpirographToBase64(dims, 480);
-  } catch {
-    // If rendering fails, fall through — we'll show without spirograph
-  }
+  const spiroBg = await tryRenderSpiro(dims, 480);
 
   // ── Card layout ────────────────────────────────────────────────────────────
   return new ImageResponse(
