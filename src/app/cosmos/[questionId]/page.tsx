@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
@@ -26,6 +26,8 @@ const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
+  const searchParams = useSearchParams();
+  const starParam = searchParams.get('star');
   const [data, setData] = useState<CosmosData | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -173,14 +175,21 @@ export default function CosmosPage() {
     } catch { /* bond already shown optimistically */ }
   };
 
-  // Auto-focus user's star when cosmos first loads with their star present
+  const initialShortcode = starParam ?? myShortcode;
+
+  // Auto-focus initial star (from ?star= param or user's own star) when cosmos first loads
   useEffect(() => {
-    if (!autoFocused.current && userStarId && data) {
-      autoFocused.current = true;
-      setSelected(userStarId);
-      setTimeout(() => sceneRef.current?.flyToThought(userStarId), 80);
+    if (!autoFocused.current && data) {
+      const initialStarId = initialShortcode
+        ? data.stars.find(s => s.shortcode === initialShortcode)?.id ?? null
+        : null;
+      if (initialStarId) {
+        autoFocused.current = true;
+        setSelected(initialStarId);
+        setTimeout(() => sceneRef.current?.flyToThought(initialStarId), 80);
+      }
     }
-  }, [userStarId, data]);
+  }, [initialShortcode, data]);
 
   const clearSelection = () => {
     setSelected(null);
@@ -239,7 +248,7 @@ export default function CosmosPage() {
               textAlign: 'center',
               maxWidth: 900,
               lineHeight: 1.2,
-              opacity: 0.20,
+              opacity: 0.35,
               pointerEvents: 'none',
             }}>
               {data.question.text}
