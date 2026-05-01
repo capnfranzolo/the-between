@@ -78,6 +78,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
   function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, mode, onThoughtClick, onBackgroundClick }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const modeRef = useRef<'passive' | 'active'>('active');
+    const perfOverlayRef = useRef<HTMLPreElement>(null);
 
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
@@ -133,7 +134,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.5, 2000);
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
       renderer.setSize(container.clientWidth, container.clientHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      // Mobile: force 1.0 — iPhone 14 Pro is 3×, that's 9× the pixels of 1×.
+      // Desktop: cap at 1.5 — the extra sharpness beyond 1.5× is imperceptible on a 3D cosmos.
+      const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+      renderer.setPixelRatio(isMobile ? 1.0 : Math.min(window.devicePixelRatio, 1.5));
       renderer.toneMapping = THREE.NoToneMapping;
       // sRGBEncoding matches the browser canvas color space — spirographs look as vivid in 3D as in 2D
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,7 +154,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       scene.add(new THREE.HemisphereLight(0x5A3D78, 0x1E1030, 0.3));
 
       // ─── SKY DOME — radial gradient emanating from a fixed sun point ───
-      const skyGeo = new THREE.SphereGeometry(900, 64, 64);
+      // 32×16 = 512 triangles vs 64×64 = 4096 — sky is a smooth gradient, no detail needed
+      const skyGeo = new THREE.SphereGeometry(900, 32, 16);
       const skyMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
         uniforms: {
@@ -295,7 +300,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       // ─── TERRAIN ───
       const TERRAIN_SIZE = 5600;
-      const TERRAIN_SEGS = 300;
+      // 80 segs = 6,561 vertices vs 300 segs = 90,601 — terrain snap update is 14× faster
+      const TERRAIN_SEGS = 80;
       const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
       const terrainMat = new THREE.ShaderMaterial({
         transparent: false,
@@ -363,9 +369,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       updateTerrainGeometry();
 
       // ─── CLOUDS ───
+      // 8 clouds on desktop (was 30), 0 on mobile. Smaller textures reduce alpha overdraw.
+      const isMobileCloud = /iPhone|iPad|Android/i.test(navigator.userAgent);
+      const cloudCount = isMobileCloud ? 0 : 8;
       const clouds: THREE.Sprite[] = [];
-      for (let i = 0; i < 30; i++) {
-        const cw = 512; const ch = 200;
+      for (let i = 0; i < cloudCount; i++) {
+        const cw = 256; const ch = 100; // was 512×200 — same visual, ¼ the memory
         const c = document.createElement('canvas');
         c.width = cw; c.height = ch;
         const ctx = c.getContext('2d')!;
@@ -455,9 +464,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
           const canvas = document.createElement('canvas');
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          const inst = createSpirograph(canvas, t.dimensions, { size: SPIRO_SIZE, dpr });
-          // Per-star time offset so animations don't all sync up
+          // dpr=1 for baked stars — 4× less VRAM than dpr=2, visually identical at typical
+          // viewing distances. Live (selected) star uses its own canvas with dpr=1 too.
+          const inst = createSpirograph(canvas, t.dimensions, { size: SPIRO_SIZE, dpr: 1 });
+          // Per-star time offset so all stars look different when static
           const timeOffset = (hashStr(t.id) % 10000) / 1000;
           inst.renderStatic(timeOffset);
           const texture = new THREE.CanvasTexture(canvas);
@@ -485,10 +495,27 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           group.add(dot);
         }
 
-        group.add(new THREE.PointLight(color, 0.8, 40));
+        // Cheap glow halo via additive sprite — replaces per-star PointLight
+        // (point lights multiply draw calls for every object in their range)
+        {
+          const gc = document.createElement('canvas'); gc.width = 32; gc.height = 32;
+          const gx = gc.getContext('2d')!;
+          const gr = gx.createRadialGradient(16, 16, 0, 16, 16, 16);
+          gr.addColorStop(0,   `rgba(${er},${eg},${eb},0.28)`);
+          gr.addColorStop(0.5, `rgba(${er},${eg},${eb},0.08)`);
+          gr.addColorStop(1,   'rgba(0,0,0,0)');
+          gx.fillStyle = gr; gx.fillRect(0, 0, 32, 32);
+          const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(gc),
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }));
+          glowSprite.scale.set(SPRITE_SCALE * 2.2, SPRITE_SCALE * 2.2, 1);
+          group.add(glowSprite);
+        }
         const clickSphere = new THREE.Mesh(
           new THREE.SphereGeometry(5, 8, 8),
-          new THREE.MeshBasicMaterial({ visible: false }),
+          new THREE.MeshBasicMaterial({ visible: false, colorWrite: false }),
         );
         clickSphere.userData = { thoughtId: t.id, thoughtGroup: group };
         group.add(clickSphere);
@@ -518,11 +545,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const spiro = g.userData.spiro as StarSpiro | null;
         if (!spiro) return;
         const canvas = document.createElement('canvas');
-        // Same logical size as baked stars — spirograph fills same canvas fraction.
-        // Higher dpr gives sharper pixels without changing visual proportions.
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr });
-        inst.start();
+        // dpr=1 — sharper doesn't justify the VRAM at this size
+        const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr: 1 });
+        // Do NOT call inst.start() — we drive renderStatic from the main RAF loop.
+        // That keeps exactly ONE requestAnimationFrame loop running for the whole scene.
         const texture = new THREE.CanvasTexture(canvas);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (texture as any).encoding = 3001; // THREE.sRGBEncoding
@@ -829,6 +855,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Pass 1: non-orbiters (anchors and free stars)
         thoughtGroups.forEach(g => {
           if (g.userData.orbit) return; // skip orbiters in pass 1
+          // Skip micro-animation for very distant stars — invisible at that distance
+          if (camera.position.distanceTo(g.position) > 500) return;
           g.position.y = (g.userData.baseY as number) + Math.sin(time * (g.userData.bobSpeed as number) + (g.userData.bobPhase as number)) * 1.0;
         });
         // Pass 2: orbiters (may orbit anchors that were just updated above)
@@ -861,17 +889,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           const live = liveStars.get(id);
           if (live) {
-            // Live stars animate via their own RAF loop; just tell Three.js to re-upload
+            // Drive animation from the main loop — no separate RAF running.
+            // One RAF total = one animate() call per frame regardless of star count.
+            live.inst.renderStatic(time);
             live.texture.needsUpdate = true;
-          } else {
-            // Baked stars use renderStatic; active/user stars every frame, others ~30fps
-            const isActive = isSelected || id === userStarRef.current;
-            spiro.frameCount++;
-            if (isActive || spiro.frameCount % 2 === 0) {
-              spiro.inst.renderStatic(time + spiro.timeOffset);
-              spiro.texture.needsUpdate = true;
-            }
           }
+          // Baked (non-live) stars are static — rendered once at creation with their
+          // per-star timeOffset and never re-uploaded. GPU reuses the cached texture.
+          // Cost: 0 canvas renders/frame + 0 texture uploads/frame for 48 of 50 stars.
         });
 
         // Clouds
@@ -892,6 +917,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
 
         renderer.render(scene, camera);
+
+        // Perf overlay — only active when ?perf=1 is in the URL
+        if (perfOverlayRef.current) {
+          const info = renderer.info;
+          perfOverlayRef.current.textContent =
+            `Draw calls : ${info.render.calls}\n` +
+            `Triangles  : ${info.render.triangles.toLocaleString()}\n` +
+            `Textures   : ${info.memory.textures}\n` +
+            `Geometries : ${info.memory.geometries}\n` +
+            `Programs   : ${info.programs?.length ?? '–'}\n` +
+            `Stars baked: ${bakedStarCount}\n` +
+            `Stars live : ${liveStars.size}`;
+        }
       }
       animate();
 
@@ -979,7 +1017,25 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
     }, [bonds]);
 
-    return <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;
+    const showPerf = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf');
+    return (
+      <>
+        <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
+        {showPerf && (
+          <pre
+            ref={perfOverlayRef}
+            style={{
+              position: 'fixed', top: 12, left: 12, zIndex: 100,
+              margin: 0, padding: '10px 14px',
+              background: 'rgba(0,0,0,0.72)', color: '#b0ffb0',
+              fontFamily: 'monospace', fontSize: 11, lineHeight: 1.6,
+              borderRadius: 6, pointerEvents: 'none',
+              whiteSpace: 'pre',
+            }}
+          />
+        )}
+      </>
+    );
   },
 );
 
