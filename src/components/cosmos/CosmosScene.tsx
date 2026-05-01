@@ -889,14 +889,31 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           const live = liveStars.get(id);
           if (live) {
-            // Drive animation from the main loop — no separate RAF running.
-            // One RAF total = one animate() call per frame regardless of star count.
+            // Selected star: full 60 fps, driven from the single main RAF loop.
             live.inst.renderStatic(time);
             live.texture.needsUpdate = true;
+          } else {
+            // ── Distance-based animation tiers for baked stars ──────────────────
+            // Closer = more frequent re-renders = livelier. Each tier is cheap
+            // (one canvas draw + one GPU upload) and only fires when its frame
+            // counter hits the interval, so the total uploads/frame stays low.
+            //
+            //  dist < 55  →  every  3 frames  (~20 fps) — close, clearly alive
+            //  dist < 140 →  every 10 frames  (~ 6 fps) — medium, noticeably moving
+            //  dist < 320 →  every 50 frames  (~1.2 fps) — distant, slow subtle cycle
+            //  dist ≥ 320 →  never            (0 fps)   — tiny dot, static still
+            const dist = camera.position.distanceTo(g.position);
+            spiro.frameCount++;
+            let interval = 0;
+            if      (dist < 55)  interval = 3;
+            else if (dist < 140) interval = 10;
+            else if (dist < 320) interval = 50;
+
+            if (interval > 0 && spiro.frameCount % interval === 0) {
+              spiro.inst.renderStatic(time + spiro.timeOffset);
+              spiro.texture.needsUpdate = true;
+            }
           }
-          // Baked (non-live) stars are static — rendered once at creation with their
-          // per-star timeOffset and never re-uploaded. GPU reuses the cached texture.
-          // Cost: 0 canvas renders/frame + 0 texture uploads/frame for 48 of 50 stars.
         });
 
         // Clouds
