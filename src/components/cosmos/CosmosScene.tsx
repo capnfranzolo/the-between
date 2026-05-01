@@ -99,7 +99,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const EXPOSURE    = 0.90;
     const SKY_BRIGHT  = 1.10;
     const GRAD_STEEP  = 1.30;
-    const GRAD_LIFT   = 0.18;
+    const GRAD_LIFT   = 0.12;
     const TERRAIN_BRIGHT = 1.00;
     // Standard cruising altitude — low enough that stars (y=80-140) are always above camera
     const BASE_CAM_Y  = 65;
@@ -206,16 +206,20 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const gx = gc.getContext('2d')!;
         const grd = gx.createLinearGradient(0, 0, 256, 0);
         // t=0 is below horizon (blocked by terrain); t=1 is zenith.
-        // Colors from user reference comp, reversed (horizon→zenith).
-        grd.addColorStop(0.000, '#d2a480'); // warm peach  (below horizon, mostly hidden by terrain)
-        grd.addColorStop(0.111, '#b27f7e'); // rose-peach
-        grd.addColorStop(0.222, '#93637f'); // mauve-rose
-        grd.addColorStop(0.333, '#7d5784'); // purple-mauve
-        grd.addColorStop(0.444, '#5a4177'); // purple
-        grd.addColorStop(0.556, '#443469'); // deep purple
-        grd.addColorStop(0.667, '#352a5c'); // dark blue-purple
-        grd.addColorStop(0.778, '#2a214e'); // darker blue-purple
-        grd.addColorStop(0.889, '#1e1a40'); // near-black blue
+        // Warm colors compressed into the bottom 8% so they appear only right at the horizon.
+        // Dark purple-to-black owns the upper 80%+ of the sky.
+        // Extra stops near black to smooth the banding at the top.
+        grd.addColorStop(0.000, '#d2a480'); // warm peach    (below horizon, hidden by terrain)
+        grd.addColorStop(0.025, '#b27f7e'); // rose-peach
+        grd.addColorStop(0.055, '#93637f'); // mauve-rose
+        grd.addColorStop(0.085, '#7d5784'); // purple-mauve  ← around visible horizon
+        grd.addColorStop(0.140, '#5a4177'); // purple
+        grd.addColorStop(0.230, '#443469'); // deep purple
+        grd.addColorStop(0.360, '#352a5c'); // dark blue-purple
+        grd.addColorStop(0.510, '#2a214e'); // deeper
+        grd.addColorStop(0.680, '#1e1a40'); // near-black blue
+        grd.addColorStop(0.820, '#120e30'); // smooth transition
+        grd.addColorStop(0.920, '#07051e'); // deep space
         grd.addColorStop(1.000, '#000000'); // black at zenith
         gx.fillStyle = grd;
         gx.fillRect(0, 0, 256, 1);
