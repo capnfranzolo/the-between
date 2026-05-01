@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Between — Cosmos</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0F0A18; }
+canvas { display: block; width: 100%; height: 100%; }
+#hint {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  color: rgba(220,200,240,0.5); font-family: 'Georgia', serif; font-size: 14px;
+  letter-spacing: 0.1em; pointer-events: none;
+  animation: fadeHint 6s ease-in-out forwards;
+}
+@keyframes fadeHint {
+  0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; }
+}
+</style>
+</head>
+<body>
+<div id="hint">hold space to drift faster · click a thought to approach it</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── SETUP ───
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+// Fog — very subtle, just softens far edge
+scene.fog = new THREE.FogExp2(0x2A1B3D, 0.0012);
+
+// ─── LIGHTING ───
+scene.add(new THREE.AmbientLight(0x6B4D8A, 0.8));
+const dirLight = new THREE.DirectionalLight(0xF0C080, 0.4);
+dirLight.position.set(0, 5, -200);
+scene.add(dirLight);
+const hemiLight = new THREE.HemisphereLight(0x5A3D78, 0x1E1030, 0.3);
+scene.add(hemiLight);
+
+// ─── SKY DOME ───
+const skyGeo = new THREE.SphereGeometry(900, 64, 64);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: { uTime: { value: 0 } },
+  vertexShader: `
+    varying vec3 vLocalPos;
+    void main() {
+      vLocalPos = normalize(position);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    varying vec3 vLocalPos;
+
+    vec3 hex(float r, float g, float b) { return vec3(r, g, b) / 255.0; }
+
+    void main() {
+      float y = vLocalPos.y;
+      float breathe = sin(uTime * 0.02) * 0.002;
+
+      vec3 zenith    = hex(30.0, 24.0, 64.0);
+      vec3 upper     = hex(61.0, 45.0, 101.0);
+      vec3 mid       = hex(110.0, 70.0, 125.0);
+      vec3 low       = hex(155.0, 100.0, 135.0);
+      vec3 rose      = hex(180.0, 120.0, 130.0);
+      vec3 horizPeak = hex(210.0, 150.0, 110.0);
+
+      vec3 color;
+      if (y < -0.15) {
+        // Far below: still warm rose
+        color = rose;
+      } else if (y < 0.0) {
+        // Below horizon: gradient from rose up to peak warmth at y=0
+        float t = smoothstep(-0.15, 0.0, y);
+        color = mix(rose, horizPeak, t);
+      } else if (y < 0.008 + breathe) {
+        // Thin bright warm line right at horizon
+        float t = smoothstep(0.0, 0.008 + breathe, y);
+        color = mix(horizPeak, rose, t);
+      } else if (y < 0.04) {
+        float t = smoothstep(0.008 + breathe, 0.04, y);
+        color = mix(rose, low, t);
+      } else if (y < 0.12) {
+        float t = smoothstep(0.04, 0.12, y);
+        color = mix(low, mid, t);
+      } else if (y < 0.4) {
+        float t = smoothstep(0.12, 0.4, y);
+        color = mix(mid, upper, t);
+      } else {
+        float t = smoothstep(0.4, 1.0, y);
+        color = mix(upper, zenith, t);
+      }
+
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+});
+const skyDome = new THREE.Mesh(skyGeo, skyMat);
+skyDome.rotation.x = -8 * Math.PI / 180; // tilt gradient down 8°
+scene.add(skyDome);
+
+// ─── STARS ───
+const starCount = 300;
+const starGeo = new THREE.BufferGeometry();
+const starPositions = new Float32Array(starCount * 3);
+const starSizes = new Float32Array(starCount);
+for (let i = 0; i < starCount; i++) {
+  // Distribute on upper hemisphere only (above horizon)
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.random() * Math.PI * 0.45; // upper ~45% of dome
+  const r = 880;
+  starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+  starPositions[i * 3 + 1] = r * Math.cos(phi); // y up
+  starPositions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+  starSizes[i] = 1.5 + Math.random() * 2.5;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+
+const starMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  uniforms: { uTime: { value: 0 } },
+  vertexShader: `
+    attribute float size;
+    varying float vSize;
+    void main() {
+      vSize = size;
+      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (300.0 / -mvPos.z);
+      gl_Position = projectionMatrix * mvPos;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    varying float vSize;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      float alpha = smoothstep(0.5, 0.0, d) * 0.7;
+      // Gentle twinkle
+      alpha *= 0.6 + 0.4 * sin(uTime * (1.0 + vSize * 0.5) + vSize * 10.0);
+      gl_FragColor = vec4(0.9, 0.85, 1.0, alpha);
+    }
+  `
+});
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// ─── TERRAIN ───
+const TERRAIN_SIZE = 3200;
+const TERRAIN_SEGS = 300;
+const terrainGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGS, TERRAIN_SEGS);
+const terrainMat = new THREE.MeshLambertMaterial({
+  color: 0x503868
+});
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.rotation.x = -Math.PI / 2;
+scene.add(terrain);
+
+let terrainOffsetX = 0, terrainOffsetZ = 0;
+
+function getHeight(wx, wz) {
+  return Math.sin(wx * 0.004) * 24 + Math.sin(wz * 0.005) * 20
+       + Math.sin(wx * 0.01 + wz * 0.008) * 12 + Math.sin(wx * 0.02 - wz * 0.015) * 6
+       + Math.sin(wx * 0.035 + wz * 0.03) * 3 + Math.sin(wx * 0.06 - wz * 0.05) * 1.5;
+}
+
+function updateTerrainGeometry() {
+  const pos = terrainGeo.attributes.position;
+  const half = TERRAIN_SIZE / 2;
+  const step = TERRAIN_SIZE / TERRAIN_SEGS;
+  for (let i = 0; i <= TERRAIN_SEGS; i++) {
+    for (let j = 0; j <= TERRAIN_SEGS; j++) {
+      const idx = i * (TERRAIN_SEGS + 1) + j;
+      const lx = -half + j * step;
+      const lz = -half + i * step;
+      const wx = lx + terrainOffsetX;
+      const wz = lz + terrainOffsetZ;
+      pos.setZ(idx, getHeight(wx, wz));
+    }
+  }
+  pos.needsUpdate = true;
+  terrainGeo.computeVertexNormals();
+}
+updateTerrainGeometry();
+
+// ─── CLOUDS ───
+function makeCloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const ctx = c.getContext('2d');
+  const blobs = 6 + Math.floor(Math.random() * 7);
+  for (let i = 0; i < blobs; i++) {
+    const x = 40 + Math.random() * 176;
+    const y = 20 + Math.random() * 88;
+    const r = 20 + Math.random() * 40;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const a = 0.06 + Math.random() * 0.09;
+    grad.addColorStop(0, `rgba(140, 100, 170, ${a})`);
+    grad.addColorStop(1, 'rgba(140, 100, 170, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 128);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const clouds = [];
+for (let i = 0; i < 30; i++) {
+  const tex = makeCloudTexture();
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.8 });
+  const sprite = new THREE.Sprite(mat);
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 20 + Math.random() * 280;
+  sprite.position.set(Math.cos(angle) * dist, 25 + Math.random() * 50, Math.sin(angle) * dist);
+  sprite.scale.set(30 + Math.random() * 50, 15 + Math.random() * 20, 1);
+  sprite.userData = { dx: (Math.random() - 0.5) * 0.3, dz: (Math.random() - 0.5) * 0.3 };
+  scene.add(sprite);
+  clouds.push(sprite);
+}
+
+// ─── THOUGHTS (SPIROGRAPHS) ───
+const THOUGHT_COLORS = [
+  0xE07050, 0xF0C050, 0xF080A0, 0xC080F0, 0xE080B0,
+  0xA0E080, 0x70B0E0, 0x60D0D0, 0x60D0B0, 0xF0A060,
+  0xD090F8, 0xF08888, 0x80C0F0, 0x90E0A0, 0xF0D080
+];
+
+const thoughts = [];
+const thoughtMeshes = []; // for raycasting
+
+function createThought(wx, wy, wz) {
+  const color = THOUGHT_COLORS[Math.floor(Math.random() * THOUGHT_COLORS.length)];
+  const group = new THREE.Group();
+  const ringCount = 3 + Math.floor(Math.random() * 3);
+
+  for (let i = 0; i < ringCount; i++) {
+    const radius = 1.5 + Math.random() * 2.5;
+    const tube = 0.03 + Math.random() * 0.04;
+    const torusGeo = new THREE.TorusGeometry(radius, tube, 16, 64);
+    const torusMat = new THREE.MeshBasicMaterial({
+      color: color, transparent: true, opacity: 0.85 - i * 0.12
+    });
+    const torus = new THREE.Mesh(torusGeo, torusMat);
+    torus.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    torus.userData = {
+      rx: (Math.random() - 0.5) * 0.4,
+      ry: (Math.random() - 0.5) * 0.3
+    };
+    group.add(torus);
+  }
+
+  // Core glow sprite
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = 64; glowCanvas.height = 64;
+  const gCtx = glowCanvas.getContext('2d');
+  const c = new THREE.Color(color);
+  const grad = gCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, `rgba(${Math.floor(c.r*255)}, ${Math.floor(c.g*255)}, ${Math.floor(c.b*255)}, 0.9)`);
+  grad.addColorStop(0.3, `rgba(${Math.floor(c.r*255)}, ${Math.floor(c.g*255)}, ${Math.floor(c.b*255)}, 0.3)`);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  gCtx.fillStyle = grad;
+  gCtx.fillRect(0, 0, 64, 64);
+  const glowTex = new THREE.CanvasTexture(glowCanvas);
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false });
+  const glowSprite = new THREE.Sprite(glowMat);
+  glowSprite.scale.set(6, 6, 1);
+  group.add(glowSprite);
+
+  // Point light
+  const light = new THREE.PointLight(color, 0.8, 40);
+  group.add(light);
+
+  // Invisible click sphere
+  const clickSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(3, 8, 8),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  group.add(clickSphere);
+  clickSphere.userData.thoughtGroup = group;
+  thoughtMeshes.push(clickSphere);
+
+  group.position.set(wx, wy, wz);
+  group.userData = {
+    bobPhase: Math.random() * Math.PI * 2,
+    bobSpeed: 0.2 + Math.random() * 0.3,
+    baseY: wy,
+    pulsePhase: Math.random() * Math.PI * 2
+  };
+
+  scene.add(group);
+  thoughts.push(group);
+  return group;
+}
+
+function spawnThoughts() {
+  for (let i = 0; i < 40; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 30 + Math.random() * 170;
+    const wx = camera.position.x + Math.cos(angle) * dist;
+    const wz = camera.position.z + Math.sin(angle) * dist;
+    const wy = 60 + Math.random() * 70;
+    createThought(wx, wy, wz);
+  }
+}
+
+// ─── CAMERA STATE ───
+let heading = 0; // radians
+let targetHeading = null;
+let speed = 4;
+let boosting = false;
+let clickBoostTime = 0;
+camera.position.set(0, 80, 0);
+
+// ─── INPUT ───
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(thoughtMeshes);
+  if (hits.length > 0) {
+    const tGroup = hits[0].object.userData.thoughtGroup;
+    const dx = tGroup.position.x - camera.position.x;
+    const dz = tGroup.position.z - camera.position.z;
+    targetHeading = Math.atan2(dx, -dz);
+    clickBoostTime = 1.5;
+  }
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ─── ANIMATION ───
+let lastSnapX = 0, lastSnapZ = 0;
+const clock = new THREE.Clock();
+spawnThoughts();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const time = clock.getElapsedTime();
+
+  // Sky time
+  skyMat.uniforms.uTime.value = time;
+  skyDome.position.copy(camera.position);
+  stars.position.copy(camera.position);
+  starMat.uniforms.uTime.value = time;
+
+  // Speed
+  boosting = keys['Space'];
+  const targetSpeed = boosting ? 25 : (clickBoostTime > 0 ? 18 : 4);
+  speed += (targetSpeed - speed) * dt * 3;
+  if (clickBoostTime > 0) clickBoostTime -= dt;
+
+  // Heading
+  if (targetHeading !== null) {
+    let diff = targetHeading - heading;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    heading += diff * dt * 1.5;
+    if (Math.abs(diff) < 0.05) targetHeading = null;
+  }
+
+  // Move camera
+  const fwdX = Math.sin(heading);
+  const fwdZ = -Math.cos(heading);
+  camera.position.x += fwdX * speed * dt;
+  camera.position.z += fwdZ * speed * dt;
+
+  // Terrain height + bob
+  const groundY = getHeight(camera.position.x, camera.position.z);
+  const flyHeight = 80 + Math.sin(time * 0.3) * 0.4;
+  camera.position.y = Math.max(groundY + 40, flyHeight);
+
+  // Look direction — pitch up so horizon sits at bottom ~15% of screen
+  // with warm gradient filling below
+  const lookDist = 200;
+  const pitchUpY = Math.tan(17 * Math.PI / 180) * lookDist; // ~61
+  const lookTarget = new THREE.Vector3(
+    camera.position.x + fwdX * lookDist,
+    camera.position.y + pitchUpY,
+    camera.position.z + fwdZ * lookDist
+  );
+  camera.lookAt(lookTarget);
+
+  // Snap terrain
+  const snapDist = 300;
+  if (Math.abs(camera.position.x - lastSnapX) > snapDist || Math.abs(camera.position.z - lastSnapZ) > snapDist) {
+    lastSnapX = Math.round(camera.position.x / snapDist) * snapDist;
+    lastSnapZ = Math.round(camera.position.z / snapDist) * snapDist;
+    terrainOffsetX = lastSnapX;
+    terrainOffsetZ = lastSnapZ;
+    terrain.position.set(lastSnapX, 0, lastSnapZ);
+    updateTerrainGeometry();
+  }
+
+  // Animate thoughts
+  for (const g of thoughts) {
+    const ud = g.userData;
+    g.position.y = ud.baseY + Math.sin(time * ud.bobSpeed + ud.bobPhase) * 1.0;
+    const pulse = 1.0 + Math.sin(time * 0.8 + ud.pulsePhase) * 0.05;
+    g.scale.setScalar(pulse);
+    g.children.forEach(child => {
+      if (child.userData.rx !== undefined) {
+        child.rotation.x += child.userData.rx * dt;
+        child.rotation.y += child.userData.ry * dt;
+      }
+    });
+  }
+
+  // Recycle thoughts far from camera
+  for (const g of thoughts) {
+    const dx = g.position.x - camera.position.x;
+    const dz = g.position.z - camera.position.z;
+    if (dx * dx + dz * dz > 250 * 250) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 100 + Math.random() * 100;
+      g.position.x = camera.position.x + Math.cos(angle) * dist;
+      g.position.z = camera.position.z + Math.sin(angle) * dist;
+      g.position.y = 60 + Math.random() * 70;
+      g.userData.baseY = g.position.y;
+    }
+  }
+
+  // Animate clouds
+  for (const c of clouds) {
+    c.position.x += c.userData.dx * dt;
+    c.position.z += c.userData.dz * dt;
+    const dx = c.position.x - camera.position.x;
+    const dz = c.position.z - camera.position.z;
+    if (dx * dx + dz * dz > 320 * 320) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 100 + Math.random() * 180;
+      c.position.x = camera.position.x + Math.cos(angle) * dist;
+      c.position.z = camera.position.z + Math.sin(angle) * dist;
+      c.position.y = 25 + Math.random() * 50;
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>

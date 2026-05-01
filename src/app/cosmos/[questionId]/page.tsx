@@ -1,12 +1,14 @@
 'use client';
-import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
+import AboutModal from '@/components/AboutModal';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString } from '@/lib/btw';
+
+const DIM_DEFAULTS = { certainty: 0.5, warmth: 0.5, tension: 0.5, vulnerability: 0.5, scope: 0.5, rootedness: 0.5, emotionIndex: 3, curveType: 'hypotrochoid' as const, reasoning: '' };
 
 interface CosmosData {
   question: { id: string; text: string } | null;
@@ -37,6 +39,7 @@ export default function CosmosPage() {
   const [myShortcode] = useState<string | null>(() =>
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
+  const [showAbout, setShowAbout] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
 
@@ -84,13 +87,21 @@ export default function CosmosPage() {
     for (const star of allStars) {
       positions.set(star.id, starWorldPos(star.shortcode));
     }
-    return allStars.map(star => ({
-      id: star.id,
-      ...positions.get(star.id)!,
-      emotionIndex: star.dimensions.emotionIndex,
-      dimensions: star.dimensions,
-    }));
-  }, [allStars]);
+    // Put the user's own star first so it's always within the baked-spirograph cap
+    const myId = myShortcode ? allStars.find(s => s.shortcode === myShortcode)?.id : undefined;
+    const sorted = myId
+      ? [...allStars].sort((a, b) => (a.id === myId ? -1 : b.id === myId ? 1 : 0))
+      : allStars;
+    return sorted.map(star => {
+      const dims = star.dimensions ?? DIM_DEFAULTS;
+      return {
+        id: star.id,
+        ...positions.get(star.id)!,
+        emotionIndex: dims.emotionIndex,
+        dimensions: dims,
+      };
+    });
+  }, [allStars, myShortcode]);
 
   const byId = useMemo(() => {
     const m: Record<string, CosmosStarData> = {};
@@ -225,14 +236,8 @@ export default function CosmosPage() {
           pointerEvents: 'none',
         }}>
           <div style={{
-            width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            width: '100%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
           }}>
-            <Link href="/" style={{
-              fontSize: 12, letterSpacing: '0.34em', textTransform: 'uppercase',
-              color: BTW.textDim, textDecoration: 'none', pointerEvents: 'auto',
-            }}>
-              The Between
-            </Link>
             {data && (
               <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em' }}>
                 {data.stars.length} stars &middot; {bonds.length} bonds
@@ -361,6 +366,44 @@ export default function CosmosPage() {
           />
         )}
 
+        {/* Bottom-left: brand + add-star button */}
+        <div style={{
+          position: 'absolute', left: 24, bottom: 24,
+          display: 'flex', alignItems: 'center', gap: 12,
+          pointerEvents: 'auto', zIndex: 3,
+        }}>
+          <button
+            onClick={() => { window.location.href = '/'; }}
+            title="Add your thought"
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: 'rgba(240,232,224,0.07)',
+              border: '1px solid rgba(240,232,224,0.18)',
+              color: BTW.textDim, fontSize: 20, lineHeight: '30px',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background .2s, border-color .2s',
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.14)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.35)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,232,224,0.07)'; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.18)'; }}
+          >
+            +
+          </button>
+          <button
+            onClick={() => setShowAbout(true)}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
+              color: BTW.textDim, padding: 0,
+              transition: 'color .2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
+            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
+          >
+            The Between
+          </button>
+        </div>
+
         <style>{`
           @keyframes btwRise {
             from { opacity: 0; transform: translateX(-50%) translateY(20px); }
@@ -368,6 +411,8 @@ export default function CosmosPage() {
           }
         `}</style>
       </div>
+
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>
   );
 }

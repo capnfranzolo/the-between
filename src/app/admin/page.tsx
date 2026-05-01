@@ -626,6 +626,61 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
   );
 }
 
+// ─── SettingsTab ─────────────────────────────────────────────────────────────
+
+function SettingsTab() {
+  const [about, setAbout] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/admin/settings')
+      .then(r => r.json())
+      .then(d => {
+        const entry = (d.settings ?? []).find((s: { key: string; value: string }) => s.key === 'about');
+        setAbout(entry?.value ?? '');
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  async function save() {
+    setSaving(true); setSaved(false);
+    await fetch('/api/admin/settings', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'about', value: about }),
+    });
+    setSaving(false); setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  }
+
+  return (
+    <div style={{ padding: '28px 24px', maxWidth: 680 }}>
+      <div style={{ color: '#888', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>
+        About — shown in the modal on the public cosmos page
+      </div>
+      <div style={{ color: '#555', fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
+        Supports markdown links: <code style={{ color: '#aaa', background: '#1a1a1a', padding: '1px 5px', borderRadius: 3 }}>[link text](https://url.com)</code>
+        {' '}· Double newline = new paragraph.
+      </div>
+      <textarea
+        value={loaded ? about : 'Loading…'}
+        onChange={e => setAbout(e.target.value)}
+        disabled={!loaded}
+        rows={16}
+        style={{ ...S.textarea, width: '100%', fontSize: 14, lineHeight: 1.7 }}
+      />
+      <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button onClick={save} disabled={saving || !loaded} style={S.btn('primary')}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {saved && <span style={{ color: '#00cc44', fontSize: 12 }}>Saved.</span>}
+      </div>
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -634,7 +689,7 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState('');
   const [checking, setChecking] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [tab, setTab] = useState<'stars' | 'connections'>('stars');
+  const [tab, setTab] = useState<'stars' | 'connections' | 'settings'>('stars');
   const [questionFilter, setQuestionFilter] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
   const prevPending = useRef(0);
@@ -745,10 +800,12 @@ export default function AdminPage() {
         <button onClick={() => setTab('connections')} style={S.tab(tab === 'connections')}>
           Connections{stats && stats.pendingConnections > 0 && tab !== 'connections' && <span style={{ color: '#ffaa00', marginLeft: 4 }}>({stats.pendingConnections})</span>}
         </button>
+        <button onClick={() => setTab('settings')} style={S.tab(tab === 'settings')}>Settings</button>
       </div>
 
       {tab === 'stars' && <StarsTab questionFilter={questionFilter} />}
       {tab === 'connections' && <ConnectionsTab questionFilter={questionFilter} />}
+      {tab === 'settings' && <SettingsTab />}
     </div>
   );
 }
