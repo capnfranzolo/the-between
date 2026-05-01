@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { BTW, withAlpha } from '@/lib/btw';
 
 interface ShareButtonProps {
@@ -70,9 +71,10 @@ const CheckIcon = () => (
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-// Tray dimensions (keep in sync with actual rendered size)
+// Tray dimensions — keep in sync with rendered size
+// 5 items × 36px + 4 gaps × 4px + 8px top + 8px bottom padding ≈ 212px
 const TRAY_WIDTH  = 164;
-const TRAY_HEIGHT = 252; // ~5 items × ~44px + 8px padding × 2
+const TRAY_HEIGHT = 216;
 
 export default function ShareButton({ url, style }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
@@ -189,8 +191,10 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
         <ShareIcon />
       </button>
 
-      {/* Slide-out tray — fixed positioning escapes any overflow:auto parent */}
-      {open && trayPos && (
+      {/* Tray is portalled to document.body so it escapes any transformed
+          ancestor (StarDetail uses transform:translateX(-50%) which would
+          otherwise break position:fixed coordinates). */}
+      {open && trayPos && typeof document !== 'undefined' && createPortal(
         <div
           id="btw-share-tray"
           style={{
@@ -211,6 +215,12 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
             animation: 'shareSlideUp .2s cubic-bezier(.2,.8,.3,1)',
           }}
         >
+          <style>{`
+            @keyframes shareSlideUp {
+              from { opacity: 0; transform: translateY(6px); }
+              to   { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
           {items.map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -249,15 +259,10 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
               {label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
 
-      <style>{`
-        @keyframes shareSlideUp {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </div>
   );
 }
