@@ -40,14 +40,24 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
 
+  // Delete associated connections first
   const { data: removedConns } = await supabaseServer
     .from('connections')
     .delete()
     .or(`from_star_id.eq.${id},to_star_id.eq.${id}`)
     .select('id');
 
-  const { error } = await supabaseServer.from('stars').delete().eq('id', id);
+  // Use .select() so we know if a row was actually deleted (no row = silent RLS block)
+  const { data: deleted, error } = await supabaseServer
+    .from('stars')
+    .delete()
+    .eq('id', id)
+    .select('id');
+
   if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (!deleted || deleted.length === 0) {
+    return Response.json({ error: 'Star not found or could not be deleted' }, { status: 404 });
+  }
 
   return Response.json({ ok: true, connectionsRemoved: removedConns?.length ?? 0 });
 }

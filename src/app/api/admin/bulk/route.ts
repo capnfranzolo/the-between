@@ -23,18 +23,24 @@ export async function POST(req: NextRequest) {
 
   if (action === 'delete') {
     if (type === 'star') {
-      // Delete connections first
-      await supabaseServer
-        .from('connections')
-        .delete()
-        .or(ids.map(id => `from_star_id.eq.${id},to_star_id.eq.${id}`).join(','));
+      // Delete connections first (one filter per id pair to avoid oversized OR)
+      for (const id of ids) {
+        await supabaseServer
+          .from('connections')
+          .delete()
+          .or(`from_star_id.eq.${id},to_star_id.eq.${id}`);
+      }
     }
-    const { data: deleted } = await supabaseServer
+    const { data: deleted, error: delError } = await supabaseServer
       .from(table)
       .delete()
       .in('id', ids)
       .select('id');
-    affected = deleted?.length ?? ids.length;
+    if (delError) return Response.json({ error: delError.message }, { status: 500 });
+    affected = deleted?.length ?? 0;
+    if (affected === 0) {
+      return Response.json({ error: 'No rows deleted — check service role key' }, { status: 500 });
+    }
   } else {
     const status = action === 'approve' ? 'approved' : 'rejected';
     const { data: updated } = await supabaseServer

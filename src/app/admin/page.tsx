@@ -318,24 +318,47 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadingRef = useRef(false); // guard against concurrent fetches
 
   const load = useCallback(async (pg = 0, reset = false) => {
+    // Prevent duplicate concurrent fetches
+    if (loadingRef.current && !reset) return;
+    loadingRef.current = true;
     setLoading(true);
+    setError(null);
     const params = new URLSearchParams({
       status: statusFilter, page: String(pg), limit: '50',
       ...(search && { search }),
       ...(questionFilter && { questionId: questionFilter }),
     });
-    const res = await fetch(`/api/admin/stars?${params}`);
-    const data = await res.json();
-    const rows: AdminStar[] = data.stars ?? [];
-    setStars(prev => reset ? rows : [...prev, ...rows]);
-    setHasMore(rows.length === 50);
-    setPage(pg);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/admin/stars?${params}`);
+      const data = await res.json();
+      const rows: AdminStar[] = data.stars ?? [];
+      setStars(prev => {
+        if (reset) return rows;
+        // Dedup by id — offset pagination can overlap when rows are deleted
+        const seen = new Set(prev.map(s => s.id));
+        return [...prev, ...rows.filter(r => !seen.has(r.id))];
+      });
+      setHasMore(rows.length === 50);
+      setPage(pg);
+    } catch {
+      setError('Failed to load stars');
+    } finally {
+      setLoading(false);
+      loadingRef.current = false;
+    }
   }, [statusFilter, search, questionFilter]);
 
-  useEffect(() => { load(0, true); setSelected(new Set()); setExpanded(null); }, [statusFilter, search, questionFilter, load]);
+  // Only re-run when filter/search/question changes — not on every render
+  useEffect(() => {
+    load(0, true);
+    setSelected(new Set());
+    setExpanded(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, search, questionFilter]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -361,12 +384,29 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
   }
 
   async function quickDelete(id: string) {
+    // Snapshot before optimistic removal so we can roll back
+    const snapshot = stars.find(s => s.id === id);
     setStars(prev => prev.filter(s => s.id !== id));
-    await fetch(`/api/admin/stars/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/admin/stars/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.ok) {
+      // Roll back and surface the error
+      if (snapshot) setStars(prev => {
+        // Insert it back at the same approximate position
+        const copy = prev.filter(s => s.id !== id);
+        copy.push(snapshot);
+        return copy;
+      });
+      setError(data.error ?? 'Delete failed');
+      setTimeout(() => setError(null), 5000);
+    }
   }
 
   async function bulkAction(action: 'approve' | 'reject' | 'delete') {
     const ids = [...selected];
+    const snapshot = stars.filter(s => selected.has(s.id));
+
+    // Optimistic update
     if (action === 'approve') {
       setStars(prev => prev.map(s => selected.has(s.id) ? { ...s, status: 'approved' } : s));
     } else if (action === 'reject') {
@@ -374,17 +414,40 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
     } else {
       setStars(prev => prev.filter(s => !selected.has(s.id)));
     }
-    setSelected(new Set()); setBulkConfirm(false);
-    await fetch('/api/admin/bulk', {
+    setSelected(new Set());
+    setBulkConfirm(false);
+
+    const res = await fetch('/api/admin/bulk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, type: 'star', ids }),
     });
+    const data = await res.json();
+    if (!data.ok) {
+      // Roll back and reload authoritative state from server
+      if (action === 'delete') {
+        setStars(prev => {
+          const existing = new Set(prev.map(s => s.id));
+          return [...prev, ...snapshot.filter(s => !existing.has(s.id))];
+        });
+      } else {
+        load(page, true);
+      }
+      setError(data.error ?? `Bulk ${action} failed`);
+      setTimeout(() => setError(null), 5000);
+    }
   }
 
   const allChecked = stars.length > 0 && stars.every(s => selected.has(s.id));
 
   return (
     <div>
+      {error && (
+        <div style={{ background: '#2a0000', color: '#ff6666', padding: '8px 16px', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          ⚠ {error}
+          <button onClick={() => setError(null)} style={{ ...S.iconBtn, color: '#ff6666', fontSize: 16 }}>×</button>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
@@ -470,7 +533,9 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
       {hasMore && (
         <div style={{ padding: '12px 16px' }}>
-          <button onClick={() => load(page + 1)} style={S.btn()}>Load more</button>
+          <button onClick={() => { if (!loadingRef.current) load(page + 1); }} disabled={loading} style={S.btn()}>
+            {loading ? 'Loading…' : 'Load more'}
+          </button>
         </div>
       )}
     </div>
