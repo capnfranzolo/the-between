@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
@@ -98,19 +98,22 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     // Baked-in sky/terrain values
     const EXPOSURE    = 0.90;
     const SKY_BRIGHT  = 1.10;
-    const GRAD_STEEP  = 1.30;
-    const GRAD_LIFT   = 0.12;
     const TERRAIN_BRIGHT = 1.00;
-    // Standard cruising altitude — low enough that stars (y=80-140) are always above camera
     const BASE_CAM_Y  = 65;
 
-    // Baked star/terrain tweaks (no runtime sliders)
+    // Baked star/terrain tweaks
     const dbgTerrainGlowRef = useRef(0.46);
     const dbgStarDensityRef = useRef(0.80);
     const dbgStarSpeedRef   = useRef(0.50);
     const dbgStarFloorRef   = useRef(0.65);
-    // Live camera readout — updated directly from animate loop, no React re-renders
-    const camDisplayRef = useRef<HTMLPreElement>(null);
+
+    // Sky gradient sliders — state drives display, refs drive the animate loop
+    const [gradLift,  setGradLift]  = useState(0.12);
+    const [gradSteep, setGradSteep] = useState(1.30);
+    const [sunShift,  setSunShift]  = useState(0.16);
+    const gradLiftRef  = useRef(0.12);
+    const gradSteepRef = useRef(1.30);
+    const sunShiftRef  = useRef(0.16);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -153,8 +156,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
           uBrightness:{ value: SKY_BRIGHT },
-          uGradSteep: { value: GRAD_STEEP },
-          uGradLift:  { value: GRAD_LIFT },
+          uGradSteep: { value: 1.30 },
+          uGradLift:  { value: 0.12 },
+          uSunShift:  { value: 0.16 },
           uSkyGrad:   { value: null as THREE.Texture | null },
         },
         vertexShader: `
@@ -170,23 +174,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform float     uBrightness;
           uniform float     uGradSteep;
           uniform float     uGradLift;
+          uniform float     uSunShift;
           uniform sampler2D uSkyGrad;
           varying vec3      vWorldDir;
 
           void main() {
             vec3 dir = normalize(vWorldDir);
 
-            // Elevation-driven base gradient
             float t = clamp(dir.y * uGradSteep + uGradLift, 0.0, 1.0);
 
-            // Concentrated sun glow: cubed dot product focuses warmth in a tight cone
-            // ahead of the camera; pow(3) means 45° away gets only 35% of the effect.
-            // horizBand is symmetric — fades above AND below horizon so warm sky
-            // doesn't bleed into the entire below-horizon zone.
             float sunAz = dot(normalize(dir.xz + vec2(0.0001)), normalize(uSunDir.xz + vec2(0.0001)));
-            float horizBand = 1.0 - smoothstep(0.0, uGradLift, abs(dir.y));
+            float horizBand = 1.0 - smoothstep(0.0, uGradLift + 0.06, abs(dir.y));
             float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
-            t = clamp(t - sunInfluence * 0.16, 0.0, 1.0);
+            t = clamp(t - sunInfluence * uSunShift, 0.0, 1.0);
 
             // Sample baked gradient texture — smooth, no GLSL banding
             vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
@@ -685,11 +685,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dt = Math.min(clock.getDelta(), 0.05);
         const time = clock.getElapsedTime();
 
-        skyMat.uniforms.uTime.value = time;
-        terrainMat.uniforms.uTerrainGlow.value  = dbgTerrainGlowRef.current;
-        starMat.uniforms.uStarDensity.value     = dbgStarDensityRef.current;
-        starMat.uniforms.uStarSpeed.value       = dbgStarSpeedRef.current;
-        starMat.uniforms.uStarFloor.value       = dbgStarFloorRef.current;
+        skyMat.uniforms.uTime.value     = time;
+        skyMat.uniforms.uGradLift.value  = gradLiftRef.current;
+        skyMat.uniforms.uGradSteep.value = gradSteepRef.current;
+        skyMat.uniforms.uSunShift.value  = sunShiftRef.current;
+        terrainMat.uniforms.uTerrainGlow.value = dbgTerrainGlowRef.current;
+        starMat.uniforms.uStarDensity.value    = dbgStarDensityRef.current;
+        starMat.uniforms.uStarSpeed.value      = dbgStarSpeedRef.current;
+        starMat.uniforms.uStarFloor.value      = dbgStarFloorRef.current;
         renderer.toneMappingExposure = EXPOSURE;
         skyDome.position.copy(camera.position);
         bgStars.position.copy(camera.position);
@@ -771,15 +774,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
         }
 
-        // Live camera readout — direct DOM write, no React re-renders
-        if (camDisplayRef.current) {
-          const hdg = (((heading * 180 / Math.PI) % 360) + 360) % 360;
-          camDisplayRef.current.textContent =
-            `x ${Math.round(camera.position.x).toString().padStart(6)}  ` +
-            `y ${Math.round(camera.position.y).toString().padStart(5)}  ` +
-            `z ${Math.round(camera.position.z).toString().padStart(6)}\n` +
-            `hdg ${hdg.toFixed(1).padStart(6)}°   pitch ${(pitch * 180 / Math.PI).toFixed(1).padStart(5)}°`;
-        }
         const cosP = Math.cos(pitch);
         const sinP = Math.sin(pitch);
         camera.lookAt(new THREE.Vector3(
@@ -954,18 +948,35 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     return (
       <>
         <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
-        <pre ref={camDisplayRef} style={{
+        <div style={{
           position: 'fixed', bottom: 20, left: 20, zIndex: 20,
-          margin: 0, padding: '10px 14px',
-          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
-          border: '1px solid rgba(255,255,255,0.09)',
-          borderRadius: 10,
-          fontFamily: 'ui-monospace, monospace', fontSize: 11, lineHeight: 1.6,
-          color: 'rgba(255,255,255,0.55)',
-          pointerEvents: 'none',
-          userSelect: 'none',
-          whiteSpace: 'pre',
-        }} />
+          background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.10)',
+          borderRadius: 12, padding: '14px 18px',
+          fontFamily: 'ui-monospace, monospace', fontSize: 12,
+          color: 'rgba(255,255,255,0.8)', minWidth: 230,
+          display: 'flex', flexDirection: 'column', gap: 10,
+          pointerEvents: 'auto',
+        }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.2em', opacity: 0.4, textTransform: 'uppercase' }}>sky</div>
+          {([
+            ['Grad lift',  gradLift,  (v: number) => { setGradLift(v);  gradLiftRef.current  = v; }, 0.00, 0.40, 0.01],
+            ['Grad steep', gradSteep, (v: number) => { setGradSteep(v); gradSteepRef.current = v; }, 0.40, 3.00, 0.05],
+            ['Sun shift',  sunShift,  (v: number) => { setSunShift(v);  sunShiftRef.current  = v; }, 0.00, 0.50, 0.01],
+          ] as [string, number, (v: number) => void, number, number, number][]).map(([label, val, set, min, max, step]) => (
+            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ opacity: 0.7 }}>{label}</span>
+                <span style={{ color: '#a0c8ff' }}>{val.toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={min} max={max} step={step} value={val}
+                onChange={e => set(parseFloat(e.target.value))}
+                style={{ width: '100%', accentColor: '#7060c0' }}
+              />
+            </div>
+          ))}
+        </div>
       </>
     );
   },
