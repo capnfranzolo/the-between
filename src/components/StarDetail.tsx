@@ -36,13 +36,14 @@ interface StarDetailProps {
   userStar?: UserStarContext | null;
 }
 
-// Mini animated spirograph for the user star context strip
+// Mini animated spirograph — uses a large internal buffer (size×8) so the full
+// spirograph is always visible (no cropping), with browser CSS scaling it down.
 function StarMini({ dims, size }: { dims: CosmosStarData['dimensions']; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size: size * 2, dpr: 1 });
+    const inst = createSpirograph(canvas, dims, { size: size * 8, dpr: 1 });
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
@@ -200,50 +201,12 @@ export default function StarDetail({
           </div>
         )}
 
-        {/* User's own star — shown when they can connect and are in connect mode */}
-        {showUserStar && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            marginTop: 16,
-            padding: '10px 14px',
-            background: 'rgba(240,232,224,0.04)',
-            border: `1px solid ${withAlpha(BTW.textPri, 0.09)}`,
-            borderRadius: 12,
-          }}>
-            <StarMini dims={userStar!.dimensions} size={44} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 9,
-                letterSpacing: '0.28em',
-                textTransform: 'uppercase',
-                color: BTW.horizon[3],
-                marginBottom: 4,
-              }}>
-                your star
-              </div>
-              <div style={{
-                fontFamily: SERIF,
-                fontStyle: 'italic',
-                fontSize: 13,
-                color: BTW.textDim,
-                lineHeight: 1.5,
-                overflow: 'hidden',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-              }}>
-                {userStar!.text}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Sticky footer — always visible above the home indicator ── */}
       <div style={{
         flexShrink: 0,
+        position: 'relative', // anchor for ghost text
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -252,33 +215,74 @@ export default function StarDetail({
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
         borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
       }}>
+        <style>{`
+          @keyframes btwGhostFloat {
+            0%, 100% { opacity: 0.68; transform: translateY(0px); }
+            50%       { opacity: 0.86; transform: translateY(-10px); }
+          }
+          .btw-ghost-answer { display: block; }
+          @media (max-width: 640px) { .btw-ghost-answer { display: none !important; } }
+        `}</style>
+
         <ShareButton url={url} nudge={nudge} />
 
         {showConnect && (
-          <button
-            onClick={onConnect}
-            style={{
-              background: 'transparent',
-              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-              color: BTW.horizon[3],
-              padding: '12px 18px', minHeight: 44,
-              borderRadius: 999,
-              fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
-              textTransform: 'uppercase', whiteSpace: 'nowrap',
-              cursor: 'pointer', fontFamily: SANS,
-              // Explicit touch-action so iOS doesn't eat the tap
-              touchAction: 'manipulation',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            Connect your star →
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* User's star — properly sized to match button height */}
+            {showUserStar && (
+              <StarMini dims={userStar!.dimensions} size={44} />
+            )}
+            <button
+              onClick={onConnect}
+              style={{
+                background: 'transparent',
+                border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+                color: BTW.horizon[3],
+                padding: '12px 18px', minHeight: 44,
+                borderRadius: 999,
+                fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
+                textTransform: 'uppercase', whiteSpace: 'nowrap',
+                cursor: 'pointer', fontFamily: SANS,
+                touchAction: 'manipulation',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.15)}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              Connect your star →
+            </button>
+          </div>
         )}
 
         {star.mine && (
           <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
             your star
+          </div>
+        )}
+
+        {/* Ghost answer text — floats to the right OUTSIDE the panel on desktop */}
+        {showUserStar && (
+          <div
+            className="btw-ghost-answer"
+            style={{
+              position: 'absolute',
+              left: 'calc(100% + 20px)',
+              bottom: 12,
+              width: 'clamp(160px, 20vw, 240px)',
+              pointerEvents: 'none',
+              animation: 'btwGhostFloat 4s ease-in-out infinite',
+            }}
+          >
+            <div style={{
+              fontFamily: SERIF,
+              fontStyle: 'italic',
+              fontSize: 'clamp(15px, 1.8vw, 18px)',
+              lineHeight: 1.55,
+              color: 'rgba(240,232,224,0.72)',
+              textShadow: '0 0 28px rgba(240,200,150,0.18)',
+              letterSpacing: '0.02em',
+            }}>
+              {userStar!.text}
+            </div>
           </div>
         )}
       </div>

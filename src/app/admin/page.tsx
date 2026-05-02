@@ -920,6 +920,275 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
   );
 }
 
+// ─── QuestionsTab ────────────────────────────────────────────────────────────
+
+interface AdminQuestion {
+  id: string;
+  slug: string;
+  text: string;
+  active: boolean;
+  display_order: number;
+  created_at: string;
+  stars: { total: number; approved: number; pending: number; rejected: number };
+  connections: { total: number; approved: number; pending: number };
+}
+
+function QuestionsTab() {
+  const [questions, setQuestions] = useState<AdminQuestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Edit state per question
+  const [editText, setEditText] = useState('');
+  const [editSlug, setEditSlug] = useState('');
+  const [editActive, setEditActive] = useState(true);
+  const [editSaving, setEditSaving] = useState(false);
+
+  function load() {
+    setLoading(true);
+    fetch('/api/admin/questions')
+      .then(r => r.json())
+      .then(d => { setQuestions(d.questions ?? []); setLoading(false); })
+      .catch(() => { setError('Failed to load questions'); setLoading(false); });
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function openEdit(q: AdminQuestion) {
+    setExpanded(q.id);
+    setEditText(q.text);
+    setEditSlug(q.slug);
+    setEditActive(q.active);
+    setEditSaving(false);
+  }
+
+  async function saveEdit(id: string) {
+    setEditSaving(true);
+    const res = await fetch(`/api/admin/questions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: editText, slug: editSlug, active: editActive }),
+    });
+    const d = await res.json();
+    setEditSaving(false);
+    if (d.ok) {
+      setQuestions(prev => prev.map(q => q.id === id ? { ...q, ...d.question } : q));
+      setExpanded(null);
+    } else {
+      setError(d.error ?? 'Save failed');
+    }
+  }
+
+  async function doDelete(id: string) {
+    setDeleting(true);
+    const res = await fetch(`/api/admin/questions/${id}`, { method: 'DELETE' });
+    const d = await res.json();
+    setDeleting(false);
+    if (d.ok) {
+      setQuestions(prev => prev.filter(q => q.id !== id));
+      setDeleteConfirm(null);
+      setExpanded(null);
+    } else {
+      setError(d.error ?? 'Delete failed');
+    }
+  }
+
+  async function createQuestion() {
+    if (!newText.trim() || !newSlug.trim()) return;
+    setSaving(true);
+    const res = await fetch('/api/admin/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: newText, slug: newSlug }),
+    });
+    const d = await res.json();
+    setSaving(false);
+    if (d.ok) {
+      setNewText(''); setNewSlug('');
+      setCreating(false);
+      load(); // reload with fresh stats
+    } else {
+      setError(d.error ?? 'Create failed');
+    }
+  }
+
+  const totalStars = questions.reduce((s, q) => s + q.stars.total, 0);
+  const totalConns = questions.reduce((s, q) => s + q.connections.total, 0);
+  const approvedStars = questions.reduce((s, q) => s + q.stars.approved, 0);
+  const pendingStars = questions.reduce((s, q) => s + q.stars.pending, 0);
+
+  return (
+    <div style={{ padding: '16px 20px', maxWidth: 900 }}>
+      {error && (
+        <div style={{ background: '#2a0000', color: '#ff6666', padding: '8px 16px', borderRadius: 4, marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+          ⚠ {error}
+          <button onClick={() => setError(null)} style={S.iconBtn}>×</button>
+        </div>
+      )}
+
+      {/* Global stats banner */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
+        {[
+          { label: 'Questions', val: questions.length, color: '#9ba8c0' },
+          { label: 'Total Stars', val: totalStars, color: '#aaa' },
+          { label: 'Approved Stars', val: approvedStars, color: '#00cc44' },
+          { label: 'Pending Stars', val: pendingStars, color: '#ffaa00' },
+          { label: 'Total Connections', val: totalConns, color: '#6af' },
+        ].map(({ label, val, color }) => (
+          <div key={label} style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '12px 16px' }}>
+            <div style={{ fontSize: 11, color: '#555', letterSpacing: '0.06em', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color, fontFamily: 'monospace' }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Create new question */}
+      <div style={{ marginBottom: 20 }}>
+        {!creating ? (
+          <button onClick={() => setCreating(true)} style={{ ...S.btn('primary'), padding: '8px 16px' }}>
+            + New question
+          </button>
+        ) : (
+          <div style={{ background: '#111', border: '1px solid #2a472a', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ color: '#6a9', fontSize: 11, letterSpacing: '0.08em', marginBottom: 12 }}>NEW QUESTION</div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Question text</div>
+              <textarea
+                autoFocus
+                value={newText}
+                onChange={e => setNewText(e.target.value)}
+                rows={3}
+                placeholder="What do you know is true but can't prove?"
+                style={{ ...S.textarea }}
+              />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Slug (URL-safe)</div>
+              <input
+                value={newSlug}
+                onChange={e => setNewSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
+                placeholder="what-you-know-is-true"
+                style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={createQuestion} disabled={saving || !newText.trim() || !newSlug.trim()} style={S.btn('primary')}>
+                {saving ? 'Creating…' : 'Create question'}
+              </button>
+              <button onClick={() => { setCreating(false); setNewText(''); setNewSlug(''); }} style={S.btn()}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Question list */}
+      {loading && <div style={{ color: '#555', padding: 16 }}>Loading…</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {questions.map(q => (
+          <div key={q.id} style={{ background: '#111', border: `1px solid ${expanded === q.id ? '#334' : '#1e1e1e'}`, borderRadius: 8 }}>
+            {/* Row header */}
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer' }}
+              onClick={() => expanded === q.id ? setExpanded(null) : openEdit(q)}
+            >
+              <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: q.active ? '#002200' : '#220000', color: q.active ? '#00cc44' : '#cc4444', fontFamily: 'monospace' }}>
+                {q.active ? 'live' : 'off'}
+              </span>
+              <span style={{ color: '#ddd', flex: 1, fontSize: 13, lineHeight: 1.4 }}>{q.text}</span>
+              <span style={{ ...S.mono, color: '#555', fontSize: 11 }}>{q.slug}</span>
+              {/* Per-question mini stats */}
+              <div style={{ display: 'flex', gap: 10, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap' as const }}>
+                <span style={{ color: '#aaa' }}>{q.stars.approved}⭐</span>
+                <span style={{ color: q.stars.pending > 0 ? '#ffaa00' : '#555' }}>{q.stars.pending}↑</span>
+                <span style={{ color: '#6af' }}>{q.connections.approved}⟂</span>
+              </div>
+              <span style={{ color: '#555', fontSize: 11 }}>{expanded === q.id ? '▲' : '▼'}</span>
+            </div>
+
+            {/* Expanded edit panel */}
+            {expanded === q.id && (
+              <div style={{ padding: '0 16px 16px', borderTop: '1px solid #1e1e1e' }}>
+                {/* Detail stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, auto)', gap: '6px 18px', padding: '12px 0', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>
+                  <span>Total stars:</span><span style={{ color: '#aaa' }}>{q.stars.total}</span>
+                  <span>Approved:</span><span style={{ color: '#00cc44' }}>{q.stars.approved}</span>
+                  <span>Pending:</span><span style={{ color: '#ffaa00' }}>{q.stars.pending}</span>
+                  <span>Rejected:</span><span style={{ color: '#cc4444' }}>{q.stars.rejected}</span>
+                  <span>Connections:</span><span style={{ color: '#6af' }}>{q.connections.total}</span>
+                  <span>Pending conns:</span><span style={{ color: '#ffaa00' }}>{q.connections.pending}</span>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Question text</div>
+                  <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={3} style={{ ...S.textarea }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 14 }}>
+                  <div>
+                    <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Slug</div>
+                    <input
+                      value={editSlug}
+                      onChange={e => setEditSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
+                      style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Active</div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', paddingTop: 8 }}>
+                      <input type="checkbox" checked={editActive} onChange={e => setEditActive(e.target.checked)} />
+                      <span style={{ color: '#aaa', fontSize: 12 }}>{editActive ? 'Live' : 'Hidden'}</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+                  <button onClick={() => saveEdit(q.id)} disabled={editSaving} style={S.btn('primary')}>
+                    {editSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                  <a
+                    href={`/cosmos/${q.id}`}
+                    target="_blank" rel="noreferrer"
+                    style={{ ...S.btn(), textDecoration: 'none', display: 'inline-block' }}
+                  >
+                    👁 Preview cosmos
+                  </a>
+                  <button onClick={() => setExpanded(null)} style={S.btn()}>Cancel</button>
+
+                  {/* Delete with confirmation */}
+                  {deleteConfirm !== q.id ? (
+                    <button
+                      onClick={() => setDeleteConfirm(q.id)}
+                      style={{ ...S.btn('danger'), marginLeft: 'auto' }}
+                    >
+                      🗑 Delete question
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+                      <span style={{ color: '#cc4444', fontSize: 12 }}>
+                        Delete &ldquo;{q.slug}&rdquo; + {q.stars.total} stars + {q.connections.total} connections?
+                      </span>
+                      <button onClick={() => doDelete(q.id)} disabled={deleting} style={S.btn('danger')}>
+                        {deleting ? 'Deleting…' : 'Confirm delete'}
+                      </button>
+                      <button onClick={() => setDeleteConfirm(null)} style={S.btn()}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── SettingsTab ─────────────────────────────────────────────────────────────
 
 function SettingsTab() {
@@ -1014,7 +1283,7 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState('');
   const [checking, setChecking] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [tab, setTab] = useState<'stars' | 'connections' | 'settings'>('stars');
+  const [tab, setTab] = useState<'stars' | 'connections' | 'questions' | 'settings'>('stars');
   const [questionFilter, setQuestionFilter] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
   const prevPending = useRef(0);
@@ -1139,11 +1408,13 @@ export default function AdminPage() {
         <button onClick={() => setTab('connections')} style={S.tab(tab === 'connections')}>
           Connections{stats && stats.pendingConnections > 0 && tab !== 'connections' && <span style={{ color: '#ffaa00', marginLeft: 4 }}>({stats.pendingConnections})</span>}
         </button>
+        <button onClick={() => setTab('questions')} style={S.tab(tab === 'questions')}>Questions</button>
         <button onClick={() => setTab('settings')} style={S.tab(tab === 'settings')}>Settings</button>
       </div>
 
       {tab === 'stars' && <StarsTab questionFilter={questionFilter} />}
       {tab === 'connections' && <ConnectionsTab questionFilter={questionFilter} />}
+      {tab === 'questions' && <QuestionsTab />}
       {tab === 'settings' && <SettingsTab />}
     </div>
   );

@@ -1,223 +1,153 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
+import { useState, useEffect, useRef } from 'react';
+import { SERIF } from '@/lib/btw';
 
-const HINT_KEY = 'btw_controls_seen';
+const HINT_KEY  = 'btw_controls_v2';
+const STYLE_ID  = 'btw-controls-css';
 
-interface ControlsHintProps {
-  /** Pass true to trigger the hint; it shows once and then sets the seen flag */
-  trigger: boolean;
-  onDone: () => void;
+// Inject keyframes once
+function ensureCSS() {
+  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
+  const s = document.createElement('style');
+  s.id = STYLE_ID;
+  s.textContent = `
+    @keyframes btwKeyIn {
+      from { opacity:0; transform:translateY(8px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes btwKeyOut {
+      0%   { opacity: var(--key-op,0.9); transform: translate(0,0) scale(1);   filter:blur(0px); }
+      100% { opacity: 0;                 transform: translate(var(--kx),var(--ky)) scale(0.6); filter:blur(6px); }
+    }
+  `;
+  document.head.appendChild(s);
 }
 
-// A single illustrated keyboard key
-function Key({ label, wide, sub }: { label: string; wide?: boolean; sub?: string }) {
+interface FloatKeyProps {
+  label: string;
+  arrow: string;
+  driftX: number;
+  driftY: number;
+  delay: number;
+  dispersing: boolean;
+  opacity: number;
+}
+
+function FloatKey({ label, arrow, driftX, driftY, delay, dispersing, opacity }: FloatKeyProps) {
+  const outStyle: React.CSSProperties = dispersing ? {
+    '--kx': `${driftX}px`,
+    '--ky': `${driftY}px`,
+    '--key-op': String(opacity),
+    animation: `btwKeyOut 1.6s ease-out ${delay}ms forwards`,
+  } as React.CSSProperties : {};
+
   return (
     <div style={{
-      display: 'inline-flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: wide ? 56 : 36,
-      height: 36,
-      background: 'rgba(240,232,224,0.07)',
-      border: `1px solid ${withAlpha(BTW.textPri, 0.30)}`,
-      borderBottom: `3px solid ${withAlpha(BTW.textPri, 0.22)}`,
-      borderRadius: 6,
-      fontFamily: SANS,
-      fontSize: sub ? 9 : 12,
-      fontWeight: 600,
-      color: BTW.textPri,
-      letterSpacing: '0.02em',
-      lineHeight: 1.1,
+      width: 42, height: 42,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(255,255,255,0.08)',
+      border: '1.5px solid rgba(255,255,255,0.55)',
+      borderBottom: '3px solid rgba(255,255,255,0.28)',
+      borderRadius: 8,
+      color: 'rgba(255,255,255,0.90)',
       userSelect: 'none',
-      flexShrink: 0,
+      gap: 1,
+      opacity,
+      animation: dispersing ? undefined : 'btwKeyIn .4s ease-out forwards',
+      ...outStyle,
     }}>
-      {sub && <span style={{ fontSize: 7, opacity: 0.5, marginBottom: 1 }}>{sub}</span>}
-      {label}
+      <span style={{ fontSize: 11, lineHeight: 1, opacity: 0.55 }}>{arrow}</span>
+      <span style={{ fontSize: 15, fontWeight: 700, lineHeight: 1, fontFamily: 'system-ui,sans-serif' }}>{label}</span>
     </div>
   );
 }
 
-// A row of keys with optional label
-function KeyRow({ children, label }: { children: React.ReactNode; label?: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ display: 'flex', gap: 4 }}>{children}</div>
-      {label && (
-        <span style={{
-          marginLeft: 8,
-          fontFamily: SANS,
-          fontSize: 11,
-          color: BTW.textDim,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
-        }}>
-          {label}
-        </span>
-      )}
-    </div>
-  );
-}
-
-export default function ControlsHint({ trigger, onDone }: ControlsHintProps) {
-  const [visible, setVisible] = useState(false);
-  const [phase, setPhase] = useState<'in' | 'hold' | 'out'>('in');
+export default function ControlsHint({ trigger, onDone }: { trigger: boolean; onDone: () => void }) {
+  const [phase, setPhase] = useState<'hidden' | 'visible' | 'dispersing'>('hidden');
+  // Random drift values, computed once on mount
+  const drifts = useRef<Array<{ x: number; y: number; delay: number }>>([]);
 
   useEffect(() => {
     if (!trigger) return;
     if (typeof localStorage !== 'undefined' && localStorage.getItem(HINT_KEY)) {
-      onDone();
-      return;
+      onDone(); return;
     }
-    setVisible(true);
-    setPhase('in');
-    // Auto-dismiss after 5s
-    const holdTimer = setTimeout(() => setPhase('out'), 5000);
-    const doneTimer = setTimeout(() => {
+    ensureCSS();
+
+    // Pre-compute random drift per element (4 keys + 1 text = 5 elements)
+    drifts.current = Array.from({ length: 5 }, (_, i) => {
+      const angle = (Math.random() * Math.PI * 2);
+      const dist  = 70 + Math.random() * 80;
+      return {
+        x: Math.round(Math.cos(angle) * dist),
+        y: Math.round(Math.sin(angle) * dist - 30), // bias upward
+        delay: Math.round(i * 90 + Math.random() * 120),
+      };
+    });
+
+    setPhase('visible');
+    const disperseTimer = setTimeout(() => setPhase('dispersing'), 6500);
+    const doneTimer     = setTimeout(() => {
       if (typeof localStorage !== 'undefined') localStorage.setItem(HINT_KEY, '1');
-      setVisible(false);
+      setPhase('hidden');
       onDone();
-    }, 5500);
-    return () => { clearTimeout(holdTimer); clearTimeout(doneTimer); };
-  }, [trigger]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, 8400);
 
-  const dismiss = () => {
-    setPhase('out');
-    if (typeof localStorage !== 'undefined') localStorage.setItem(HINT_KEY, '1');
-    setTimeout(() => { setVisible(false); onDone(); }, 400);
-  };
+    return () => { clearTimeout(disperseTimer); clearTimeout(doneTimer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
 
-  if (!visible) return null;
+  if (phase === 'hidden') return null;
+
+  const dispersing = phase === 'dispersing';
+  const d = drifts.current;
+
+  // Text drift
+  const textOut: React.CSSProperties = dispersing ? {
+    '--kx': `${d[4]?.x ?? 0}px`,
+    '--ky': `${d[4]?.y ?? -60}px`,
+    '--key-op': '0.75',
+    animation: `btwKeyOut 1.6s ease-out ${d[4]?.delay ?? 300}ms forwards`,
+  } as React.CSSProperties : {};
 
   return (
-    <div
-      onClick={dismiss}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 20,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(0,0,0,0.45)',
-        backdropFilter: 'blur(4px)',
-        WebkitBackdropFilter: 'blur(4px)',
-        opacity: phase === 'out' ? 0 : 1,
-        transition: 'opacity .4s ease',
-        cursor: 'pointer',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'rgba(14,10,32,0.94)',
-          border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
-          borderRadius: 20,
-          padding: '32px 36px',
-          maxWidth: 420,
-          width: '90%',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 20,
-          transform: phase === 'out' ? 'translateY(12px)' : 'translateY(0)',
-          transition: 'transform .4s ease',
-          animation: 'btwRise .4s cubic-bezier(.2,.8,.3,1)',
-        }}
-      >
-        {/* Title */}
-        <div style={{
-          fontFamily: SERIF,
-          fontStyle: 'italic',
-          fontSize: 18,
-          color: BTW.textPri,
-          textAlign: 'center',
-          opacity: 0.85,
-        }}>
-          Navigating the cosmos
-        </div>
+    <div style={{
+      position: 'fixed',
+      top: '38%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      zIndex: 12,
+      pointerEvents: 'none',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+    }}>
+      {/* W key (top row, centered) */}
+      <FloatKey label="W" arrow="↑" driftX={d[0]?.x ?? -40} driftY={d[0]?.y ?? -80} delay={d[0]?.delay ?? 0} dispersing={dispersing} opacity={0.9} />
 
-        {/* Key grid */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* A S D row */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <FloatKey label="A" arrow="←" driftX={d[1]?.x ?? -80} driftY={d[1]?.y ?? 30}  delay={d[1]?.delay ?? 60}  dispersing={dispersing} opacity={0.9} />
+        <FloatKey label="S" arrow="↓" driftX={d[2]?.x ?? 10}  driftY={d[2]?.y ?? 80}  delay={d[2]?.delay ?? 120} dispersing={dispersing} opacity={0.9} />
+        <FloatKey label="D" arrow="→" driftX={d[3]?.x ?? 80}  driftY={d[3]?.y ?? 20}  delay={d[3]?.delay ?? 180} dispersing={dispersing} opacity={0.9} />
+      </div>
 
-          {/* WASD row */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
-            {/* Top row: W / ↑ */}
-            <div style={{ display: 'flex', gap: 8, marginLeft: 40 }}>
-              <Key label="W" sub="↑" />
-              <Key label="↑" />
-            </div>
-            {/* Middle row: A S D / ← ↓ → */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <Key label="A" sub="←" />
-                <Key label="S" sub="↓" />
-                <Key label="D" sub="→" />
-              </div>
-              <span style={{ color: BTW.textDim, opacity: 0.4, fontSize: 12 }}>/</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <Key label="←" />
-                <Key label="↓" />
-                <Key label="→" />
-              </div>
-              <span style={{ marginLeft: 8, fontFamily: SANS, fontSize: 11, color: BTW.textDim, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-                turn &amp; move
-              </span>
-            </div>
-          </div>
-
-          {/* Q E row */}
-          <KeyRow label="slide left / right">
-            <Key label="Q" />
-            <Key label="E" />
-          </KeyRow>
-
-          {/* Space */}
-          <KeyRow label="boost">
-            <Key label="Space" wide />
-          </KeyRow>
-        </div>
-
-        {/* Divider + click instruction */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          borderTop: `1px solid ${withAlpha(BTW.textPri, 0.10)}`,
-          paddingTop: 16,
-        }}>
-          <div style={{
-            fontFamily: SERIF,
-            fontStyle: 'italic',
-            fontSize: 22,
-            color: BTW.horizon[3],
-            opacity: 0.9,
-            flexShrink: 0,
-          }}>
-            ✦
-          </div>
-          <div style={{
-            fontFamily: SERIF,
-            fontStyle: 'italic',
-            fontSize: 17,
-            color: BTW.textPri,
-            lineHeight: 1.4,
-          }}>
-            click a star to read it
-          </div>
-        </div>
-
-        {/* Dismiss hint */}
-        <div style={{
-          textAlign: 'center',
-          fontFamily: SANS,
-          fontSize: 10,
-          color: BTW.textDim,
-          letterSpacing: '0.16em',
-          textTransform: 'uppercase',
-          opacity: 0.5,
-        }}>
-          click anywhere to dismiss
-        </div>
+      {/* "click any star" */}
+      <div style={{
+        marginTop: 10,
+        fontFamily: SERIF,
+        fontStyle: 'italic',
+        fontSize: 17,
+        color: 'rgba(255,255,255,0.75)',
+        letterSpacing: '0.02em',
+        whiteSpace: 'nowrap',
+        opacity: 0.75,
+        animation: dispersing ? undefined : 'btwKeyIn .5s ease-out 200ms both',
+        ...textOut,
+      }}>
+        click any star
       </div>
     </div>
   );

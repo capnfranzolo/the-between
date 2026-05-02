@@ -30,13 +30,15 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 
 // ── Shared inline star canvas ──────────────────────────────────────────────────
+// Uses a large internal buffer (size * 8) displayed at CSS size, ensuring the
+// spirograph is never clipped — the browser scales the buffer down to fit.
 function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dims = star.dimensions ?? DIM_DEFAULTS;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size: size * 2, dpr: 1 });
+    const inst = createSpirograph(canvas, dims, { size: size * 8, dpr: 1 });
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
@@ -470,14 +472,12 @@ export default function CosmosPage() {
         zIndex: 0,
         pointerEvents: 'none',
       }}>
-        {/* Brand / about — always visible; user's star shown inline when they have one */}
+        {/* Brand / about — always visible; user's star to the RIGHT when they have one
+            and are NOT currently viewing their own star panel */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           pointerEvents: 'auto',
         }}>
-          {userStarId && byId[userStarId] && (
-            <StarMiniInline star={byId[userStarId]} size={28} />
-          )}
           <button
             onClick={() => setShowAbout(true)}
             style={{
@@ -493,6 +493,9 @@ export default function CosmosPage() {
           >
             The Between
           </button>
+          {userStarId && byId[userStarId] && !selectedStar?.mine && (
+            <StarMiniInline star={byId[userStarId]} size={28} />
+          )}
         </div>
 
         {/* Add star */}

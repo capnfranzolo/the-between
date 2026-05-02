@@ -56,24 +56,25 @@ function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
       }}>
         {/* Title */}
         <div style={{
-          fontSize: 10,
-          letterSpacing: '0.28em',
-          textTransform: 'uppercase',
-          color: BTW.textDim,
-          fontFamily: SANS,
-          marginBottom: 20,
+          fontFamily: SERIF,
+          fontSize: 'clamp(32px, 7vw, 48px)',
+          letterSpacing: '0.06em',
+          color: BTW.textPri,
+          marginBottom: 8,
+          lineHeight: 1.1,
         }}>
           The Between
         </div>
         <div style={{
           fontFamily: SERIF,
-          fontSize: 'clamp(15px, 3.5vw, 17px)',
-          color: BTW.textDim,
-          letterSpacing: '0.06em',
-          marginBottom: 28,
+          fontStyle: 'italic',
+          fontSize: 'clamp(13px, 2.5vw, 15px)',
+          color: withAlpha(BTW.textDim, 0.55),
+          letterSpacing: '0.04em',
+          marginBottom: 32,
           lineHeight: 1.3,
         }}>
-          An Art Project
+          (an art project)
         </div>
 
         {/* Body lines */}
@@ -176,7 +177,7 @@ function LandingPageInner() {
           }}>
             The Between
           </div>
-          <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: 640 }}>
+          <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: 'min(820px, 92vw)' }}>
             <QuestionCycler
               onQuestionChange={setQuestionId}
               onValidated={setPending}

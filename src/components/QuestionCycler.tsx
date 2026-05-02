@@ -110,7 +110,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
           fontFamily: SERIF, fontWeight: 400,
           fontSize: 'clamp(24px, 5vw, 32px)', lineHeight: 1.18,
           margin: 0, color: BTW.textPri,
-          maxWidth: 360,
+          maxWidth: 'min(720px, 90vw)',
           letterSpacing: '0.005em',
           textShadow: '0 1px 24px rgba(30,24,64,0.6)',
           textAlign: 'center',
