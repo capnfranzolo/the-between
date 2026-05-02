@@ -870,7 +870,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         smokeInFlight = true;
         smokeOverlay.appendChild(bubble);
 
-        // Phase 2 @ 0.8 s: freeze phrase, scatter each word (total ~2 s)
+        // Phase 2 @ 1.3 s: freeze phrase, scatter each word (total ~2.5 s)
         smokeDisperseTimer = setTimeout(() => {
           smokeDisperseTimer = null;
           bubble.style.animation = 'none';
@@ -886,9 +886,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             const delay = (i * 30 + Math.random() * 40).toFixed(0);
             span.style.animation = `btwSmokeSplit 1.2s ease-out ${delay}ms forwards`;
           });
-        }, 800);
+        }, 1300);
 
-        // Cleanup after full animation completes (~2 s total)
+        // Cleanup after full animation completes (~2.6 s total)
         smokeCleanupTimer = setTimeout(() => {
           smokeCleanupTimer = null;
           smokeInFlight = false;
@@ -897,7 +897,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const next = smokeNextStarId;
           smokeNextStarId = null;
           if (next) triggerSmoke(next);
-        }, 2100);
+        }, 2600);
       }
       const onMouseMove = (e: MouseEvent) => {
         // Skip smoke when a star detail is open or in passive mode

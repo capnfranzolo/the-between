@@ -51,71 +51,6 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
   );
 }
 
-// ── Peeking star — user's own star peeks from the bottom as a persistent anchor ──
-function PeekingStar({ star }: { star: CosmosStarData }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const starId = star.id;
-  const dims = star.dimensions ?? DIM_DEFAULTS;
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size: 180, dpr: 1 });
-    let t = 0;
-    let raf: number;
-    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
-    tick();
-    return () => { cancelAnimationFrame(raf); inst.stop(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [starId]);
-
-  return (
-    <div style={{
-      position: 'fixed',
-      bottom: 0,
-      left: '50%',
-      transform: 'translateX(-50%)',
-      zIndex: 2,
-      pointerEvents: 'none',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      animation: 'btwPeekBob 3.8s ease-in-out infinite',
-    }}>
-      {/* Faint answer text across the bottom */}
-      {star.text && (
-        <div style={{
-          fontFamily: SERIF,
-          fontStyle: 'italic',
-          fontSize: 'clamp(10px, 1.5vw, 13px)',
-          color: 'rgba(240,232,224,0.18)',
-          letterSpacing: '0.04em',
-          textAlign: 'center',
-          maxWidth: 420,
-          lineHeight: 1.5,
-          padding: '0 20px 6px',
-        }}>
-          {star.text}
-        </div>
-      )}
-      {/* Only the top ~50px of the spirograph peeks above the screen edge */}
-      <div style={{ width: 110, height: 52, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 110,
-            height: 110,
-            opacity: 0.55,
-          }}
-        />
-      </div>
-    </div>
-  );
-}
 
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
@@ -438,6 +373,9 @@ export default function CosmosPage() {
             onConnectionClick={handleThoughtClick}
             onDismiss={clearSelection}
             nudge={hashString(selectedStar.shortcode) % 5 === 0}
+            userStar={userStarId && byId[userStarId] && !selectedStar.mine
+              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              : null}
           />
         )}
 
@@ -532,44 +470,14 @@ export default function CosmosPage() {
         zIndex: 0,
         pointerEvents: 'none',
       }}>
-        {/* Brand / about — OR connecting-mode star widget */}
-        {connecting && userStarId && byId[userStarId] ? (
-          // ── Connecting mode: show user's star + CTA ──────────────────────
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            pointerEvents: 'none',
-            maxWidth: 'calc(100% - 60px)',
-            animation: 'btwRise .3s ease-out',
-          }}>
-            <StarMiniInline star={byId[userStarId]} size={60} />
-            <div style={{ overflow: 'hidden' }}>
-              <div style={{
-                fontFamily: SERIF,
-                fontStyle: 'italic',
-                fontSize: 'clamp(10px, 1.4vw, 13px)',
-                color: BTW.textDim,
-                lineHeight: 1.4,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                maxWidth: 220,
-              }}>
-                {byId[userStarId].text}
-              </div>
-              <div style={{
-                fontFamily: SANS,
-                fontSize: 9,
-                letterSpacing: '0.16em',
-                textTransform: 'uppercase',
-                color: BTW.horizon[3],
-                opacity: 0.75,
-                marginTop: 3,
-              }}>
-                Find a star to connect to by clicking around!
-              </div>
-            </div>
-          </div>
-        ) : (
+        {/* Brand / about — always visible; user's star shown inline when they have one */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          pointerEvents: 'auto',
+        }}>
+          {userStarId && byId[userStarId] && (
+            <StarMiniInline star={byId[userStarId]} size={28} />
+          )}
           <button
             onClick={() => setShowAbout(true)}
             style={{
@@ -578,14 +486,14 @@ export default function CosmosPage() {
               color: BTW.textDim, padding: '6px 0',
               minHeight: 44,
               transition: 'color .2s',
-              pointerEvents: 'auto',
+              fontFamily: SANS,
             }}
             onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
             onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
           >
             The Between
           </button>
-        )}
+        </div>
 
         {/* Add star */}
         <button
@@ -608,11 +516,6 @@ export default function CosmosPage() {
         </button>
       </div>
 
-      {/* Peeking star — user's own star floats from the bottom as a reminder */}
-      {userStarId && byId[userStarId] && !connectConfirmed && !connecting && !selected && (
-        <PeekingStar star={byId[userStarId]} />
-      )}
-
       <ControlsHint
         trigger={triggerControlsHint}
         onDone={() => setTriggerControlsHint(false)}
@@ -622,12 +525,6 @@ export default function CosmosPage() {
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
 
-      <style>{`
-        @keyframes btwPeekBob {
-          0%, 100% { transform: translateX(-50%) translateY(0px); }
-          50%       { transform: translateX(-50%) translateY(-9px); }
-        }
-      `}</style>
     </>
   );
 }

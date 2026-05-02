@@ -3,6 +3,7 @@ import { useRef, useEffect } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
+import { createSpirograph } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
 
@@ -18,6 +19,11 @@ export interface CosmosStarData {
   mine?: boolean;
 }
 
+export interface UserStarContext {
+  text: string;
+  dimensions: CosmosStarData['dimensions'];
+}
+
 interface StarDetailProps {
   star: CosmosStarData;
   hasMystar: boolean;
@@ -27,11 +33,33 @@ interface StarDetailProps {
   onConnectionClick?: (id: string) => void;
   onDismiss?: () => void;
   nudge?: boolean;
+  userStar?: UserStarContext | null;
+}
+
+// Mini animated spirograph for the user star context strip
+function StarMini({ dims, size }: { dims: CosmosStarData['dimensions']; size: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const inst = createSpirograph(canvas, dims, { size: size * 2, dpr: 1 });
+    let t = 0; let raf: number;
+    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
+    tick();
+    return () => { cancelAnimationFrame(raf); inst.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width: size, height: size, display: 'block', flexShrink: 0 }}
+    />
+  );
 }
 
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
-  connections, onConnectionClick, onDismiss, nudge,
+  connections, onConnectionClick, onDismiss, nudge, userStar,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const panelRef = useRef<HTMLDivElement>(null);
@@ -70,6 +98,7 @@ export default function StarDetail({
   }, [onDismiss]);
 
   const showConnect = hasMystar && !star.mine && !userHasOutgoingBond;
+  const showUserStar = userStar && showConnect;
 
   return (
     <div
@@ -83,7 +112,7 @@ export default function StarDetail({
         width: 'min(560px, 100%)',
         // Use flex column so the footer is always visible — only the
         // content area scrolls. Cap at 52vh so the star stays visible.
-        maxHeight: '52vh',
+        maxHeight: '56vh',
         display: 'flex',
         flexDirection: 'column',
         background: 'rgba(20,14,40,0.82)',
@@ -167,6 +196,46 @@ export default function StarDetail({
                   {c.reason}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* User's own star — shown when they can connect and are in connect mode */}
+        {showUserStar && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            marginTop: 16,
+            padding: '10px 14px',
+            background: 'rgba(240,232,224,0.04)',
+            border: `1px solid ${withAlpha(BTW.textPri, 0.09)}`,
+            borderRadius: 12,
+          }}>
+            <StarMini dims={userStar!.dimensions} size={44} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 9,
+                letterSpacing: '0.28em',
+                textTransform: 'uppercase',
+                color: BTW.horizon[3],
+                marginBottom: 4,
+              }}>
+                your star
+              </div>
+              <div style={{
+                fontFamily: SERIF,
+                fontStyle: 'italic',
+                fontSize: 13,
+                color: BTW.textDim,
+                lineHeight: 1.5,
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+              }}>
+                {userStar!.text}
+              </div>
             </div>
           </div>
         )}
