@@ -24,9 +24,11 @@ interface QuestionCyclerProps {
   onValidated?: (data: ValidatedPayload) => void;
   validationError?: string | null;
   onClearError?: () => void;
+  /** Pre-select a specific question by ID when the list loads */
+  initialQuestionId?: string | null;
 }
 
-export default function QuestionCycler({ onQuestionChange, onValidated, validationError, onClearError }: QuestionCyclerProps) {
+export default function QuestionCycler({ onQuestionChange, onValidated, validationError, onClearError, initialQuestionId }: QuestionCyclerProps) {
   const [questions, setQuestions] = useState<Question[]>(FALLBACK);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [fadingOut, setFadingOut] = useState(false);
@@ -45,6 +47,15 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
         if (data && data.length > 0) setQuestions(data as Question[]);
       });
   }, []);
+
+  // Jump to the requested initial question once the list loads from the server
+  useEffect(() => {
+    if (!initialQuestionId || questions === FALLBACK) return;
+    const idx = questions.findIndex(q => q.id === initialQuestionId);
+    if (idx !== -1 && idx !== currentIndex) setCurrentIndex(idx);
+    // Only run once when questions first load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions]);
 
   useEffect(() => {
     if (questions[currentIndex]?.id && questions[currentIndex].id !== 'fallback') {

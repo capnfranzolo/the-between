@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import CosmosScene, { type ThoughtData } from '@/components/cosmos/CosmosScene';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
@@ -20,6 +21,8 @@ interface CosmosStarRaw {
 }
 
 export default function LandingPage() {
+  const searchParams = useSearchParams();
+  const initialQuestionId = searchParams.get('question');
   const [questionId, setQuestionId] = useState<string | null>(null);
   const [thoughts, setThoughts] = useState<ThoughtData[]>([]);
   const [pending, setPending] = useState<ValidatedPayload | null>(null);
@@ -76,6 +79,7 @@ export default function LandingPage() {
             <QuestionCycler
               onQuestionChange={setQuestionId}
               onValidated={setPending}
+              initialQuestionId={initialQuestionId}
             />
           </div>
         </div>

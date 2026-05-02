@@ -428,7 +428,7 @@ export default function CosmosPage() {
         justifyContent: 'space-between',
         padding: '0 24px',
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
-        zIndex: 5,
+        zIndex: 4,
         pointerEvents: 'none',
       }}>
         {/* Brand / about */}
@@ -450,7 +450,7 @@ export default function CosmosPage() {
 
         {/* Add star */}
         <button
-          onClick={() => { window.location.href = '/'; }}
+          onClick={() => { window.location.href = `/?question=${questionId}`; }}
           title="Add your thought"
           style={{
             width: 44, height: 44, borderRadius: '50%',
