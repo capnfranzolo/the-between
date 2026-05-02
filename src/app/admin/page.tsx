@@ -327,6 +327,90 @@ function ConnectionDetailPanel({
   );
 }
 
+// ─── ConnectModal ─────────────────────────────────────────────────────────────
+
+function ConnectModal({
+  from, to, onClose, onCreated,
+}: {
+  from: AdminStar;
+  to: AdminStar;
+  onClose: () => void;
+  onCreated: (msg: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true);
+    setErr(null);
+    const res = await fetch('/api/admin/connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromStarId: from.id, toStarId: to.id, reason }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (data.ok) {
+      onCreated(data.hadExisting
+        ? `Connected — note: ${from.shortcode} already had an active connection`
+        : `${from.shortcode} now orbits ${to.shortcode}`);
+      onClose();
+    } else {
+      setErr(data.error ?? 'Failed');
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        background: '#141414', border: '1px solid #333', borderRadius: 8,
+        padding: 24, width: '100%', maxWidth: 480,
+      }}>
+        <div style={{ fontSize: 12, color: '#555', letterSpacing: '0.08em', marginBottom: 16 }}>CREATE CONNECTION</div>
+
+        {/* Visual summary */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+          <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 12px' }}>
+            <span style={{ ...S.mono, color: '#6af', marginRight: 8 }}>{from.shortcode}</span>
+            <span style={{ color: '#aaa', fontSize: 12 }}>{trunc(from.answer, 80)}</span>
+          </div>
+          <div style={{ textAlign: 'center', color: '#555', fontSize: 12, letterSpacing: '0.06em' }}>will orbit ↓</div>
+          <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 12px' }}>
+            <span style={{ ...S.mono, color: '#6af', marginRight: 8 }}>{to.shortcode}</span>
+            <span style={{ color: '#aaa', fontSize: 12 }}>{trunc(to.answer, 80)}</span>
+          </div>
+        </div>
+
+        <div style={{ color: '#555', fontSize: 11, marginBottom: 6 }}>Reason <span style={{ color: '#444' }}>(optional)</span></div>
+        <textarea
+          autoFocus
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) submit(); if (e.key === 'Escape') onClose(); }}
+          rows={3}
+          placeholder="Why does this thought orbit that one?"
+          style={{ ...S.textarea, marginBottom: 12 }}
+        />
+        {err && <div style={{ color: '#ff6666', fontSize: 12, marginBottom: 8 }}>⚠ {err}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={S.btn()}>Cancel</button>
+          <button onClick={submit} disabled={saving} style={S.btn('primary')}>
+            {saving ? 'Connecting…' : 'Connect →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── StarsTab ────────────────────────────────────────────────────────────────
 
 function StarsTab({ questionFilter }: { questionFilter: string }) {
@@ -341,6 +425,12 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadingRef = useRef(false); // guard against concurrent fetches
+
+  // Drag-to-connect state
+  const [draggedStar, setDraggedStar] = useState<AdminStar | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [connectModal, setConnectModal] = useState<{ from: AdminStar; to: AdminStar } | null>(null);
+  const [connectToast, setConnectToast] = useState<string | null>(null);
 
   const load = useCallback(async (pg = 0, reset = false) => {
     // Prevent duplicate concurrent fetches
@@ -460,8 +550,54 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
   const allChecked = stars.length > 0 && stars.every(s => selected.has(s.id));
 
+  function showToast(msg: string) {
+    setConnectToast(msg);
+    setTimeout(() => setConnectToast(null), 4000);
+  }
+
+  // Drag handlers — build the from→to pair, open modal on drop
+  function onDragStart(e: React.DragEvent, star: AdminStar) {
+    setDraggedStar(star);
+    e.dataTransfer.effectAllowed = 'link';
+    // Ghost label
+    const ghost = document.createElement('div');
+    ghost.textContent = star.shortcode;
+    ghost.style.cssText = 'position:absolute;top:-999px;left:-999px;background:#1a472a;color:#ccc;padding:4px 10px;border-radius:4px;font-family:monospace;font-size:12px;pointer-events:none';
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    setTimeout(() => document.body.removeChild(ghost), 0);
+  }
+
+  function onDragOver(e: React.DragEvent, targetId: string) {
+    if (!draggedStar || draggedStar.id === targetId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'link';
+    setDragOverId(targetId);
+  }
+
+  function onDrop(e: React.DragEvent, target: AdminStar) {
+    e.preventDefault();
+    setDragOverId(null);
+    if (!draggedStar || draggedStar.id === target.id) return;
+    setConnectModal({ from: draggedStar, to: target });
+    setDraggedStar(null);
+  }
+
   return (
     <div>
+      {connectModal && (
+        <ConnectModal
+          from={connectModal.from}
+          to={connectModal.to}
+          onClose={() => setConnectModal(null)}
+          onCreated={showToast}
+        />
+      )}
+      {connectToast && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a472a', color: '#aaffcc', padding: '10px 20px', borderRadius: 6, fontSize: 13, boxShadow: '0 4px 20px rgba(0,0,0,0.5)', pointerEvents: 'none' }}>
+          ✓ {connectToast}
+        </div>
+      )}
       {error && (
         <div style={{ background: '#2a0000', color: '#ff6666', padding: '8px 16px', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           ⚠ {error}
@@ -473,6 +609,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
         ))}
+        <span style={{ color: '#444', fontSize: 11, marginLeft: 8 }}>drag a row onto another to connect</span>
         <input className="btw-admin-search" placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 200 }} />
       </div>
 
@@ -503,12 +640,24 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
 
-      {stars.map(star => (
-        <div key={star.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+      {stars.map(star => {
+        const isDropTarget = dragOverId === star.id && draggedStar?.id !== star.id;
+        const isDragging = draggedStar?.id === star.id;
+        const dropStyle: React.CSSProperties = isDropTarget
+          ? { outline: '2px solid #4a9', outlineOffset: -2, background: '#0d2a1a' }
+          : {};
+        return (
+        <div key={star.id} style={{ borderBottom: '1px solid #1a1a1a', opacity: isDragging ? 0.45 : 1, transition: 'opacity .15s' }}>
           {/* Desktop row */}
           <div
             className="btw-admin-desktop"
-            style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            draggable
+            onDragStart={e => onDragStart(e, star)}
+            onDragEnd={() => { setDraggedStar(null); setDragOverId(null); }}
+            onDragOver={e => onDragOver(e, star.id)}
+            onDragLeave={() => setDragOverId(null)}
+            onDrop={e => onDrop(e, star)}
+            style={{ ...S.row, ...dropStyle, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'grab', background: expanded === star.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === star.id ? null : star.id)}
           >
             <input
@@ -542,7 +691,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
           {/* Mobile card */}
           <div
             className="btw-admin-card"
-            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent', ...dropStyle }}
             onClick={() => setExpanded(e => e === star.id ? null : star.id)}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -579,7 +728,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
             />
           )}
         </div>
-      ))}
+      ); })}
 
       {!loading && stars.length === 0 && (
         <div style={{ padding: 32, color: '#444', textAlign: 'center' }}>No stars found.</div>
