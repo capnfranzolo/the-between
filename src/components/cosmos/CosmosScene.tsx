@@ -495,8 +495,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           dotSprite.scale.set(4, 4, 1);
           dotSprite.userData = { isDotFallback: true };
           group.add(dotSprite);
-          // Mark dims on group for on-demand upgrade in activateLive
-          group.userData.dotDims = t.dimensions;
         }
 
         // Cheap glow halo via additive sprite — replaces per-star PointLight
@@ -536,6 +534,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
           spiro,
+          // dotDims: stored when spiro is null (beyond MAX_BAKED cap) so activateLive()
+          // can upgrade the dot fallback to a full spirograph on first selection.
+          dotDims: spiro ? undefined : t.dimensions,
           scaleMult: 1.0,
         };
         scene.add(group);
