@@ -74,7 +74,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 
 const S = {
   page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
-  topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 16, position: 'sticky' as const, top: 0, zIndex: 100 },
+  topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, position: 'sticky' as const, top: 0, zIndex: 100, flexWrap: 'wrap' as const },
   tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
   btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
     padding: '5px 12px', border: `1px solid ${variant === 'danger' ? '#cc4444' : '#444'}`,
@@ -82,7 +82,7 @@ const S = {
     background: variant === 'primary' ? '#1a472a' : variant === 'danger' ? '#2a0000' : 'transparent',
     color: variant === 'danger' ? '#cc4444' : '#ccc',
   }),
-  iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, padding: '2px 6px', color: '#888' },
+  iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 8px', color: '#888' },
   input:   { background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '6px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none' },
   textarea:{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '8px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none', resize: 'vertical' as const, width: '100%', boxSizing: 'border-box' as const },
   row:     { borderBottom: '1px solid #1a1a1a', display: 'grid' as const, alignItems: 'center', padding: '6px 8px', gap: 8 },
@@ -198,7 +198,8 @@ function StarDetailPanel({
 
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
+      <style>{`@media(max-width:700px){.btw-detail-grid{grid-template-columns:1fr!important}}`}</style>
+      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Answer</div>
@@ -290,7 +291,8 @@ function ConnectionDetailPanel({
 
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
+      <style>{`@media(max-width:700px){.btw-conn-grid{grid-template-columns:1fr!important}}`}</style>
+      <div className="btw-conn-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
         {([conn.from_star, conn.to_star] as const).map((star, i) => star && (
           <div key={i}>
             <div style={{ color: '#555', fontSize: 11, marginBottom: 4 }}>{i === 0 ? '↑ From (orbiter)' : '↓ To (anchor)'}</div>
@@ -329,7 +331,7 @@ function ConnectionDetailPanel({
 
 function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [stars, setStars] = useState<AdminStar[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('approved');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -467,11 +469,11 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
+      <div className="btw-admin-filters" style={{ display: 'flex', gap: 8, padding: '10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
         ))}
-        <input placeholder="Search answer or byline…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 240 }} />
+        <input className="btw-admin-search" placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 200 }} />
       </div>
 
       {selected.size > 0 && (
@@ -494,7 +496,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
         <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(stars.map(s => s.id)) : new Set())} />
         <span>status</span><span>code</span><span>answer</span><span>byline</span><span>question</span><span>ips</span><span>age</span><span>actions</span>
       </div>
@@ -502,9 +504,11 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
 
       {stars.map(star => (
-        <div key={star.id}>
+        <div key={star.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+          {/* Desktop row */}
           <div
-            style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            className="btw-admin-desktop"
+            style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === star.id ? null : star.id)}
           >
             <input
@@ -534,6 +538,37 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
               <a title="preview" href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.iconBtn, textDecoration: 'none' }}>👁</a>
               <button title="delete" onClick={() => quickDelete(star.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
             </span>
+          </div>
+          {/* Mobile card */}
+          <div
+            className="btw-admin-card"
+            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            onClick={() => setExpanded(e => e === star.id ? null : star.id)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <input
+                type="checkbox"
+                checked={selected.has(star.id)}
+                onClick={e => e.stopPropagation()}
+                onChange={e => { const s = new Set(selected); e.target.checked ? s.add(star.id) : s.delete(star.id); setSelected(s); }}
+              />
+              <StatusBadge status={star.status} />
+              <a
+                href={`/cosmos/${star.question_id}?star=${star.shortcode}`}
+                target="_blank" rel="noreferrer"
+                style={{ ...S.mono, color: '#6af', textDecoration: 'none', fontSize: 12 }}
+                onClick={e => e.stopPropagation()}
+              >{star.shortcode}</a>
+              <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(star.created_at)}</span>
+            </div>
+            <div style={{ color: '#ddd', fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{trunc(star.answer, 120)}</div>
+            {star.unique_fact && <div style={{ color: '#777', fontSize: 12, marginBottom: 6 }}>{trunc(star.unique_fact, 80)}</div>}
+            <div style={{ display: 'flex', gap: 0 }} onClick={e => e.stopPropagation()}>
+              <button title="approve" onClick={() => quickAction(star.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button title="reject" onClick={() => quickAction(star.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <a title="preview" href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.iconBtn, textDecoration: 'none' }}>👁</a>
+              <button title="delete" onClick={() => quickDelete(star.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </div>
           </div>
           {expanded === star.id && (
             <StarDetailPanel
@@ -565,7 +600,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
 function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
   const [connections, setConnections] = useState<AdminConnection[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('approved');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -649,7 +684,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', borderBottom: '1px solid #222', background: '#0d0d0d', color: '#555', fontSize: 11 }}>
         <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(connections.map(c => c.id)) : new Set())} />
         <span>status</span><span>from</span><span>to</span><span>reason</span><span>question</span><span>age</span><span>actions</span>
       </div>
@@ -657,9 +692,11 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
 
       {connections.map(conn => (
-        <div key={conn.id}>
+        <div key={conn.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+          {/* Desktop row */}
           <div
-            style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
+            className="btw-admin-desktop"
+            style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', borderBottom: 'none', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
           >
             <input
@@ -685,6 +722,30 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
               <button onClick={() => quickAction(conn.id, 'rejected')} style={S.iconBtn}>✗</button>
               <button onClick={() => quickDelete(conn.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
             </span>
+          </div>
+          {/* Mobile card */}
+          <div
+            className="btw-admin-card"
+            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
+            onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <input type="checkbox" checked={selected.has(conn.id)} onClick={e => e.stopPropagation()} onChange={e => { const s = new Set(selected); e.target.checked ? s.add(conn.id) : s.delete(conn.id); setSelected(s); }} />
+              <StatusBadge status={conn.status} />
+              <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(conn.created_at)}</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 3 }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.from_star?.shortcode}</span> {trunc(conn.from_star?.answer ?? '', 60)}
+            </div>
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 4 }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.to_star?.shortcode}</span> {trunc(conn.to_star?.answer ?? '', 60)}
+            </div>
+            {conn.reason && <div style={{ color: '#888', fontStyle: 'italic', fontSize: 12, marginBottom: 6 }}>"{trunc(conn.reason, 80)}"</div>}
+            <div style={{ display: 'flex', gap: 0 }} onClick={e => e.stopPropagation()}>
+              <button onClick={() => quickAction(conn.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button onClick={() => quickAction(conn.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <button onClick={() => quickDelete(conn.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </div>
           </div>
           {expanded === conn.id && (
             <ConnectionDetailPanel
@@ -776,6 +837,23 @@ function SettingsTab() {
       </div>
     </div>
   );
+}
+
+// ─── Mobile CSS injection ────────────────────────────────────────────────────
+// Injected once; targets .btw-admin-* classes used in the star/connection rows.
+const ADMIN_MOBILE_CSS = `
+  .btw-admin-desktop { display: grid; }
+  .btw-admin-card    { display: none; }
+  @media (max-width: 700px) {
+    .btw-admin-desktop { display: none !important; }
+    .btw-admin-card    { display: block; }
+    .btw-admin-filters { flex-wrap: wrap; }
+    .btw-admin-search  { width: 100% !important; margin-left: 0 !important; }
+  }
+`;
+
+function AdminStyles() {
+  return <style>{ADMIN_MOBILE_CSS}</style>;
 }
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
@@ -887,22 +965,22 @@ export default function AdminPage() {
 
   return (
     <div style={S.page}>
+      <AdminStyles />
       <div style={S.topbar}>
-        <span style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.08em', color: '#666', marginRight: 8, whiteSpace: 'nowrap' as const }}>THE BETWEEN — ADMIN</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.08em', color: '#666', whiteSpace: 'nowrap' as const }}>ADMIN</span>
         {stats && (
-          <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' as const }}>
+          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' as const }}>
             <span style={{ color: pendingPulse ? '#ffaa00' : '#888', fontWeight: pendingPulse ? 700 : 400, transition: 'color .3s' }}>
-              {stats.pendingStars} pending
+              {stats.pendingStars}↑
             </span>
-            {' · '}{stats.approvedStars} approved · {stats.rejectedStars} rejected
-            {' · '}{stats.totalConnections} connections ({stats.pendingConnections} pending)
+            {' '}{stats.approvedStars}✓ {stats.rejectedStars}✗
           </span>
         )}
-        <select value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ ...S.input, marginLeft: 'auto' }}>
-          <option value="">All questions</option>
+        <select value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ ...S.input, marginLeft: 'auto', maxWidth: 160 }}>
+          <option value="">All Qs</option>
           {questions.map(q => <option key={q.id} value={q.id}>{q.slug}</option>)}
         </select>
-        <button onClick={logout} style={S.btn()}>Logout</button>
+        <button onClick={logout} style={S.btn()}>Out</button>
       </div>
 
       <div style={{ display: 'flex', gap: 4, padding: '8px 16px', borderBottom: '1px solid #1a1a1a', background: '#0d0d0d' }}>
