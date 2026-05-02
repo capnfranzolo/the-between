@@ -109,6 +109,7 @@ export default function CosmosPage() {
         ...positions.get(star.id)!,
         emotionIndex: dims.emotionIndex,
         dimensions: dims,
+        answer: star.text ?? '',
       };
     });
   }, [allStars, myShortcode]);
@@ -354,6 +355,7 @@ export default function CosmosPage() {
             connections={selectedConnections}
             onConnectionClick={handleThoughtClick}
             onDismiss={clearSelection}
+            nudge={hashString(selectedStar.shortcode) % 5 === 0}
           />
         )}
 

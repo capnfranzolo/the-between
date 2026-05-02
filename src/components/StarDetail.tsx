@@ -26,11 +26,12 @@ interface StarDetailProps {
   connections?: Array<{ reason: string; relatedStarId?: string }>;
   onConnectionClick?: (id: string) => void;
   onDismiss?: () => void;
+  nudge?: boolean;
 }
 
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
-  connections, onConnectionClick, onDismiss,
+  connections, onConnectionClick, onDismiss, nudge,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const panelRef = useRef<HTMLDivElement>(null);
@@ -182,7 +183,7 @@ export default function StarDetail({
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
         borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
       }}>
-        <ShareButton url={url} />
+        <ShareButton url={url} nudge={nudge} />
 
         {showConnect && (
           <button

@@ -10,6 +10,8 @@ export interface ThoughtData {
   z: number;
   emotionIndex: number;
   dimensions: SpiroDimensions;
+  /** Answer text — shown as a smoke/ghost effect on hover */
+  answer?: string;
 }
 
 export interface BondData {
@@ -537,6 +539,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           // dotDims: stored when spiro is null (beyond MAX_BAKED cap) so activateLive()
           // can upgrade the dot fallback to a full spirograph on first selection.
           dotDims: spiro ? undefined : t.dimensions,
+          answer: t.answer ?? '',
           scaleMult: 1.0,
         };
         scene.add(group);
@@ -689,7 +692,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let noStarVisibleSec = 0;
       let autoRotateTarget: number | null = null;
       // Angular speed: ~0.2 rad/s → a 90° turn takes ~4.7 seconds
-      const AUTO_ROTATE_SPEED = 0.20; // rad/s
+      const AUTO_ROTATE_SPEED = 0.07; // rad/s — ~13 s per 90°, very glacial
       // Only consider stars within ±90° of current heading (cos 90° = 0)
       const AUTO_ROTATE_MAX_COS = 0.0; // dot product threshold
 
@@ -770,6 +773,118 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
       };
       renderer.domElement.addEventListener('click', onClickCanvas);
+
+      // ─── HOVER SMOKE EFFECT ───────────────────────────────────────────────
+      // When the mouse rests on a star for 500 ms, its answer text rises up
+      // word-by-word like smoke and drifts away. Clicking still works normally.
+
+      // Inject CSS keyframes once per document lifetime
+      const SMOKE_STYLE_ID = 'btw-smoke-css';
+      if (!document.getElementById(SMOKE_STYLE_ID)) {
+        const ss = document.createElement('style');
+        ss.id = SMOKE_STYLE_ID;
+        ss.textContent = `
+          @keyframes btwSmokeWord {
+            0%   { opacity:0;    transform:translateY(0)              translateX(0);            filter:blur(5px); }
+            16%  { opacity:0.72; transform:translateY(-10px)          translateX(0);            filter:blur(0px); }
+            100% { opacity:0;    transform:translateY(var(--btw-sdy)) translateX(var(--btw-sdx)); filter:blur(8px); }
+          }
+        `;
+        document.head.appendChild(ss);
+      }
+
+      // Overlay sits on top of the canvas, pointer-events:none so clicks pass through
+      const smokeOverlay = document.createElement('div');
+      smokeOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1;';
+      container.appendChild(smokeOverlay);
+
+      let hoverStarId: string | null = null;
+      let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+      function clearSmoke() {
+        smokeOverlay.innerHTML = '';
+      }
+
+      function triggerSmoke(starId: string) {
+        if (!container) return;
+        const g = thoughtGroups.get(starId);
+        if (!g) return;
+        const answer = (g.userData.answer as string | undefined) ?? '';
+        if (!answer.trim()) return;
+
+        // Project 3D position to screen space
+        const pos3d = g.position.clone();
+        pos3d.project(camera);
+        const sx = Math.round((pos3d.x + 1) / 2 * container.clientWidth);
+        const sy = Math.round((-pos3d.y + 1) / 2 * container.clientHeight);
+
+        clearSmoke();
+
+        const words = answer.trim().split(/\s+/).filter(Boolean);
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          'position:absolute',
+          `left:${sx}px`,
+          `top:${sy - 36}px`,
+          'transform:translate(-50%,-100%)',
+          'text-align:center',
+          'max-width:280px',
+          'pointer-events:none',
+          "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
+          'font-style:italic',
+          'font-weight:300',
+          'font-size:18px',
+          'line-height:1.65',
+          'color:rgba(240,232,224,0.78)',
+          'text-shadow:0 0 22px rgba(240,200,150,0.22)',
+          'letter-spacing:0.02em',
+        ].join(';');
+
+        let maxEnd = 0;
+        words.forEach((word, i) => {
+          // Each word drifts in a random direction, slightly upward
+          const dx = (Math.random() - 0.5) * 130;
+          const dy = -(55 + Math.random() * 60);
+          const delay = i * 70 + Math.random() * 90;
+          const duration = 2900 + Math.random() * 700;
+          maxEnd = Math.max(maxEnd, delay + duration);
+
+          const span = document.createElement('span');
+          span.textContent = word + ' ';
+          span.style.cssText = [
+            'display:inline-block',
+            `--btw-sdx:${dx.toFixed(0)}px`,
+            `--btw-sdy:${dy.toFixed(0)}px`,
+            `animation:btwSmokeWord ${duration.toFixed(0)}ms ease-out forwards`,
+            `animation-delay:${delay.toFixed(0)}ms`,
+            'opacity:0',
+          ].join(';');
+          bubble.appendChild(span);
+        });
+
+        smokeOverlay.appendChild(bubble);
+        setTimeout(() => {
+          if (smokeOverlay.contains(bubble)) smokeOverlay.removeChild(bubble);
+        }, maxEnd + 100);
+      }
+
+      const onMouseMove = (e: MouseEvent) => {
+        // Skip smoke when a star detail is open or in passive mode
+        if (activeStarRef.current || modeRef.current === 'passive') return;
+        const relX = e.clientX / container.clientWidth;
+        const relY = e.clientY / container.clientHeight;
+        const hoverMouse = new THREE.Vector2(relX * 2 - 1, -(relY * 2 - 1));
+        raycaster.setFromCamera(hoverMouse, camera);
+        const hits = raycaster.intersectObjects(thoughtMeshes);
+        const hitId = hits.length > 0 ? (hits[0].object.userData.thoughtId as string | undefined) ?? null : null;
+        if (hitId !== hoverStarId) {
+          if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+          clearSmoke();
+          hoverStarId = hitId;
+          if (hitId) hoverTimer = setTimeout(() => triggerSmoke(hitId), 500);
+        }
+      };
+      renderer.domElement.addEventListener('mousemove', onMouseMove);
 
       // ─── TOUCH CONTROLS ─────────────────────────────────────────────────
       // Swipe → yaw/pitch with momentum, pinch → zoom, tap → select, double-tap → boost
@@ -935,7 +1050,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
               freeTargetY = BASE_CAM_Y;
             }
           }
-          if (currentActiveStar) activateLive(currentActiveStar);
+          if (currentActiveStar) {
+            activateLive(currentActiveStar);
+            // Clear any lingering smoke when a star is selected
+            clearSmoke();
+            if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+            hoverStarId = null;
+          }
           prevActiveStar = currentActiveStar;
         }
 
@@ -1209,9 +1330,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
+        renderer.domElement.removeEventListener('mousemove', onMouseMove);
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
         renderer.domElement.removeEventListener('touchend',   onTouchEnd);
+        if (hoverTimer) clearTimeout(hoverTimer);
+        if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
