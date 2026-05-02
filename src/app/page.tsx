@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import CosmosScene, { type ThoughtData } from '@/components/cosmos/CosmosScene';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -20,7 +20,9 @@ interface CosmosStarRaw {
   dimensions: { emotionIndex: number; [k: string]: unknown };
 }
 
-export default function LandingPage() {
+// Inner component that uses useSearchParams — must be wrapped in <Suspense>
+// so Next.js can statically pre-render the shell without blocking on params.
+function LandingPageInner() {
   const searchParams = useSearchParams();
   const initialQuestionId = searchParams.get('question');
   const [questionId, setQuestionId] = useState<string | null>(null);
@@ -47,11 +49,6 @@ export default function LandingPage() {
     <>
       <CosmosScene mode="passive" thoughts={thoughts} bonds={[]} />
 
-      {/*
-        On desktop: vertically centred.
-        On mobile: placed at ~55% from top so it sits in the natural thumb zone,
-        clear of the status bar (top safe-area) and the bottom sheet / home bar.
-      */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 1,
         display: 'flex', flexDirection: 'column',
@@ -61,13 +58,9 @@ export default function LandingPage() {
         textAlign: 'center',
         fontFamily: SANS, color: BTW.textPri,
         pointerEvents: 'none',
-        // Push content down on mobile to the ~55% thumb-reach zone
         justifyContent: 'center',
       }}>
-        <div style={{
-          // Nudge downward on small screens so the form sits in thumb reach
-          marginTop: 'min(0px, 10vh)',
-        }}>
+        <div style={{ marginTop: 'min(0px, 10vh)' }}>
           <div style={{
             fontSize: 11, letterSpacing: '0.32em',
             textTransform: 'uppercase', color: BTW.textDim,
@@ -94,5 +87,13 @@ export default function LandingPage() {
         />
       )}
     </>
+  );
+}
+
+export default function LandingPage() {
+  return (
+    <Suspense>
+      <LandingPageInner />
+    </Suspense>
   );
 }
