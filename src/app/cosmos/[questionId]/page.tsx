@@ -238,41 +238,7 @@ export default function CosmosPage() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Next question — upper right */}
-        {allQuestions.length > 1 && (() => {
-          const idx = allQuestions.findIndex(q => q.id === questionId);
-          const next = allQuestions[(idx + 1) % allQuestions.length];
-          return (
-            <div style={{
-              position: 'absolute', top: 'calc(env(safe-area-inset-top, 0px) + 16px)', right: 20,
-              pointerEvents: 'auto', zIndex: 3,
-            }}>
-              <button
-                onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: BTW.textDim,
-                  fontSize: 11,
-                  letterSpacing: '0.22em',
-                  textTransform: 'uppercase',
-                  cursor: 'pointer',
-                  padding: '6px 0',
-                  fontFamily: SANS,
-                  opacity: 0.55,
-                  transition: 'opacity .2s',
-                  display: 'flex', alignItems: 'center', gap: 5,
-                }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = '0.55'; }}
-              >
-                Next question ›
-              </button>
-            </div>
-          );
-        })()}
-
-        {/* Top chrome */}
+        {/* Top chrome — question + next-question link */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0,
           padding: '22px 30px 18px',
@@ -294,6 +260,43 @@ export default function CosmosPage() {
               {data.question.text}
             </div>
           )}
+
+          {/* Next question — upper-right on desktop, below question on mobile */}
+          {allQuestions.length > 1 && (() => {
+            const idx = allQuestions.findIndex(q => q.id === questionId);
+            const next = allQuestions[(idx + 1) % allQuestions.length];
+            const sharedStyle: React.CSSProperties = {
+              background: 'transparent', border: 'none',
+              color: BTW.textDim, cursor: 'pointer',
+              fontFamily: SANS, letterSpacing: '0.22em',
+              textTransform: 'uppercase', pointerEvents: 'auto',
+              transition: 'opacity .2s',
+            };
+            return (
+              <>
+                {/* Desktop: fixed upper-right */}
+                <button
+                  className="btw-next-q-desktop"
+                  onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
+                  style={{ ...sharedStyle, fontSize: 11, padding: '6px 0', opacity: 0.55 }}
+                  onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                  onMouseLeave={e => { e.currentTarget.style.opacity = '0.55'; }}
+                >
+                  Next question ›
+                </button>
+                {/* Mobile: inline below question, centered */}
+                <button
+                  className="btw-next-q-mobile"
+                  onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
+                  style={{ ...sharedStyle, fontSize: 10, padding: '4px 0', opacity: 0.28 }}
+                  onMouseEnter={e => { e.currentTarget.style.opacity = '0.55'; }}
+                  onMouseLeave={e => { e.currentTarget.style.opacity = '0.28'; }}
+                >
+                  Next question ›
+                </button>
+              </>
+            );
+          })()}
         </div>
 
         {/* Bottom hint — desktop only (keyboard shortcut is meaningless on mobile) */}
@@ -409,8 +412,19 @@ export default function CosmosPage() {
             from { opacity: 0; transform: translateX(-50%) translateY(20px); }
             to   { opacity: 1; transform: translateX(-50%) translateY(0); }
           }
+          /* Desktop: next-question floats upper-right, mobile version hidden */
+          .btw-next-q-desktop {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 24px);
+            right: 20px;
+          }
+          .btw-next-q-mobile { display: none !important; }
+
           @media (hover: none) and (pointer: coarse) {
-            .btw-desktop-hint { display: none !important; }
+            .btw-desktop-hint  { display: none !important; }
+            /* Mobile: next-question flows inline below the question */
+            .btw-next-q-desktop { display: none !important; }
+            .btw-next-q-mobile  { display: block !important; }
           }
         `}</style>
       </div>

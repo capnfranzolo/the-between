@@ -653,6 +653,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
+      // Seconds elapsed with no star in the camera's field of view
+      let noStarVisibleSec = 0;
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
@@ -979,6 +981,47 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.y + sinP * 200,
           camera.position.z + fwdZ * cosP * 200,
         ));
+
+        // ── Auto-rotate toward nearest star if none visible for 10 s ──────────
+        if (thoughtGroups.size > 0 && !isPaused) {
+          // Dot-product frustum check: star is "visible" if within ~±50° of forward
+          const COS_HALF_FOV = 0.64; // cos(50°)
+          const anyVisible = (() => {
+            for (const g of thoughtGroups.values()) {
+              const dx = g.position.x - camera.position.x;
+              const dy = g.position.y - camera.position.y;
+              const dz = g.position.z - camera.position.z;
+              const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+              const dot = (dx / len) * fwdX * cosP
+                        + (dy / len) * sinP
+                        + (dz / len) * fwdZ * cosP;
+              if (dot > COS_HALF_FOV) return true;
+            }
+            return false;
+          })();
+
+          // Reset if stars are visible or user is actively swiping
+          if (anyVisible || Math.abs(touch.velX) > 0.001 || Math.abs(touch.velY) > 0.001) {
+            noStarVisibleSec = 0;
+          } else {
+            noStarVisibleSec += dt;
+            if (noStarVisibleSec > 10 && targetHeading === null) {
+              // Aim toward the nearest star
+              let nearestDist = Infinity;
+              let nearestPos: THREE.Vector3 | null = null;
+              thoughtGroups.forEach(g => {
+                const d = camera.position.distanceTo(g.position);
+                if (d < nearestDist) { nearestDist = d; nearestPos = g.position; }
+              });
+              if (nearestPos) {
+                const nx = (nearestPos as THREE.Vector3).x - camera.position.x;
+                const nz = (nearestPos as THREE.Vector3).z - camera.position.z;
+                targetHeading = Math.atan2(nx, -nz);
+                noStarVisibleSec = 0;
+              }
+            }
+          }
+        }
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
