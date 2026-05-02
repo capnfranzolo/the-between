@@ -1,6 +1,7 @@
 'use client';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
+import { createSpirograph } from '@/lib/spirograph/renderer';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
@@ -26,6 +27,72 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 }
 
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
+
+// ── Peeking star — user's own star peeks from the bottom as a persistent anchor ──
+function PeekingStar({ star }: { star: CosmosStarData }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const starId = star.id;
+  const dims = star.dimensions ?? DIM_DEFAULTS;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const inst = createSpirograph(canvas, dims, { size: 180, dpr: 1 });
+    let t = 0;
+    let raf: number;
+    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
+    tick();
+    return () => { cancelAnimationFrame(raf); inst.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [starId]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: 0,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 2,
+      pointerEvents: 'none',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      animation: 'btwPeekBob 3.8s ease-in-out infinite',
+    }}>
+      {/* Faint answer text across the bottom */}
+      {star.text && (
+        <div style={{
+          fontFamily: SERIF,
+          fontStyle: 'italic',
+          fontSize: 'clamp(10px, 1.5vw, 13px)',
+          color: 'rgba(240,232,224,0.18)',
+          letterSpacing: '0.04em',
+          textAlign: 'center',
+          maxWidth: 420,
+          lineHeight: 1.5,
+          padding: '0 20px 6px',
+        }}>
+          {star.text}
+        </div>
+      )}
+      {/* Only the top ~50px of the spirograph peeks above the screen edge */}
+      <div style={{ width: 110, height: 52, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 110,
+            height: 110,
+            opacity: 0.55,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
@@ -300,31 +367,16 @@ export default function CosmosPage() {
           })()}
         </div>
 
-        {/* Bottom hint — desktop only (keyboard shortcut is meaningless on mobile) */}
-        {!selected && !connecting && (
-          <div style={{
-            position: 'absolute', left: '50%', bottom: 28,
-            transform: 'translateX(-50%)',
-            fontSize: 13, color: BTW.textDim,
-            letterSpacing: '0.18em', textTransform: 'uppercase',
-            whiteSpace: 'nowrap', pointerEvents: 'none',
-          }}
-            className="btw-desktop-hint"
-          >
-            hold space to drift faster &middot; click a star to read it
-          </div>
-        )}
-
         {/* Edge hotspot indicators — pointer-events none; canvas handles actual click */}
         <div style={{
-          position: 'absolute', left: 0, top: 0, width: '5%', height: '100%',
+          position: 'absolute', left: 0, top: 0, width: '10%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none', zIndex: 2,
         }}>
           <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>‹</span>
         </div>
         <div style={{
-          position: 'absolute', right: 0, top: 0, width: '5%', height: '100%',
+          position: 'absolute', right: 0, top: 0, width: '10%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none', zIndex: 2,
         }}>
@@ -424,7 +476,6 @@ export default function CosmosPage() {
 
           /* Mobile: width breakpoint OR touch-only device */
           @media (max-width: 768px), (hover: none) and (pointer: coarse) {
-            .btw-desktop-hint   { display: none !important; }
             .btw-next-q-desktop { display: none !important; }
             .btw-next-q-mobile  { display: block !important; }
           }
@@ -486,9 +537,21 @@ export default function CosmosPage() {
         </button>
       </div>
 
+      {/* Peeking star — user's own star floats from the bottom as a reminder */}
+      {userStarId && byId[userStarId] && !connectConfirmed && (
+        <PeekingStar star={byId[userStarId]} />
+      )}
+
       <AddToHomeScreen />
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+
+      <style>{`
+        @keyframes btwPeekBob {
+          0%, 100% { transform: translateX(-50%) translateY(0px); }
+          50%       { transform: translateX(-50%) translateY(-9px); }
+        }
+      `}</style>
     </>
   );
 }

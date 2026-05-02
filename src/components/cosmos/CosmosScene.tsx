@@ -762,10 +762,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pitchTarget = Math.min(pitch + Math.PI / 8, 0.70);
         } else if (relY > 0.95) {
           pitchTarget = Math.max(pitch - Math.PI / 8, -0.40);
-        } else if (relX < 0.05) {
+        } else if (relX < 0.10) {
           targetHeading = heading - Math.PI / 6;
           flyTargetXZ = null;
-        } else if (relX > 0.95) {
+        } else if (relX > 0.90) {
           targetHeading = heading + Math.PI / 6;
           flyTargetXZ = null;
         } else {
@@ -784,10 +784,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const ss = document.createElement('style');
         ss.id = SMOKE_STYLE_ID;
         ss.textContent = `
-          @keyframes btwSmokeWord {
-            0%   { opacity:0;    transform:translateY(0)              translateX(0);            filter:blur(5px); }
-            16%  { opacity:0.72; transform:translateY(-10px)          translateX(0);            filter:blur(0px); }
-            100% { opacity:0;    transform:translateY(var(--btw-sdy)) translateX(var(--btw-sdx)); filter:blur(8px); }
+          @keyframes btwSmokeRise {
+            0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
+            18%  { opacity:0.82; }
+            100% { opacity:0.82; transform: translate(-50%,-100%) translateY(-38px); }
+          }
+          @keyframes btwSmokeSplit {
+            0%   { opacity:0.82; transform: translate(0,0) scale(1);   filter:blur(0px); }
+            100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.7); filter:blur(7px); }
           }
         `;
         document.head.appendChild(ss);
@@ -800,8 +804,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       let hoverStarId: string | null = null;
       let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeDisperseTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
       function clearSmoke() {
+        if (smokeDisperseTimer) { clearTimeout(smokeDisperseTimer); smokeDisperseTimer = null; }
+        if (smokeCleanupTimer)  { clearTimeout(smokeCleanupTimer);  smokeCleanupTimer  = null; }
         smokeOverlay.innerHTML = '';
       }
 
@@ -820,54 +828,63 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         clearSmoke();
 
-        const words = answer.trim().split(/\s+/).filter(Boolean);
+        // Whole phrase rises as one block, then each word scatters
         const bubble = document.createElement('div');
         bubble.style.cssText = [
           'position:absolute',
           `left:${sx}px`,
           `top:${sy - 36}px`,
-          'transform:translate(-50%,-100%)',
           'text-align:center',
-          'max-width:280px',
+          'max-width:300px',
           'pointer-events:none',
           "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
           'font-style:italic',
           'font-weight:300',
           'font-size:18px',
           'line-height:1.65',
-          'color:rgba(240,232,224,0.78)',
+          'color:rgba(240,232,224,0.82)',
           'text-shadow:0 0 22px rgba(240,200,150,0.22)',
           'letter-spacing:0.02em',
+          'opacity:0',
+          'animation:btwSmokeRise 2s ease-out forwards',
         ].join(';');
 
-        let maxEnd = 0;
-        words.forEach((word, i) => {
-          // Each word drifts in a random direction, slightly upward
-          const dx = (Math.random() - 0.5) * 130;
-          const dy = -(55 + Math.random() * 60);
-          const delay = i * 70 + Math.random() * 90;
-          const duration = 2900 + Math.random() * 700;
-          maxEnd = Math.max(maxEnd, delay + duration);
-
+        const words = answer.trim().split(/\s+/).filter(Boolean);
+        const spans: HTMLSpanElement[] = [];
+        words.forEach(word => {
           const span = document.createElement('span');
           span.textContent = word + ' ';
-          span.style.cssText = [
-            'display:inline-block',
-            `--btw-sdx:${dx.toFixed(0)}px`,
-            `--btw-sdy:${dy.toFixed(0)}px`,
-            `animation:btwSmokeWord ${duration.toFixed(0)}ms ease-out forwards`,
-            `animation-delay:${delay.toFixed(0)}ms`,
-            'opacity:0',
-          ].join(';');
+          span.style.display = 'inline-block';
           bubble.appendChild(span);
+          spans.push(span);
         });
 
         smokeOverlay.appendChild(bubble);
-        setTimeout(() => {
-          if (smokeOverlay.contains(bubble)) smokeOverlay.removeChild(bubble);
-        }, maxEnd + 100);
-      }
 
+        // Phase 2 @ 2 s: freeze phrase position, scatter each word individually
+        smokeDisperseTimer = setTimeout(() => {
+          smokeDisperseTimer = null;
+          bubble.style.animation = 'none';
+          bubble.style.opacity = '0.82';
+          bubble.style.transform = 'translate(-50%, -100%) translateY(-38px)';
+          spans.forEach((span, i) => {
+            const angle = Math.random() * Math.PI * 2;
+            const dist  = 55 + Math.random() * 100;
+            const dx = (Math.cos(angle) * dist).toFixed(0);
+            const dy = (Math.sin(angle) * dist - 50).toFixed(0); // bias upward
+            span.style.setProperty('--btw-sdx', `${dx}px`);
+            span.style.setProperty('--btw-sdy', `${dy}px`);
+            const delay = (i * 45 + Math.random() * 60).toFixed(0);
+            span.style.animation = `btwSmokeSplit 2.5s ease-out ${delay}ms forwards`;
+          });
+        }, 2000);
+
+        // Cleanup after full animation completes
+        smokeCleanupTimer = setTimeout(() => {
+          smokeCleanupTimer = null;
+          if (smokeOverlay.contains(bubble)) smokeOverlay.removeChild(bubble);
+        }, 4700);
+      }
       const onMouseMove = (e: MouseEvent) => {
         // Skip smoke when a star detail is open or in passive mode
         if (activeStarRef.current || modeRef.current === 'passive') return;
@@ -881,7 +898,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
           clearSmoke();
           hoverStarId = hitId;
-          if (hitId) hoverTimer = setTimeout(() => triggerSmoke(hitId), 500);
+          if (hitId) hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
         }
       };
       renderer.domElement.addEventListener('mousemove', onMouseMove);
@@ -1078,6 +1095,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.pinchVel *= 0.82;
         } else { touch.pinchVel = 0; }
 
+        // Continuous keyboard turning: A/Q/ArrowLeft = left, D/E/ArrowRight = right
+        const KBD_TURN = 1.2; // rad/s
+        if (!isPaused) {
+          if (keys['KeyA'] || keys['ArrowLeft'] || keys['KeyQ']) {
+            heading -= KBD_TURN * dt;
+            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
+          }
+          if (keys['KeyD'] || keys['ArrowRight'] || keys['KeyE']) {
+            heading += KBD_TURN * dt;
+            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
+          }
+        }
+
         // Heading: smooth toward target, auto-rotate when idle, or very slow drift
         if (targetHeading !== null) {
           let diff = targetHeading - heading;
@@ -1103,8 +1133,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Sun always in front of camera so warm glow stays ahead
         skyMat.uniforms.uSunDir.value.set(fwdX, -0.15, fwdZ).normalize();
 
-        // Speed for free drift
-        const targetSpeed = isPaused ? 0 : (keys['Space'] ? 25 : 4);
+        // Speed for free drift — W/ArrowUp/Space accelerate; S/ArrowDown brakes
+        const targetSpeed = isPaused ? 0 : (
+          (keys['Space'] || keys['KeyW'] || keys['ArrowUp']) ? 25 :
+          (keys['KeyS'] || keys['ArrowDown']) ? 0 : 4
+        );
         speed += (targetSpeed - speed) * dt * 3;
 
         // Horizontal position
@@ -1335,6 +1368,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
         renderer.domElement.removeEventListener('touchend',   onTouchEnd);
         if (hoverTimer) clearTimeout(hoverTimer);
+        if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
+        if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
         if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
