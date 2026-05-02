@@ -420,18 +420,19 @@ export default function CosmosPage() {
           }
           .btw-next-q-mobile { display: none !important; }
 
-          @media (hover: none) and (pointer: coarse) {
-            .btw-desktop-hint  { display: none !important; }
-            /* Mobile: next-question flows inline below the question */
+          /* Mobile: width breakpoint OR touch-only device */
+          @media (max-width: 768px), (hover: none) and (pointer: coarse) {
+            .btw-desktop-hint   { display: none !important; }
             .btw-next-q-desktop { display: none !important; }
             .btw-next-q-mobile  { display: block !important; }
           }
         `}</style>
       </div>
 
-      {/* ── Bottom chrome — rendered OUTSIDE the overflow:hidden overlay so
-          it is never clipped on iOS Safari. zIndex 5 sits above the cosmos
-          scene (0) and overlay (1) but below StarDetail (6). ── */}
+      {/* ── Bottom chrome — outside overflow:hidden overlay so it's never
+          clipped on iOS. zIndex:0 keeps it above the canvas but below the
+          overlay div (zIndex:1) which contains StarDetail (zIndex:6 within
+          that context). StarDetail therefore always paints on top. ── */}
       <div style={{
         position: 'fixed',
         left: 0, right: 0,
@@ -442,7 +443,7 @@ export default function CosmosPage() {
         justifyContent: 'space-between',
         padding: '0 24px',
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
-        zIndex: 4,
+        zIndex: 0,
         pointerEvents: 'none',
       }}>
         {/* Brand / about */}

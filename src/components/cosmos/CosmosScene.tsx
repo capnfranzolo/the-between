@@ -643,6 +643,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // Initial heading toward SUN_DIRECTION (sunset straight ahead)
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let targetHeading: number | null = null;
+      // Separate target for the auto-rotate-toward-nearest-star behaviour.
+      // Uses a much slower interpolation rate so the pan is lazy, not snappy.
+      let autoRotateTarget: number | null = null;
       let pitchTarget: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = BASE_CAM_Y;
@@ -664,6 +667,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dz = starPos.z - camera.position.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
         targetHeading = Math.atan2(dx, -dz);
+        autoRotateTarget = null;
         const stopDist = 60;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
@@ -680,11 +684,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       turnLeftFnRef.current = () => {
         targetHeading = heading - Math.PI / 6;
+        autoRotateTarget = null;
         flyTargetXZ = null;
       };
 
       turnRightFnRef.current = () => {
         targetHeading = heading + Math.PI / 6;
+        autoRotateTarget = null;
         flyTargetXZ = null;
       };
 
@@ -921,6 +927,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           while (diff < -Math.PI) diff += Math.PI * 2;
           heading += diff * dt * 1.5;
           if (Math.abs(diff) < 0.05) targetHeading = null;
+        } else if (autoRotateTarget !== null) {
+          // Lazy auto-rotate toward nearest star — ~4× slower than a normal fly-to
+          let diff = autoRotateTarget - heading;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          heading += diff * dt * 0.32;
+          if (Math.abs(diff) < 0.05) autoRotateTarget = null;
         } else if (!isPaused && !flyTargetXZ) {
           // One rotation every ~50 minutes — sunset slowly sweeps across the view
           heading += 0.002 * dt;
@@ -1003,10 +1016,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           // Reset if stars are visible or user is actively swiping
           if (anyVisible || Math.abs(touch.velX) > 0.001 || Math.abs(touch.velY) > 0.001) {
             noStarVisibleSec = 0;
+            if (anyVisible) autoRotateTarget = null; // stop lazy pan once stars are in view
           } else {
             noStarVisibleSec += dt;
-            if (noStarVisibleSec > 10 && targetHeading === null) {
-              // Aim toward the nearest star
+            if (noStarVisibleSec > 10 && targetHeading === null && autoRotateTarget === null) {
+              // Aim lazily toward the nearest star via the slow-interpolation path
               let nearestDist = Infinity;
               let nearestPos: THREE.Vector3 | null = null;
               thoughtGroups.forEach(g => {
@@ -1016,7 +1030,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
               if (nearestPos) {
                 const nx = (nearestPos as THREE.Vector3).x - camera.position.x;
                 const nz = (nearestPos as THREE.Vector3).z - camera.position.z;
-                targetHeading = Math.atan2(nx, -nz);
+                autoRotateTarget = Math.atan2(nx, -nz);
                 noStarVisibleSec = 0;
               }
             }
