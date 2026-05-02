@@ -480,7 +480,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           group.add(sprite);
           spiro = { canvas, texture, sprite, inst, timeOffset, frameCount: 0, dims: t.dimensions };
         } else {
-          // Glowing dot fallback beyond the 50-star cap
+          // Glowing dot fallback beyond the 50-star cap.
+          // Store dims so activateLive() can upgrade this dot to a full spirograph on demand.
           const dc = document.createElement('canvas'); dc.width = 32; dc.height = 32;
           const dctx = dc.getContext('2d')!;
           const gr = dctx.createRadialGradient(16, 16, 0, 16, 16, 16);
@@ -488,11 +489,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.5)`);
           gr.addColorStop(1, 'rgba(0,0,0,0)');
           dctx.fillStyle = gr; dctx.fillRect(0, 0, 32, 32);
-          const dot = new THREE.Sprite(new THREE.SpriteMaterial({
+          const dotSprite = new THREE.Sprite(new THREE.SpriteMaterial({
             map: new THREE.CanvasTexture(dc), transparent: true, depthWrite: false,
           }));
-          dot.scale.set(4, 4, 1);
-          group.add(dot);
+          dotSprite.scale.set(4, 4, 1);
+          dotSprite.userData = { isDotFallback: true };
+          group.add(dotSprite);
+          // Mark dims on group for on-demand upgrade in activateLive
+          group.userData.dotDims = t.dimensions;
         }
 
         // Cheap glow halo via additive sprite — replaces per-star PointLight
@@ -542,21 +546,47 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (liveStars.has(id)) return;
         const g = thoughtGroups.get(id);
         if (!g) return;
-        const spiro = g.userData.spiro as StarSpiro | null;
+        let spiro = g.userData.spiro as StarSpiro | null;
+
+        // Dot-fallback upgrade: if this star was beyond MAX_BAKED at creation time,
+        // build a full spirograph now so the selected star always animates properly.
+        if (!spiro && g.userData.dotDims) {
+          const dims = g.userData.dotDims as SpiroDimensions;
+          const canvas = document.createElement('canvas');
+          const inst = createSpirograph(canvas, dims, { size: SPIRO_SIZE, dpr: 1 });
+          const timeOffset = (hashStr(id) % 10000) / 1000;
+          inst.renderStatic(timeOffset);
+          const texture = new THREE.CanvasTexture(canvas);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (texture as any).encoding = 3001;
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture, transparent: true, depthWrite: false, opacity: 1.0,
+          }));
+          sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+          // Hide the dot fallback sprite(s), show the new spirograph sprite
+          g.children.forEach(child => {
+            if (child instanceof THREE.Sprite && child.userData.isDotFallback) child.visible = false;
+          });
+          g.add(sprite);
+          spiro = { canvas, texture, sprite, inst, timeOffset, frameCount: 0, dims };
+          g.userData.spiro = spiro;
+          g.userData.dotDims = undefined;
+        }
+
         if (!spiro) return;
-        const canvas = document.createElement('canvas');
+        const liveCanvas = document.createElement('canvas');
         // dpr=1 — sharper doesn't justify the VRAM at this size
-        const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr: 1 });
+        const liveInst = createSpirograph(liveCanvas, spiro.dims, { size: SPIRO_SIZE, dpr: 1 });
         // Do NOT call inst.start() — we drive renderStatic from the main RAF loop.
         // That keeps exactly ONE requestAnimationFrame loop running for the whole scene.
-        const texture = new THREE.CanvasTexture(canvas);
+        const liveTexture = new THREE.CanvasTexture(liveCanvas);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (texture as any).encoding = 3001; // THREE.sRGBEncoding
+        (liveTexture as any).encoding = 3001; // THREE.sRGBEncoding
         const mat = spiro.sprite.material as THREE.SpriteMaterial;
         const origTexture = mat.map!;
-        mat.map = texture;
+        mat.map = liveTexture;
         mat.needsUpdate = true;
-        liveStars.set(id, { canvas, inst, texture, origTexture });
+        liveStars.set(id, { canvas: liveCanvas, inst: liveInst, texture: liveTexture, origTexture });
       }
 
       function deactivateLive(id: string) {
@@ -643,9 +673,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // Initial heading toward SUN_DIRECTION (sunset straight ahead)
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let targetHeading: number | null = null;
-      // Separate target for the auto-rotate-toward-nearest-star behaviour.
-      // Uses a much slower interpolation rate so the pan is lazy, not snappy.
-      let autoRotateTarget: number | null = null;
       let pitchTarget: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = BASE_CAM_Y;
@@ -656,8 +683,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
-      // Seconds elapsed with no star in the camera's field of view
+
+      // Auto-rotate toward nearest star when none visible for 10 seconds
       let noStarVisibleSec = 0;
+      let autoRotateTarget: number | null = null;
+      // Angular speed: ~0.2 rad/s → a 90° turn takes ~4.7 seconds
+      const AUTO_ROTATE_SPEED = 0.20; // rad/s
+      // Only consider stars within ±90° of current heading (cos 90° = 0)
+      const AUTO_ROTATE_MAX_COS = 0.0; // dot product threshold
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
@@ -668,6 +701,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dist = Math.sqrt(dx * dx + dz * dz);
         targetHeading = Math.atan2(dx, -dz);
         autoRotateTarget = null;
+        noStarVisibleSec = 0;
         const stopDist = 60;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
@@ -791,9 +825,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.lastX = t.clientX;
           touch.lastY = t.clientY;
 
-          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 90°.
-          const sensX = (Math.PI * 0.65) / container.clientWidth;
-          const sensY = (Math.PI * 0.32) / container.clientHeight;
+          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
+          const sensX = (Math.PI * 1.4) / container.clientWidth;
+          const sensY = (Math.PI * 0.7) / container.clientHeight;
 
           // Immediately apply delta (no lag) AND store as velocity for momentum
           heading += dx * sensX;
@@ -804,8 +838,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.velX = dx * sensX;
           touch.velY = -dy * sensY;
 
-          // Clear any keyboard-triggered targetHeading so swipe takes over
+          // Clear any keyboard-triggered targetHeading / auto-rotate so swipe takes over
           targetHeading = null;
+          autoRotateTarget = null;
+          noStarVisibleSec = 0;
 
         } else if (e.touches.length === 2) {
           const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -920,7 +956,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.pinchVel *= 0.82;
         } else { touch.pinchVel = 0; }
 
-        // Heading: smooth toward target, or very slow drift when idle
+        // Heading: smooth toward target, auto-rotate when idle, or very slow drift
         if (targetHeading !== null) {
           let diff = targetHeading - heading;
           while (diff > Math.PI) diff -= Math.PI * 2;
@@ -928,12 +964,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           heading += diff * dt * 1.5;
           if (Math.abs(diff) < 0.05) targetHeading = null;
         } else if (autoRotateTarget !== null) {
-          // Lazy auto-rotate toward nearest star — ~4× slower than a normal fly-to
+          // Constant angular velocity: ~0.2 rad/s → 90° takes ~4.7 s
           let diff = autoRotateTarget - heading;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          heading += diff * dt * 0.32;
-          if (Math.abs(diff) < 0.05) autoRotateTarget = null;
+          const step = Math.sign(diff) * Math.min(Math.abs(diff), AUTO_ROTATE_SPEED * dt);
+          heading += step;
+          if (Math.abs(diff) < 0.04) autoRotateTarget = null;
         } else if (!isPaused && !flyTargetXZ) {
           // One rotation every ~50 minutes — sunset slowly sweeps across the view
           heading += 0.002 * dt;
@@ -995,47 +1032,59 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z + fwdZ * cosP * 200,
         ));
 
-        // ── Auto-rotate toward nearest star if none visible for 10 s ──────────
-        if (thoughtGroups.size > 0 && !isPaused) {
-          // Dot-product frustum check: star is "visible" if within ~±50° of forward
-          const COS_HALF_FOV = 0.64; // cos(50°)
-          const anyVisible = (() => {
-            for (const g of thoughtGroups.values()) {
-              const dx = g.position.x - camera.position.x;
-              const dy = g.position.y - camera.position.y;
-              const dz = g.position.z - camera.position.z;
-              const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-              const dot = (dx / len) * fwdX * cosP
-                        + (dy / len) * sinP
-                        + (dz / len) * fwdZ * cosP;
-              if (dot > COS_HALF_FOV) return true;
-            }
-            return false;
-          })();
+        // ── Auto-rotate toward nearest star when none visible for 10 s ──────────
+        // Only run when no star is selected and no manual turn is active.
+        if (!activeStarRef.current && targetHeading === null && autoRotateTarget === null && !isPaused) {
+          // Camera forward direction (horizontal only for dot-product test)
+          const camFwdX = fwdX;
+          const camFwdZ = fwdZ;
 
-          // Reset if stars are visible or user is actively swiping
-          if (anyVisible || Math.abs(touch.velX) > 0.001 || Math.abs(touch.velY) > 0.001) {
+          // Check if any thought star is roughly in front of the camera.
+          // Use a ~50° half-angle cone (cos 50° ≈ 0.64).
+          const COS_HALF_FOV = 0.64;
+          let anyVisible = false;
+          thoughtGroups.forEach(g => {
+            if (anyVisible) return;
+            const gx = g.position.x - camera.position.x;
+            const gz = g.position.z - camera.position.z;
+            const hDist = Math.sqrt(gx * gx + gz * gz);
+            if (hDist < 1) return;
+            const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
+            if (dot > COS_HALF_FOV) anyVisible = true;
+          });
+
+          if (anyVisible) {
             noStarVisibleSec = 0;
-            if (anyVisible) autoRotateTarget = null; // stop lazy pan once stars are in view
           } else {
             noStarVisibleSec += dt;
-            if (noStarVisibleSec > 10 && targetHeading === null && autoRotateTarget === null) {
-              // Aim lazily toward the nearest star via the slow-interpolation path
-              let nearestDist = Infinity;
-              let nearestPos: THREE.Vector3 | null = null;
+            if (noStarVisibleSec >= 10) {
+              // Find nearest star within ±90° of current heading
+              // (dot product > 0 means it's in front of us, not behind)
+              let bestDist = Infinity;
+              let bestHeading: number | null = null;
               thoughtGroups.forEach(g => {
-                const d = camera.position.distanceTo(g.position);
-                if (d < nearestDist) { nearestDist = d; nearestPos = g.position; }
+                const gx = g.position.x - camera.position.x;
+                const gz = g.position.z - camera.position.z;
+                const hDist = Math.sqrt(gx * gx + gz * gz);
+                if (hDist < 1) return;
+                const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
+                // Skip stars more than 90° away (behind us or overhead)
+                if (dot < AUTO_ROTATE_MAX_COS) return;
+                if (hDist < bestDist) {
+                  bestDist = hDist;
+                  bestHeading = Math.atan2(gx, -gz);
+                }
               });
-              if (nearestPos) {
-                const nx = (nearestPos as THREE.Vector3).x - camera.position.x;
-                const nz = (nearestPos as THREE.Vector3).z - camera.position.z;
-                autoRotateTarget = Math.atan2(nx, -nz);
+              if (bestHeading !== null) {
+                autoRotateTarget = bestHeading;
                 noStarVisibleSec = 0;
               }
             }
           }
+        } else if (activeStarRef.current || targetHeading !== null) {
+          noStarVisibleSec = 0;
         }
+        // ── end auto-rotate ───────────────────────────────────────────────────
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
