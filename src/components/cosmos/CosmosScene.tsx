@@ -682,6 +682,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let flyStarTargetY = BASE_CAM_Y;
       let camTargetY = BASE_CAM_Y;
       let speed = 4;
+      let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
+      let strafeVel = 0; // units/s — Q/E lateral slide
       let pitch = 0.05;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
@@ -786,12 +788,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         ss.textContent = `
           @keyframes btwSmokeRise {
             0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
-            18%  { opacity:0.82; }
-            100% { opacity:0.82; transform: translate(-50%,-100%) translateY(-38px); }
+            30%  { opacity:0.85; }
+            100% { opacity:0.85; transform: translate(-50%,-100%) translateY(-24px); }
           }
           @keyframes btwSmokeSplit {
-            0%   { opacity:0.82; transform: translate(0,0) scale(1);   filter:blur(0px); }
-            100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.7); filter:blur(7px); }
+            0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
+            100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
           }
         `;
         document.head.appendChild(ss);
@@ -806,10 +808,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let hoverTimer: ReturnType<typeof setTimeout> | null = null;
       let smokeDisperseTimer: ReturnType<typeof setTimeout> | null = null;
       let smokeCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeInFlight = false;
+      let smokeNextStarId: string | null = null;
 
+      // clearSmoke is only called for hard resets (star selected, component cleanup).
+      // It force-stops any in-flight animation immediately.
       function clearSmoke() {
         if (smokeDisperseTimer) { clearTimeout(smokeDisperseTimer); smokeDisperseTimer = null; }
         if (smokeCleanupTimer)  { clearTimeout(smokeCleanupTimer);  smokeCleanupTimer  = null; }
+        smokeInFlight = false;
+        smokeNextStarId = null;
         smokeOverlay.innerHTML = '';
       }
 
@@ -859,31 +867,37 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           spans.push(span);
         });
 
+        smokeInFlight = true;
         smokeOverlay.appendChild(bubble);
 
-        // Phase 2 @ 2 s: freeze phrase position, scatter each word individually
+        // Phase 2 @ 0.8 s: freeze phrase, scatter each word (total ~2 s)
         smokeDisperseTimer = setTimeout(() => {
           smokeDisperseTimer = null;
           bubble.style.animation = 'none';
-          bubble.style.opacity = '0.82';
-          bubble.style.transform = 'translate(-50%, -100%) translateY(-38px)';
+          bubble.style.opacity = '0.85';
+          bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
           spans.forEach((span, i) => {
             const angle = Math.random() * Math.PI * 2;
-            const dist  = 55 + Math.random() * 100;
+            const dist  = 45 + Math.random() * 80;
             const dx = (Math.cos(angle) * dist).toFixed(0);
-            const dy = (Math.sin(angle) * dist - 50).toFixed(0); // bias upward
+            const dy = (Math.sin(angle) * dist - 40).toFixed(0); // bias upward
             span.style.setProperty('--btw-sdx', `${dx}px`);
             span.style.setProperty('--btw-sdy', `${dy}px`);
-            const delay = (i * 45 + Math.random() * 60).toFixed(0);
-            span.style.animation = `btwSmokeSplit 2.5s ease-out ${delay}ms forwards`;
+            const delay = (i * 30 + Math.random() * 40).toFixed(0);
+            span.style.animation = `btwSmokeSplit 1.2s ease-out ${delay}ms forwards`;
           });
-        }, 2000);
+        }, 800);
 
-        // Cleanup after full animation completes
+        // Cleanup after full animation completes (~2 s total)
         smokeCleanupTimer = setTimeout(() => {
           smokeCleanupTimer = null;
+          smokeInFlight = false;
           if (smokeOverlay.contains(bubble)) smokeOverlay.removeChild(bubble);
-        }, 4700);
+          // Trigger queued next star if any
+          const next = smokeNextStarId;
+          smokeNextStarId = null;
+          if (next) triggerSmoke(next);
+        }, 2100);
       }
       const onMouseMove = (e: MouseEvent) => {
         // Skip smoke when a star detail is open or in passive mode
@@ -896,9 +910,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const hitId = hits.length > 0 ? (hits[0].object.userData.thoughtId as string | undefined) ?? null : null;
         if (hitId !== hoverStarId) {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-          clearSmoke();
           hoverStarId = hitId;
-          if (hitId) hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
+          if (hitId) {
+            if (!smokeInFlight) {
+              // Nothing playing — start immediately after short delay
+              hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
+            } else {
+              // Let current smoke finish, queue this star for after
+              smokeNextStarId = hitId;
+            }
+          } else {
+            // Moved to empty space — cancel queued next but let current finish
+            smokeNextStarId = null;
+          }
         }
       };
       renderer.domElement.addEventListener('mousemove', onMouseMove);
@@ -1095,17 +1119,45 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.pinchVel *= 0.82;
         } else { touch.pinchVel = 0; }
 
-        // Continuous keyboard turning: A/Q/ArrowLeft = left, D/E/ArrowRight = right
-        const KBD_TURN = 1.2; // rad/s
+        // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
+        // Q/E = lateral strafe (slide perpendicular to heading)
+        const MAX_TURN_VEL  = 1.8;  // max rad/s
+        const TURN_ACCEL    = 5.0;  // rad/s² spin-up
+        const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
+        const MAX_STRAFE    = 22;   // units/s
+        const STRAFE_ACCEL  = 55;
+        const STRAFE_DECEL  = 80;
         if (!isPaused) {
-          if (keys['KeyA'] || keys['ArrowLeft'] || keys['KeyQ']) {
-            heading -= KBD_TURN * dt;
+          const wantLeft  = keys['KeyA'] || keys['ArrowLeft'];
+          const wantRight = keys['KeyD'] || keys['ArrowRight'];
+          if (wantLeft) {
+            turnVel = Math.max(turnVel - TURN_ACCEL * dt, -MAX_TURN_VEL);
             targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
-          }
-          if (keys['KeyD'] || keys['ArrowRight'] || keys['KeyE']) {
-            heading += KBD_TURN * dt;
+          } else if (wantRight) {
+            turnVel = Math.min(turnVel + TURN_ACCEL * dt, MAX_TURN_VEL);
             targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
+          } else {
+            const decel = TURN_DECEL * dt;
+            if (Math.abs(turnVel) <= decel) turnVel = 0;
+            else turnVel -= Math.sign(turnVel) * decel;
           }
+          if (turnVel !== 0) heading += turnVel * dt;
+
+          const wantStrafeLeft  = keys['KeyQ'];
+          const wantStrafeRight = keys['KeyE'];
+          if (wantStrafeLeft) {
+            strafeVel = Math.max(strafeVel - STRAFE_ACCEL * dt, -MAX_STRAFE);
+          } else if (wantStrafeRight) {
+            strafeVel = Math.min(strafeVel + STRAFE_ACCEL * dt, MAX_STRAFE);
+          } else {
+            const sd = STRAFE_DECEL * dt;
+            if (Math.abs(strafeVel) <= sd) strafeVel = 0;
+            else strafeVel -= Math.sign(strafeVel) * sd;
+          }
+        } else {
+          // Paused — bleed off any existing velocity
+          if (Math.abs(turnVel)   > 0) turnVel   = 0;
+          if (Math.abs(strafeVel) > 0) strafeVel = 0;
         }
 
         // Heading: smooth toward target, auto-rotate when idle, or very slow drift
@@ -1155,6 +1207,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
           camera.position.z += fwdZ * speed * dt;
+          // Q/E strafe — slide perpendicular to heading
+          if (strafeVel !== 0) {
+            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
+            const sideZ = Math.sin(heading);  // perpendicular Z
+            camera.position.x += sideX * strafeVel * dt;
+            camera.position.z += sideZ * strafeVel * dt;
+          }
         }
 
         // Camera Y — always at BASE_CAM_Y; stars (y=80-140) are above so we always look up

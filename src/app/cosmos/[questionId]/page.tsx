@@ -5,6 +5,7 @@ import { createSpirograph } from '@/lib/spirograph/renderer';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
+import ControlsHint from '@/components/ControlsHint';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import { type CosmosBond } from '@/components/BondCurves';
@@ -27,6 +28,28 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 }
 
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
+
+// ── Shared inline star canvas ──────────────────────────────────────────────────
+function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dims = star.dimensions ?? DIM_DEFAULTS;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const inst = createSpirograph(canvas, dims, { size: size * 2, dpr: 1 });
+    let t = 0; let raf: number;
+    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
+    tick();
+    return () => { cancelAnimationFrame(raf); inst.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [star.id]);
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width: size, height: size, display: 'block', flexShrink: 0 }}
+    />
+  );
+}
 
 // ── Peeking star — user's own star peeks from the bottom as a persistent anchor ──
 function PeekingStar({ star }: { star: CosmosStarData }) {
@@ -109,8 +132,10 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
+  const [triggerControlsHint, setTriggerControlsHint] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
+  const panelDismissedOnce = useRef(false);
 
   // Fetch all questions so we can cycle to the next one
   useEffect(() => {
@@ -285,6 +310,11 @@ export default function CosmosPage() {
     setConnecting(false);
     setConnectConfirmed(false);
     setReason('');
+    // Trigger controls hint the first time a panel is dismissed
+    if (!panelDismissedOnce.current) {
+      panelDismissedOnce.current = true;
+      setTriggerControlsHint(true);
+    }
   };
 
   return (
@@ -458,6 +488,9 @@ export default function CosmosPage() {
             onChange={setReason}
             onCancel={() => { setConnecting(false); setReason(''); }}
             onSubmit={() => handleConnect(selectedStar.id)}
+            userStar={userStarId && byId[userStarId]
+              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              : null}
           />
         )}
 
@@ -499,22 +532,60 @@ export default function CosmosPage() {
         zIndex: 0,
         pointerEvents: 'none',
       }}>
-        {/* Brand / about */}
-        <button
-          onClick={() => setShowAbout(true)}
-          style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
-            color: BTW.textDim, padding: '6px 0',
-            minHeight: 44,
-            transition: 'color .2s',
-            pointerEvents: 'auto',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
-          onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
-        >
-          The Between
-        </button>
+        {/* Brand / about — OR connecting-mode star widget */}
+        {connecting && userStarId && byId[userStarId] ? (
+          // ── Connecting mode: show user's star + CTA ──────────────────────
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            pointerEvents: 'none',
+            maxWidth: 'calc(100% - 60px)',
+            animation: 'btwRise .3s ease-out',
+          }}>
+            <StarMiniInline star={byId[userStarId]} size={60} />
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{
+                fontFamily: SERIF,
+                fontStyle: 'italic',
+                fontSize: 'clamp(10px, 1.4vw, 13px)',
+                color: BTW.textDim,
+                lineHeight: 1.4,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 220,
+              }}>
+                {byId[userStarId].text}
+              </div>
+              <div style={{
+                fontFamily: SANS,
+                fontSize: 9,
+                letterSpacing: '0.16em',
+                textTransform: 'uppercase',
+                color: BTW.horizon[3],
+                opacity: 0.75,
+                marginTop: 3,
+              }}>
+                Find a star to connect to by clicking around!
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAbout(true)}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
+              color: BTW.textDim, padding: '6px 0',
+              minHeight: 44,
+              transition: 'color .2s',
+              pointerEvents: 'auto',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
+            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
+          >
+            The Between
+          </button>
+        )}
 
         {/* Add star */}
         <button
@@ -538,9 +609,14 @@ export default function CosmosPage() {
       </div>
 
       {/* Peeking star — user's own star floats from the bottom as a reminder */}
-      {userStarId && byId[userStarId] && !connectConfirmed && (
+      {userStarId && byId[userStarId] && !connectConfirmed && !connecting && !selected && (
         <PeekingStar star={byId[userStarId]} />
       )}
+
+      <ControlsHint
+        trigger={triggerControlsHint}
+        onDone={() => setTriggerControlsHint(false)}
+      />
 
       <AddToHomeScreen />
 
