@@ -55,12 +55,23 @@ function ensureSmokeCSSDetail() {
       0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
       100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
     }
+    @keyframes btwSmokeSlideRight {
+      0%   { opacity:0;    transform: translateY(-50%) translateX(0px); }
+      25%  { opacity:0.85; }
+      100% { opacity:0.85; transform: translateY(-50%) translateX(40px); }
+    }
   `;
   document.head.appendChild(s);
 }
 
-// Mini animated spirograph with circular clip + optional hover smoke text
-function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; size: number; text?: string }) {
+// animVariant='slideRight' — smoke exits to the right from the star's right edge
+// (used when star is inside the connect button so text flies into the cosmos).
+function StarMini({ dims, size, text, animVariant = 'rise' }: {
+  dims: CosmosStarData['dimensions'];
+  size: number;
+  text?: string;
+  animVariant?: 'rise' | 'slideRight';
+}) {
   const canvasRef   = useRef<HTMLCanvasElement>(null);
   const wrapRef     = useRef<HTMLDivElement>(null);
   const smokeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -93,28 +104,37 @@ function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; si
     const wrap = wrapRef.current;
 
     const bubble = document.createElement('div');
-    const props: [string, string][] = [
+    const isSlide = animVariant === 'slideRight';
+    const baseProps: [string, string][] = [
       ['position', 'absolute'],
-      ['left', '50%'],
-      ['bottom', 'calc(100% + 6px)'],
-      ['text-align', 'center'],
+      ['text-align', isSlide ? 'left' : 'center'],
       ['width', '200px'],
       ['max-width', '220px'],
+      ['white-space', 'normal'],
       ['pointer-events', 'none'],
       ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
       ['font-style', 'italic'],
       ['font-weight', '300'],
-      ['font-size', '15px'],
+      ['font-size', '17px'],
       ['line-height', '1.65'],
       ['color', 'rgba(240,232,224,0.82)'],
       ['text-shadow', '0 0 18px rgba(240,200,150,0.22)'],
       ['letter-spacing', '0.02em'],
       ['text-transform', 'none'],
       ['opacity', '0'],
-      ['animation', 'btwSmokeRise 2s ease-out forwards'],
       ['z-index', '99'],
     ];
-    props.forEach(([p, v]) => bubble.style.setProperty(p, v));
+    if (isSlide) {
+      // Starts just right of the star, vertically centred
+      baseProps.push(['left', `${size + 8}px`]);
+      baseProps.push(['top', '50%']);
+      baseProps.push(['animation', 'btwSmokeSlideRight 2s ease-out forwards']);
+    } else {
+      baseProps.push(['left', '50%']);
+      baseProps.push(['bottom', 'calc(100% + 6px)']);
+      baseProps.push(['animation', 'btwSmokeRise 2s ease-out forwards']);
+    }
+    baseProps.forEach(([p, v]) => bubble.style.setProperty(p, v));
 
     const words = text.trim().split(/\s+/).filter(Boolean);
     const spans: HTMLSpanElement[] = [];
@@ -132,18 +152,29 @@ function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; si
       if (!smokeBubble.current) return;
       bubble.style.setProperty('animation', 'none');
       bubble.style.setProperty('opacity', '0.85');
-      bubble.style.setProperty('transform', 'translate(-50%, -100%) translateY(-24px)');
+      if (isSlide) {
+        bubble.style.setProperty('transform', `translateY(-50%) translateX(40px)`);
+      } else {
+        bubble.style.setProperty('transform', 'translate(-50%, -100%) translateY(-24px)');
+      }
       spans.forEach((span, i) => {
         const ang  = Math.random() * Math.PI * 2;
-        const dist = 35 + Math.random() * 55;
-        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
-        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
+        const dist = 45 + Math.random() * 70;
+        // Slide variant biases disperse rightward and upward
+        const dx = isSlide
+          ? (20 + Math.random() * 80).toFixed(0)
+          : (Math.cos(ang) * dist).toFixed(0);
+        const dy = isSlide
+          ? (-(Math.random() * 60 + 10)).toFixed(0)
+          : (Math.sin(ang) * dist - 35).toFixed(0);
+        span.style.setProperty('--btw-sdx', `${dx}px`);
+        span.style.setProperty('--btw-sdy', `${dy}px`);
         span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`);
       });
     }, 1300);
     const t2 = setTimeout(() => clearSmoke(), 2600);
     smokeTimers.current = [t1, t2];
-  }, [text, clearSmoke]);
+  }, [text, animVariant, size, clearSmoke]);
 
   useEffect(() => () => clearSmoke(), [clearSmoke]);
 
@@ -341,7 +372,7 @@ export default function StarDetail({
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {showUserStar && (
-              <StarMini dims={userStar!.dimensions} size={36} text={userStar!.text} />
+              <StarMini dims={userStar!.dimensions} size={36} text={userStar!.text} animVariant="slideRight" />
             )}
             Connect your star →
           </button>

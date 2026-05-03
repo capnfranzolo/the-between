@@ -227,7 +227,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
               onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
               onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
             >
-              not this one →
+              next question →
             </button>
           )}
         </div>

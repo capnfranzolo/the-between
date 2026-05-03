@@ -408,7 +408,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
         ctx.globalCompositeOperation = 'source-over';
         const tex = new THREE.CanvasTexture(c);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.8 });
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.3 });
         const sprite = new THREE.Sprite(mat);
         const angle = Math.random() * Math.PI * 2;
         const dist = 20 + Math.random() * 280;
@@ -760,18 +760,35 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const dz = thoughtGroup.position.z - camera.position.z;
           targetHeading = Math.atan2(dx, -dz);
           onClickRef.current?.(thoughtId);
-        } else if (relY < 0.05) {
-          pitchTarget = Math.min(pitch + Math.PI / 8, 0.70);
-        } else if (relY > 0.95) {
-          pitchTarget = Math.max(pitch - Math.PI / 8, -0.40);
-        } else if (relX < 0.10) {
-          targetHeading = heading - Math.PI / 6;
-          flyTargetXZ = null;
-        } else if (relX > 0.90) {
-          targetHeading = heading + Math.PI / 6;
-          flyTargetXZ = null;
         } else {
-          onBgClickRef.current?.();
+          // Bullseye navigation: center quarter → background click, outer ring → navigate
+          // nx/ny: -1 = left/top, +1 = right/bottom (screen space, y down)
+          const nx = (relX - 0.5) * 2;
+          const ny = (relY - 0.5) * 2;
+          const dist = Math.sqrt(nx * nx + ny * ny);
+
+          if (dist < 0.5) {
+            // Inner circle (≈ center 1/4 of screen area) — treat as background tap
+            onBgClickRef.current?.();
+          } else {
+            // Outer zone — navigate with intensity proportional to dist from center
+            // Scale: 0 at dist=0.5, 1 at dist=1.42 (full corner)
+            const t = Math.min((dist - 0.5) / 0.92, 1.0);
+            const maxPush = Math.PI / 6 + t * (Math.PI / 3 - Math.PI / 6); // π/6 → π/3
+
+            const ux = nx / dist; // unit direction
+            const uy = ny / dist;
+
+            // Heading component (left/right)
+            if (Math.abs(ux) > 0.15) {
+              targetHeading = heading + ux * maxPush;
+              flyTargetXZ = null;
+            }
+            // Pitch component (up/down — screen y is inverted for pitch)
+            if (Math.abs(uy) > 0.15) {
+              pitchTarget = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
+            }
+          }
         }
       };
       renderer.domElement.addEventListener('click', onClickCanvas);
@@ -848,7 +865,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
           'font-style:italic',
           'font-weight:300',
-          'font-size:18px',
+          'font-size:20px',
           'line-height:1.65',
           'color:rgba(240,232,224,0.82)',
           'text-shadow:0 0 22px rgba(240,200,150,0.22)',

@@ -72,7 +72,7 @@ function showSmokeFromEl(
     ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
     ['font-style', 'italic'],
     ['font-weight', '300'],
-    ['font-size', '15px'],
+    ['font-size', '17px'],
     ['line-height', '1.65'],
     ['color', 'rgba(240,232,224,0.82)'],
     ['text-shadow', '0 0 18px rgba(240,200,150,0.22)'],
@@ -166,6 +166,76 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
 }
 
 
+// ── "Click around to find a star to orbit." prompt ────────────────────────────
+// Uses the same smoke rise+scatter animation as hover ghosts.
+function OrbitPrompt({ onDone }: { onDone: () => void }) {
+  const [phase, setPhase] = useState<'rising' | 'dispersing'>('rising');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    ensureSmokeCSSInline();
+    // Scatter after 3 s
+    const t1 = setTimeout(() => setPhase('dispersing'), 3000);
+    // Remove after scatter animation completes
+    const t2 = setTimeout(() => onDone(), 4400);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const words = 'Click around to find a star to orbit.'.split(' ');
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        position: 'fixed',
+        top: '30%',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 12,
+        pointerEvents: 'none',
+        textAlign: 'center',
+        maxWidth: 320,
+      }}
+    >
+      <div style={{
+        fontFamily: "'Cormorant Garamond','Playfair Display',Georgia,serif",
+        fontStyle: 'italic',
+        fontWeight: 300,
+        fontSize: 20,
+        lineHeight: 1.65,
+        color: 'rgba(240,232,224,0.85)',
+        textShadow: '0 0 22px rgba(240,200,150,0.22)',
+        letterSpacing: '0.02em',
+        animation: phase === 'rising'
+          ? 'btwSmokeRise 2s ease-out forwards'
+          : undefined,
+      }}>
+        {phase === 'dispersing'
+          ? words.map((word, i) => {
+              const ang  = Math.random() * Math.PI * 2;
+              const dist = 45 + Math.random() * 80;
+              return (
+                <span
+                  key={i}
+                  style={{
+                    display: 'inline-block',
+                    ['--btw-sdx' as string]: `${(Math.cos(ang) * dist).toFixed(0)}px`,
+                    ['--btw-sdy' as string]: `${(Math.sin(ang) * dist - 40).toFixed(0)}px`,
+                    animation: `btwSmokeSplit 1.2s ease-out ${(i * 40).toFixed(0)}ms forwards`,
+                  } as React.CSSProperties}
+                >
+                  {word + ' '}
+                </span>
+              );
+            })
+          : 'Click around to find a star to orbit.'
+        }
+      </div>
+    </div>
+  );
+}
+
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
   const searchParams = useSearchParams();
@@ -182,9 +252,11 @@ export default function CosmosPage() {
   );
   const [showAbout, setShowAbout] = useState(false);
   const [triggerControlsHint, setTriggerControlsHint] = useState(false);
+  const [showOrbitPrompt, setShowOrbitPrompt] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
   const panelDismissedOnce = useRef(false);
+  const orbitPromptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch all questions so we can cycle to the next one
   useEffect(() => {
@@ -353,6 +425,28 @@ export default function CosmosPage() {
       }
     }
   }, [initialShortcode, data]);
+
+  // "Click around to find a star to orbit." — shown 5s after loading a shared star link.
+  // Dismissed immediately when user presses WASD.
+  useEffect(() => {
+    if (!starParam || !data) return;
+    if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current);
+    orbitPromptTimer.current = setTimeout(() => setShowOrbitPrompt(true), 5000);
+    return () => { if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current); };
+  }, [starParam, data]);
+
+  useEffect(() => {
+    if (!showOrbitPrompt) return;
+    const dismiss = (e: KeyboardEvent) => {
+      if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+        setShowOrbitPrompt(false);
+      }
+    };
+    window.addEventListener('keydown', dismiss);
+    // Also auto-dismiss after 6 s
+    const t = setTimeout(() => setShowOrbitPrompt(false), 6000);
+    return () => { window.removeEventListener('keydown', dismiss); clearTimeout(t); };
+  }, [showOrbitPrompt]);
 
   const clearSelection = () => {
     setSelected(null);
@@ -605,7 +699,7 @@ export default function CosmosPage() {
             The Between
           </button>
           {userStarId && byId[userStarId] && !selected && (
-            <StarMiniInline star={byId[userStarId]} size={40} />
+            <StarMiniInline star={byId[userStarId]} size={80} />
           )}
         </div>
 
@@ -634,6 +728,11 @@ export default function CosmosPage() {
         trigger={triggerControlsHint}
         onDone={() => setTriggerControlsHint(false)}
       />
+
+      {/* "Click around to find a star to orbit." — shown 5 s after landing on a shared star */}
+      {showOrbitPrompt && (
+        <OrbitPrompt onDone={() => setShowOrbitPrompt(false)} />
+      )}
 
       <AddToHomeScreen />
 
