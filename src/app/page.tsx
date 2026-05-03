@@ -54,22 +54,24 @@ function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
         textAlign: 'center',
         boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
       }}>
-        {/* Title */}
+        {/* Title — all-caps, fills ~75% of viewport width */}
         <div style={{
-          fontFamily: SERIF,
-          fontSize: 'clamp(32px, 7vw, 48px)',
-          letterSpacing: '0.06em',
-          color: BTW.textPri,
-          marginBottom: 8,
+          fontFamily: SANS,
+          fontSize: 'clamp(20px, 7.2vw, 88px)',
+          letterSpacing: '0.34em',
+          textTransform: 'uppercase',
+          color: BTW.textDim,
+          marginBottom: 6,
           lineHeight: 1.1,
+          whiteSpace: 'nowrap',
         }}>
           The Between
         </div>
         <div style={{
           fontFamily: SERIF,
           fontStyle: 'italic',
-          fontSize: 'clamp(13px, 2.5vw, 15px)',
-          color: withAlpha(BTW.textDim, 0.55),
+          fontSize: 'clamp(12px, 1.4vw, 16px)',
+          color: 'rgba(180,148,230,0.62)',
           letterSpacing: '0.04em',
           marginBottom: 32,
           lineHeight: 1.3,

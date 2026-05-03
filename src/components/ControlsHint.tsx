@@ -134,20 +134,20 @@ export default function ControlsHint({ trigger, onDone }: { trigger: boolean; on
         <FloatKey label="D" arrow="→" driftX={d[3]?.x ?? 80}  driftY={d[3]?.y ?? 20}  delay={d[3]?.delay ?? 180} dispersing={dispersing} opacity={0.9} />
       </div>
 
-      {/* "click any star" */}
+      {/* "Click any star." */}
       <div style={{
-        marginTop: 10,
+        marginTop: 12,
         fontFamily: SERIF,
         fontStyle: 'italic',
-        fontSize: 17,
-        color: 'rgba(255,255,255,0.75)',
+        fontSize: 21,
+        color: 'rgba(255,255,255,0.82)',
         letterSpacing: '0.02em',
         whiteSpace: 'nowrap',
-        opacity: 0.75,
+        opacity: 0.82,
         animation: dispersing ? undefined : 'btwKeyIn .5s ease-out 200ms both',
         ...textOut,
       }}>
-        click any star
+        Click any star.
       </div>
     </div>
   );

@@ -18,24 +18,20 @@ interface ConnectionDrawerProps {
 }
 
 // Mini animated spirograph canvas
+// createSpirograph sets canvas.style.width/height = size + 'px' internally.
 function StarMini({ dims, size }: { dims: SpiroDimensions; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size: size * 2, dpr: 1 });
+    const inst = createSpirograph(canvas, dims, { size, dpr: 1 });
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
     return () => { cancelAnimationFrame(raf); inst.stop(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: size, height: size, display: 'block', flexShrink: 0 }}
-    />
-  );
+  return <canvas ref={canvasRef} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit, userStar }: ConnectionDrawerProps) {

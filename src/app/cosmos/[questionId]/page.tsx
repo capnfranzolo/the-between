@@ -30,27 +30,23 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 
 // ── Shared inline star canvas ──────────────────────────────────────────────────
-// Uses a large internal buffer (size * 8) displayed at CSS size, ensuring the
-// spirograph is never clipped — the browser scales the buffer down to fit.
+// createSpirograph sets canvas.style.width/height = size + 'px' internally,
+// so we just pass the display size directly — no multiplier needed.
 function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dims = star.dimensions ?? DIM_DEFAULTS;
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size: size * 8, dpr: 1 });
+    const inst = createSpirograph(canvas, dims, { size, dpr: 1 });
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
     return () => { cancelAnimationFrame(raf); inst.stop(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [star.id]);
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: size, height: size, display: 'block', flexShrink: 0 }}
-    />
-  );
+  // No CSS size needed — createSpirograph sets canvas.style directly
+  return <canvas ref={canvasRef} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 
@@ -463,19 +459,18 @@ export default function CosmosPage() {
         position: 'fixed',
         left: 0, right: 0,
         bottom: 0,
-        height: 'calc(env(safe-area-inset-bottom, 0px) + 62px)',
+        height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'space-between',
         padding: '0 24px',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
         zIndex: 0,
         pointerEvents: 'none',
       }}>
-        {/* Brand / about — always visible; user's star to the RIGHT when they have one
-            and are NOT currently viewing their own star panel */}
+        {/* Brand + user's star to the right (hidden when viewing own star) */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
+          display: 'flex', alignItems: 'center', gap: 10,
           pointerEvents: 'auto',
         }}>
           <button
@@ -494,7 +489,7 @@ export default function CosmosPage() {
             The Between
           </button>
           {userStarId && byId[userStarId] && !selectedStar?.mine && (
-            <StarMiniInline star={byId[userStarId]} size={28} />
+            <StarMiniInline star={byId[userStarId]} size={80} />
           )}
         </div>
 
