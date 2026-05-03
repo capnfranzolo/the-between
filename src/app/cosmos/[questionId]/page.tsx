@@ -49,6 +49,71 @@ function ensureSmokeCSSInline() {
   document.head.appendChild(s);
 }
 
+// Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas to render
+// the full pattern. We render at SPIRO_RENDER_SIZE then CSS-scale down to `size`.
+const SPIRO_RENDER_SIZE = 600;
+
+function showSmokeFromEl(
+  wrapEl: HTMLElement,
+  text: string,
+): { timers: ReturnType<typeof setTimeout>[]; bubble: HTMLDivElement } {
+  ensureSmokeCSSInline();
+  const bubble = document.createElement('div');
+  // Use setProperty so inherited values (text-transform, font-*) are overridden
+  const props: [string, string][] = [
+    ['position', 'absolute'],
+    ['left', '50%'],
+    ['bottom', 'calc(100% + 6px)'],
+    ['text-align', 'center'],
+    // Explicit width so the bubble isn't constrained to the 40px containing block
+    ['width', '200px'],
+    ['max-width', '220px'],
+    ['pointer-events', 'none'],
+    ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
+    ['font-style', 'italic'],
+    ['font-weight', '300'],
+    ['font-size', '15px'],
+    ['line-height', '1.65'],
+    ['color', 'rgba(240,232,224,0.82)'],
+    ['text-shadow', '0 0 18px rgba(240,200,150,0.22)'],
+    ['letter-spacing', '0.02em'],
+    ['text-transform', 'none'],
+    ['opacity', '0'],
+    ['animation', 'btwSmokeRise 2s ease-out forwards'],
+    ['z-index', '99'],
+  ];
+  props.forEach(([p, v]) => bubble.style.setProperty(p, v));
+
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const spans: HTMLSpanElement[] = [];
+  words.forEach(w => {
+    const span = document.createElement('span');
+    span.textContent = w + ' ';
+    span.style.setProperty('display', 'inline');
+    bubble.appendChild(span);
+    spans.push(span);
+  });
+
+  wrapEl.appendChild(bubble);
+
+  const t1 = setTimeout(() => {
+    if (!wrapEl.contains(bubble)) return;
+    bubble.style.setProperty('animation', 'none');
+    bubble.style.setProperty('opacity', '0.85');
+    bubble.style.setProperty('transform', 'translate(-50%, -100%) translateY(-24px)');
+    spans.forEach((span, i) => {
+      const ang  = Math.random() * Math.PI * 2;
+      const dist = 35 + Math.random() * 55;
+      span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+      span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
+      span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`);
+    });
+  }, 1300);
+  const t2 = setTimeout(() => { bubble.remove(); }, 2600);
+
+  return { timers: [t1, t2], bubble };
+}
+
 function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef   = useRef<HTMLDivElement>(null);
@@ -59,7 +124,10 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size, dpr: 1 });
+    // Render at full geometry size, then CSS-scale down to `size`
+    const inst = createSpirograph(canvas, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
@@ -75,63 +143,12 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
   }
 
   function showSmoke() {
-    if (smokeBubble.current || !star.text?.trim()) return;
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    ensureSmokeCSSInline();
-
-    const bubble = document.createElement('div');
-    bubble.style.cssText = [
-      'position:absolute',
-      'left:50%',
-      'bottom:calc(100% + 6px)',
-      'text-align:center',
-      'max-width:220px',
-      'pointer-events:none',
-      "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
-      'font-style:italic',
-      'font-weight:300',
-      'font-size:15px',
-      'line-height:1.65',
-      'color:rgba(240,232,224,0.82)',
-      'text-shadow:0 0 18px rgba(240,200,150,0.22)',
-      'letter-spacing:0.02em',
-      'opacity:0',
-      'animation:btwSmokeRise 2s ease-out forwards',
-      'z-index:99',
-    ].join(';');
-
-    const words = star.text.trim().split(/\s+/).filter(Boolean);
-    const spans: HTMLSpanElement[] = [];
-    words.forEach(w => {
-      const span = document.createElement('span');
-      span.textContent = w + ' ';
-      span.style.display = 'inline-block';
-      bubble.appendChild(span);
-      spans.push(span);
-    });
-
-    wrap.appendChild(bubble);
+    if (smokeBubble.current || !star.text?.trim() || !wrapRef.current) return;
+    const { timers, bubble } = showSmokeFromEl(wrapRef.current, star.text);
+    smokeTimers.current = timers;
     smokeBubble.current = bubble;
-
-    const t1 = setTimeout(() => {
-      if (!smokeBubble.current) return;
-      bubble.style.animation = 'none';
-      bubble.style.opacity = '0.85';
-      bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
-      spans.forEach((span, i) => {
-        const ang  = Math.random() * Math.PI * 2;
-        const dist = 35 + Math.random() * 55;
-        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
-        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
-        span.style.animation = `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`;
-      });
-    }, 1300);
-    const t2 = setTimeout(() => clearSmoke(), 2600);
-    smokeTimers.current = [t1, t2];
   }
 
-  // cleanup on unmount
   useEffect(() => () => clearSmoke(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -587,7 +604,7 @@ export default function CosmosPage() {
           >
             The Between
           </button>
-          {userStarId && byId[userStarId] && !selectedStar?.mine && !connecting && !connectConfirmed && (
+          {userStarId && byId[userStarId] && !selected && (
             <StarMiniInline star={byId[userStarId]} size={40} />
           )}
         </div>

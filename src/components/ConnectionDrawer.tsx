@@ -17,13 +17,17 @@ interface ConnectionDrawerProps {
   userStar?: UserStar | null;
 }
 
-// Mini animated spirograph with circular clip
+// Mini animated spirograph — renders at 600px (full geometry), CSS-scales to `size`
+const SPIRO_RENDER_SIZE = 600;
+
 function StarMini({ dims, size }: { dims: SpiroDimensions; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size, dpr: 1 });
+    const inst = createSpirograph(canvas, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();

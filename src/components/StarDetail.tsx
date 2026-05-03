@@ -36,7 +36,10 @@ interface StarDetailProps {
   userStar?: UserStarContext | null;
 }
 
-// Ensure smoke CSS keyframes are in the document (shared id with CosmosScene)
+// Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas.
+// Render at full size and CSS-scale down to avoid cropping.
+const SPIRO_RENDER_SIZE = 600;
+
 function ensureSmokeCSSDetail() {
   const SMOKE_STYLE_ID = 'btw-smoke-css';
   if (typeof document === 'undefined' || document.getElementById(SMOKE_STYLE_ID)) return;
@@ -66,7 +69,10 @@ function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; si
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const inst = createSpirograph(canvas, dims, { size, dpr: 1 });
+    // Render at full geometry size, then CSS-scale to `size`
+    const inst = createSpirograph(canvas, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
     let t = 0; let raf: number;
     const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
     tick();
@@ -82,38 +88,40 @@ function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; si
   }, []);
 
   const showSmoke = useCallback(() => {
-    if (smokeBubble.current || !text?.trim()) return;
-    const wrap = wrapRef.current;
-    if (!wrap) return;
+    if (smokeBubble.current || !text?.trim() || !wrapRef.current) return;
     ensureSmokeCSSDetail();
+    const wrap = wrapRef.current;
 
     const bubble = document.createElement('div');
-    bubble.style.cssText = [
-      'position:absolute',
-      'left:50%',
-      'bottom:calc(100% + 6px)',
-      'text-align:center',
-      'max-width:220px',
-      'pointer-events:none',
-      "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
-      'font-style:italic',
-      'font-weight:300',
-      'font-size:15px',
-      'line-height:1.65',
-      'color:rgba(240,232,224,0.82)',
-      'text-shadow:0 0 18px rgba(240,200,150,0.22)',
-      'letter-spacing:0.02em',
-      'opacity:0',
-      'animation:btwSmokeRise 2s ease-out forwards',
-      'z-index:99',
-    ].join(';');
+    const props: [string, string][] = [
+      ['position', 'absolute'],
+      ['left', '50%'],
+      ['bottom', 'calc(100% + 6px)'],
+      ['text-align', 'center'],
+      ['width', '200px'],
+      ['max-width', '220px'],
+      ['pointer-events', 'none'],
+      ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
+      ['font-style', 'italic'],
+      ['font-weight', '300'],
+      ['font-size', '15px'],
+      ['line-height', '1.65'],
+      ['color', 'rgba(240,232,224,0.82)'],
+      ['text-shadow', '0 0 18px rgba(240,200,150,0.22)'],
+      ['letter-spacing', '0.02em'],
+      ['text-transform', 'none'],
+      ['opacity', '0'],
+      ['animation', 'btwSmokeRise 2s ease-out forwards'],
+      ['z-index', '99'],
+    ];
+    props.forEach(([p, v]) => bubble.style.setProperty(p, v));
 
     const words = text.trim().split(/\s+/).filter(Boolean);
     const spans: HTMLSpanElement[] = [];
     words.forEach(w => {
       const span = document.createElement('span');
       span.textContent = w + ' ';
-      span.style.display = 'inline-block';
+      span.style.setProperty('display', 'inline');
       bubble.appendChild(span);
       spans.push(span);
     });
@@ -122,15 +130,15 @@ function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; si
 
     const t1 = setTimeout(() => {
       if (!smokeBubble.current) return;
-      bubble.style.animation = 'none';
-      bubble.style.opacity = '0.85';
-      bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
+      bubble.style.setProperty('animation', 'none');
+      bubble.style.setProperty('opacity', '0.85');
+      bubble.style.setProperty('transform', 'translate(-50%, -100%) translateY(-24px)');
       spans.forEach((span, i) => {
         const ang  = Math.random() * Math.PI * 2;
         const dist = 35 + Math.random() * 55;
         span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
         span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
-        span.style.animation = `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`;
+        span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`);
       });
     }, 1300);
     const t2 = setTimeout(() => clearSmoke(), 2600);
