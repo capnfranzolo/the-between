@@ -21,7 +21,7 @@ interface CosmosStarRaw {
 }
 
 // ── Welcome overlay — shown once per browser, dismissed via localStorage ──────
-function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
+function WelcomeOverlay({ onDismiss, questionId }: { onDismiss: () => void; questionId: string | null }) {
   const [visible, setVisible] = useState(false);
   useEffect(() => { setVisible(true); }, []);
 
@@ -30,89 +30,121 @@ function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
     setTimeout(onDismiss, 300);
   }
 
+  function lookAround() {
+    localStorage.setItem('btw_welcomed', '1');
+    window.location.href = `/cosmos/${questionId}`;
+  }
+
   return (
     <div
       style={{
         position: 'fixed', inset: 0, zIndex: 20,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '0 24px',
-        background: 'rgba(10, 6, 28, 0.72)',
+        padding: '24px',
+        background: 'rgba(10, 6, 28, 0.75)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
         transition: 'opacity 0.3s ease',
         opacity: visible ? 1 : 0,
         pointerEvents: visible ? 'auto' : 'none',
+        overflowY: 'auto',
       }}
     >
       <div style={{
         background: 'rgba(30, 24, 64, 0.90)',
         border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
-        borderRadius: 18,
-        padding: 'clamp(32px, 6vw, 52px) clamp(28px, 6vw, 56px)',
-        maxWidth: 360,
+        borderRadius: 20,
+        padding: 'clamp(32px, 5vw, 52px) clamp(28px, 5vw, 60px)',
+        maxWidth: 580,
         width: '100%',
         textAlign: 'center',
         boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
       }}>
-        {/* Title — all-caps, fills ~80% of the card width */}
-        <div style={{
-          fontFamily: SANS,
-          fontSize: 28,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: BTW.textDim,
-          marginBottom: 6,
-          lineHeight: 1.1,
-          whiteSpace: 'nowrap',
-        }}>
-          The Between
-        </div>
+        {/* Title */}
         <div style={{
           fontFamily: SERIF,
-          fontStyle: 'italic',
-          fontSize: 'clamp(12px, 1.4vw, 16px)',
-          color: 'rgba(180,148,230,0.62)',
-          letterSpacing: '0.04em',
-          marginBottom: 32,
-          lineHeight: 1.3,
-        }}>
-          (an art project)
-        </div>
-
-        {/* Body lines */}
-        <div style={{
-          fontFamily: SERIF,
-          fontSize: 'clamp(17px, 4vw, 21px)',
+          fontWeight: 400,
+          fontSize: 'clamp(22px, 4vw, 30px)',
+          letterSpacing: '0.02em',
           color: BTW.textPri,
-          lineHeight: 2.0,
-          marginBottom: 36,
+          marginBottom: 28,
+          lineHeight: 1.2,
         }}>
-          Answer a question.<br />
-          Your thought becomes a star.<br />
-          Find a star for yours to orbit.
+          Welcome to The Between.
         </div>
 
-        {/* CTA */}
-        <button
-          onClick={dismiss}
-          style={{
-            background: 'transparent',
-            border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-            color: BTW.horizon[3],
-            padding: '13px 36px',
-            borderRadius: 999,
-            fontFamily: SANS,
-            fontSize: 13,
-            fontWeight: 500,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-        >
-          Begin →
-        </button>
+        {/* Body copy */}
+        <div style={{
+          fontFamily: SERIF,
+          fontSize: 'clamp(15px, 2.2vw, 17px)',
+          color: 'rgba(240,232,224,0.75)',
+          lineHeight: 1.8,
+          marginBottom: 36,
+          textAlign: 'left',
+        }}>
+          <p style={{ margin: '0 0 1.1em' }}>
+            These days we&rsquo;re eager to sort each other into categories before we&rsquo;ve met the real person.
+          </p>
+          <p style={{ margin: '0 0 1.1em' }}>
+            This is an experiment in getting past that. You answer one question, honestly. Your answer becomes a star, and joins a sky of other stars from strangers who answered the same thing. When you find one whose thought feels like a relative of yours, you can choose to orbit it.
+          </p>
+          <p style={{ margin: 0 }}>
+            Somewhere in here is a worthy stranger. The person the media may tell you is &ldquo;the other&rdquo; but may be closer to you than you think. We have more in common than we&rsquo;re told. This is a place to notice it.
+          </p>
+        </div>
+
+        {/* Two CTAs */}
+        <div style={{
+          display: 'flex',
+          gap: 12,
+          justifyContent: 'center',
+          flexWrap: 'wrap',
+        }}>
+          <button
+            onClick={dismiss}
+            style={{
+              background: withAlpha(BTW.horizon[3], 0.14),
+              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+              color: BTW.horizon[3],
+              padding: '13px 28px',
+              borderRadius: 999,
+              fontFamily: SANS,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.26); }}
+            onMouseLeave={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
+          >
+            Answer a question
+          </button>
+          <button
+            onClick={lookAround}
+            disabled={!questionId}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.textPri, questionId ? 0.32 : 0.12)}`,
+              color: questionId ? BTW.textDim : withAlpha(BTW.textDim, 0.35),
+              padding: '13px 28px',
+              borderRadius: 999,
+              fontFamily: SANS,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              cursor: questionId ? 'pointer' : 'default',
+              whiteSpace: 'nowrap',
+              transition: 'color .2s, border-color .2s',
+            }}
+            onMouseEnter={e => { if (questionId) e.currentTarget.style.color = BTW.textPri; }}
+            onMouseLeave={e => { if (questionId) e.currentTarget.style.color = BTW.textDim; }}
+          >
+            Look around first
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -189,7 +221,7 @@ function LandingPageInner() {
         </div>
       </div>
 
-      {showWelcome && <WelcomeOverlay onDismiss={dismissWelcome} />}
+      {showWelcome && <WelcomeOverlay onDismiss={dismissWelcome} questionId={questionId} />}
 
       {pending && (
         <UniqueOverlay

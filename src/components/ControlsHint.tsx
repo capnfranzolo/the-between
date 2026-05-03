@@ -19,6 +19,9 @@ function ensureCSS() {
       0%   { opacity: var(--key-op,0.9); transform: translate(0,0) scale(1);   filter:blur(0px); }
       100% { opacity: 0;                 transform: translate(var(--kx),var(--ky)) scale(0.6); filter:blur(6px); }
     }
+    @media (max-width: 768px), (hover: none) and (pointer: coarse) {
+      .btw-controls-hint { display: none !important; }
+    }
   `;
   document.head.appendChild(s);
 }
@@ -112,7 +115,7 @@ export default function ControlsHint({ trigger, onDone }: { trigger: boolean; on
   } as React.CSSProperties : {};
 
   return (
-    <div style={{
+    <div className="btw-controls-hint" style={{
       position: 'fixed',
       top: '38%',
       left: '50%',

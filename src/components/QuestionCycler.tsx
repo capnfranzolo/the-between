@@ -160,7 +160,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
           transition: 'color .3s',
         }}>
           <span style={{ opacity: text.length > 0 ? 1 : 0, transition: 'opacity .3s' }}>
-            {text.length < MIN_ANSWER_LENGTH ? `${MIN_ANSWER_LENGTH - text.length} more to bloom` : 'ready'}
+            {text.length < MIN_ANSWER_LENGTH ? `${MIN_ANSWER_LENGTH - text.length} more to go` : 'ready'}
           </span>
           <span>{text.length} / {MAX_ANSWER_LENGTH}</span>
         </div>
@@ -170,13 +170,11 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
             onClick={handleSubmit}
             disabled={!ready || tooLong || submitting}
             style={{
-              opacity: ready && !tooLong ? 1 : 0,
-              transform: ready && !tooLong ? 'translateY(0)' : 'translateY(8px)',
-              transition: 'opacity .6s ease, transform .6s ease',
-              pointerEvents: ready && !tooLong ? 'auto' : 'none',
+              opacity: 1,
+              transition: 'border-color .5s ease, color .5s ease, background .2s ease',
               background: 'transparent',
-              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-              color: BTW.horizon[3],
+              border: `1px solid ${ready && !tooLong ? withAlpha(BTW.horizon[3], 0.7) : withAlpha(BTW.horizon[3], 0.22)}`,
+              color: ready && !tooLong ? BTW.horizon[3] : withAlpha(BTW.horizon[3], 0.32),
               padding: '14px 32px',
               borderRadius: 999,
               fontFamily: SANS,
@@ -185,10 +183,10 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
               whiteSpace: 'nowrap',
-              cursor: 'pointer',
+              cursor: ready && !tooLong ? 'pointer' : 'default',
               backdropFilter: 'blur(6px)',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
+            onMouseEnter={e => { if (ready && !tooLong) e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
           >
             {submitting ? 'Checking…' : 'See your thought →'}
