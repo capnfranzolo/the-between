@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
@@ -36,10 +36,33 @@ interface StarDetailProps {
   userStar?: UserStarContext | null;
 }
 
-// Mini animated spirograph — pass display size directly; createSpirograph
-// sets canvas.style.width/height internally so no CSS override needed.
-function StarMini({ dims, size }: { dims: CosmosStarData['dimensions']; size: number }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+// Ensure smoke CSS keyframes are in the document (shared id with CosmosScene)
+function ensureSmokeCSSDetail() {
+  const SMOKE_STYLE_ID = 'btw-smoke-css';
+  if (typeof document === 'undefined' || document.getElementById(SMOKE_STYLE_ID)) return;
+  const s = document.createElement('style');
+  s.id = SMOKE_STYLE_ID;
+  s.textContent = `
+    @keyframes btwSmokeRise {
+      0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
+      30%  { opacity:0.85; }
+      100% { opacity:0.85; transform: translate(-50%,-100%) translateY(-24px); }
+    }
+    @keyframes btwSmokeSplit {
+      0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
+      100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+// Mini animated spirograph with circular clip + optional hover smoke text
+function StarMini({ dims, size, text }: { dims: CosmosStarData['dimensions']; size: number; text?: string }) {
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const wrapRef     = useRef<HTMLDivElement>(null);
+  const smokeTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const smokeBubble = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -50,7 +73,84 @@ function StarMini({ dims, size }: { dims: CosmosStarData['dimensions']; size: nu
     return () => { cancelAnimationFrame(raf); inst.stop(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <canvas ref={canvasRef} style={{ display: 'block', flexShrink: 0 }} />;
+
+  const clearSmoke = useCallback(() => {
+    smokeTimers.current.forEach(clearTimeout);
+    smokeTimers.current = [];
+    smokeBubble.current?.remove();
+    smokeBubble.current = null;
+  }, []);
+
+  const showSmoke = useCallback(() => {
+    if (smokeBubble.current || !text?.trim()) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    ensureSmokeCSSDetail();
+
+    const bubble = document.createElement('div');
+    bubble.style.cssText = [
+      'position:absolute',
+      'left:50%',
+      'bottom:calc(100% + 6px)',
+      'text-align:center',
+      'max-width:220px',
+      'pointer-events:none',
+      "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
+      'font-style:italic',
+      'font-weight:300',
+      'font-size:15px',
+      'line-height:1.65',
+      'color:rgba(240,232,224,0.82)',
+      'text-shadow:0 0 18px rgba(240,200,150,0.22)',
+      'letter-spacing:0.02em',
+      'opacity:0',
+      'animation:btwSmokeRise 2s ease-out forwards',
+      'z-index:99',
+    ].join(';');
+
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    const spans: HTMLSpanElement[] = [];
+    words.forEach(w => {
+      const span = document.createElement('span');
+      span.textContent = w + ' ';
+      span.style.display = 'inline-block';
+      bubble.appendChild(span);
+      spans.push(span);
+    });
+    wrap.appendChild(bubble);
+    smokeBubble.current = bubble;
+
+    const t1 = setTimeout(() => {
+      if (!smokeBubble.current) return;
+      bubble.style.animation = 'none';
+      bubble.style.opacity = '0.85';
+      bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
+      spans.forEach((span, i) => {
+        const ang  = Math.random() * Math.PI * 2;
+        const dist = 35 + Math.random() * 55;
+        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
+        span.style.animation = `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`;
+      });
+    }, 1300);
+    const t2 = setTimeout(() => clearSmoke(), 2600);
+    smokeTimers.current = [t1, t2];
+  }, [text, clearSmoke]);
+
+  useEffect(() => () => clearSmoke(), [clearSmoke]);
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}
+      onMouseEnter={text ? showSmoke : undefined}
+      onMouseLeave={text ? clearSmoke : undefined}
+    >
+      <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden' }}>
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
+      </div>
+    </div>
+  );
 }
 
 export default function StarDetail({
@@ -212,32 +312,28 @@ export default function StarDetail({
         <ShareButton url={url} nudge={nudge} />
 
         {showConnect && (
-          // Star + button together as one unit — star is part of the CTA
+          // Star icon sits to the left; button keeps its natural pill height
           <button
             onClick={onConnect}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 0,
+              gap: showUserStar ? 12 : 0,
               background: 'transparent',
               border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
               color: BTW.horizon[3],
-              padding: '0 18px 0 0',
-              minHeight: 80,
+              padding: showUserStar ? '10px 18px 10px 10px' : '10px 18px',
               borderRadius: 999,
               fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
               textTransform: 'uppercase', whiteSpace: 'nowrap',
               cursor: 'pointer', fontFamily: SANS,
               touchAction: 'manipulation',
-              overflow: 'hidden',
             }}
             onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12)}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {showUserStar && (
-              <span style={{ display: 'block', flexShrink: 0, marginRight: 12 }}>
-                <StarMini dims={userStar!.dimensions} size={80} />
-              </span>
+              <StarMini dims={userStar!.dimensions} size={36} text={userStar!.text} />
             )}
             Connect your star →
           </button>

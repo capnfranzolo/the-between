@@ -29,12 +29,33 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 
-// ── Shared inline star canvas ──────────────────────────────────────────────────
-// createSpirograph sets canvas.style.width/height = size + 'px' internally,
-// so we just pass the display size directly — no multiplier needed.
+// ── Shared inline star canvas with circular clip + hover smoke ────────────────
+function ensureSmokeCSSInline() {
+  const SMOKE_STYLE_ID = 'btw-smoke-css';
+  if (typeof document === 'undefined' || document.getElementById(SMOKE_STYLE_ID)) return;
+  const s = document.createElement('style');
+  s.id = SMOKE_STYLE_ID;
+  s.textContent = `
+    @keyframes btwSmokeRise {
+      0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
+      30%  { opacity:0.85; }
+      100% { opacity:0.85; transform: translate(-50%,-100%) translateY(-24px); }
+    }
+    @keyframes btwSmokeSplit {
+      0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
+      100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef   = useRef<HTMLDivElement>(null);
+  const smokeTimers  = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const smokeBubble  = useRef<HTMLDivElement | null>(null);
   const dims = star.dimensions ?? DIM_DEFAULTS;
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -45,8 +66,86 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
     return () => { cancelAnimationFrame(raf); inst.stop(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [star.id]);
-  // No CSS size needed — createSpirograph sets canvas.style directly
-  return <canvas ref={canvasRef} style={{ display: 'block', flexShrink: 0 }} />;
+
+  function clearSmoke() {
+    smokeTimers.current.forEach(clearTimeout);
+    smokeTimers.current = [];
+    smokeBubble.current?.remove();
+    smokeBubble.current = null;
+  }
+
+  function showSmoke() {
+    if (smokeBubble.current || !star.text?.trim()) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    ensureSmokeCSSInline();
+
+    const bubble = document.createElement('div');
+    bubble.style.cssText = [
+      'position:absolute',
+      'left:50%',
+      'bottom:calc(100% + 6px)',
+      'text-align:center',
+      'max-width:220px',
+      'pointer-events:none',
+      "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
+      'font-style:italic',
+      'font-weight:300',
+      'font-size:15px',
+      'line-height:1.65',
+      'color:rgba(240,232,224,0.82)',
+      'text-shadow:0 0 18px rgba(240,200,150,0.22)',
+      'letter-spacing:0.02em',
+      'opacity:0',
+      'animation:btwSmokeRise 2s ease-out forwards',
+      'z-index:99',
+    ].join(';');
+
+    const words = star.text.trim().split(/\s+/).filter(Boolean);
+    const spans: HTMLSpanElement[] = [];
+    words.forEach(w => {
+      const span = document.createElement('span');
+      span.textContent = w + ' ';
+      span.style.display = 'inline-block';
+      bubble.appendChild(span);
+      spans.push(span);
+    });
+
+    wrap.appendChild(bubble);
+    smokeBubble.current = bubble;
+
+    const t1 = setTimeout(() => {
+      if (!smokeBubble.current) return;
+      bubble.style.animation = 'none';
+      bubble.style.opacity = '0.85';
+      bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
+      spans.forEach((span, i) => {
+        const ang  = Math.random() * Math.PI * 2;
+        const dist = 35 + Math.random() * 55;
+        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
+        span.style.animation = `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`;
+      });
+    }, 1300);
+    const t2 = setTimeout(() => clearSmoke(), 2600);
+    smokeTimers.current = [t1, t2];
+  }
+
+  // cleanup on unmount
+  useEffect(() => () => clearSmoke(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-block', cursor: 'pointer', flexShrink: 0 }}
+      onMouseEnter={showSmoke}
+      onMouseLeave={clearSmoke}
+    >
+      <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden' }}>
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
+      </div>
+    </div>
+  );
 }
 
 
@@ -488,8 +587,8 @@ export default function CosmosPage() {
           >
             The Between
           </button>
-          {userStarId && byId[userStarId] && !selectedStar?.mine && (
-            <StarMiniInline star={byId[userStarId]} size={80} />
+          {userStarId && byId[userStarId] && !selectedStar?.mine && !connecting && !connectConfirmed && (
+            <StarMiniInline star={byId[userStarId]} size={40} />
           )}
         </div>
 
