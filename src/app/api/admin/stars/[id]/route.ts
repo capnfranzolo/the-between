@@ -25,6 +25,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     updates.dimensions = { ...dimResult, curveType: randomCurveType() };
   }
 
+  // Direct dimension override — editor sliders bypass AI regen
+  if (body.dimensions !== undefined) {
+    updates.dimensions = body.dimensions;
+  }
+
   const { data, error } = await supabaseServer
     .from('stars')
     .update(updates)

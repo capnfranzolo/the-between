@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import type { CurveType } from '@/lib/spirograph/renderer';
+import type { CurveType, SpiroDimensions, SpirographInstance } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 
 const Spirograph = dynamic(() => import('@/components/Spirograph'), { ssr: false });
@@ -129,6 +129,142 @@ function DimTable({ dims, before }: { dims: DimsShape; before?: DimsShape }) {
   );
 }
 
+// ─── SpiroPreview ─────────────────────────────────────────────────────────────
+// Uses inst.update() so sliders update live without teardown/re-fade.
+
+function SpiroPreview({ dims, size = 200 }: { dims: SpiroDimensions; size?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const instRef   = useRef<SpirographInstance | null>(null);
+
+  // Create once on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    import('@/lib/spirograph/renderer').then(({ createSpirograph }) => {
+      if (!canvasRef.current) return;
+      const inst = createSpirograph(canvasRef.current, dims, { size, dpr: window.devicePixelRatio ?? 1 });
+      instRef.current = inst;
+      inst.start();
+    });
+    return () => { instRef.current?.stop(); instRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Update geometry on dim changes (no teardown)
+  useEffect(() => {
+    instRef.current?.update(dims);
+  }, [dims]);
+
+  return <canvas ref={canvasRef} style={{ borderRadius: 8, display: 'block' }} />;
+}
+
+// ─── SpiroEditor ──────────────────────────────────────────────────────────────
+
+const FLOAT_DIMS = ['certainty', 'warmth', 'tension', 'vulnerability', 'scope', 'rootedness'] as const;
+const CURVE_TYPES_LIST: CurveType[] = ['hypotrochoid', 'epitrochoid', 'rose', 'lissajous', 'rhodonea'];
+const EMOTION_NAMES = ['Awe', 'Longing', 'Hope', 'Grief', 'Joy', 'Fear', 'Wonder'];
+const EMOTION_COLORS = ['#4488ff', '#aa66ff', '#44cc88', '#cc6666', '#ffcc44', '#ff6644', '#88ddff'];
+
+function SpiroEditor({
+  dims,
+  onChange,
+  onSave,
+  saving,
+}: {
+  dims: SpiroDimensions;
+  onChange: (d: SpiroDimensions) => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  function setFloat(key: typeof FLOAT_DIMS[number], v: number) {
+    onChange({ ...dims, [key]: v });
+  }
+  function setCurve(c: CurveType) { onChange({ ...dims, curveType: c }); }
+  function setEmotion(i: number)  { onChange({ ...dims, emotionIndex: i }); }
+
+  return (
+    <div style={{ display: 'flex', gap: 16 }}>
+      {/* Live preview */}
+      <div style={{ flexShrink: 0 }}>
+        <SpiroPreview dims={dims} size={200} />
+      </div>
+
+      {/* Controls */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        {/* Float sliders */}
+        {FLOAT_DIMS.map(key => (
+          <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#aaa' }}>
+              <span style={{ color: '#666' }}>{key}</span>
+              <span style={{ fontFamily: 'monospace', color: '#ccc' }}>{dims[key].toFixed(2)}</span>
+            </div>
+            <input
+              type="range"
+              min={0} max={1} step={0.01}
+              value={dims[key]}
+              onChange={e => setFloat(key, parseFloat(e.target.value))}
+              style={{ width: '100%', accentColor: '#4488ff', cursor: 'pointer' }}
+            />
+          </label>
+        ))}
+
+        {/* Curve type */}
+        <div>
+          <div style={{ fontSize: 11, color: '#666', marginBottom: 5 }}>curve type</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {CURVE_TYPES_LIST.map(c => (
+              <button
+                key={c}
+                onClick={() => setCurve(c)}
+                style={{
+                  padding: '3px 9px', borderRadius: 3, fontSize: 11,
+                  border: `1px solid ${dims.curveType === c ? '#4488ff' : '#333'}`,
+                  background: dims.curveType === c ? 'rgba(68,136,255,0.18)' : 'transparent',
+                  color: dims.curveType === c ? '#4488ff' : '#888',
+                  cursor: 'pointer',
+                }}
+              >{c}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Emotion */}
+        <div>
+          <div style={{ fontSize: 11, color: '#666', marginBottom: 5 }}>emotion</div>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {EMOTION_NAMES.map((name, i) => (
+              <button
+                key={i}
+                title={name}
+                onClick={() => setEmotion(i)}
+                style={{
+                  width: 22, height: 22, borderRadius: '50%',
+                  border: `2px solid ${dims.emotionIndex === i ? '#fff' : 'transparent'}`,
+                  background: EMOTION_COLORS[i],
+                  cursor: 'pointer',
+                  outline: 'none',
+                  flexShrink: 0,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Save */}
+        <button
+          onClick={onSave}
+          disabled={saving}
+          style={{
+            ...S.btn('primary'),
+            marginTop: 4,
+            alignSelf: 'flex-start',
+            fontWeight: 600,
+          }}
+        >{saving ? 'Saving…' : '💾 Save shape'}</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── StarDetailPanel ─────────────────────────────────────────────────────────
 
 function StarDetailPanel({
@@ -149,7 +285,14 @@ function StarDetailPanel({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [dims, setDims] = useState(star.dimensions);
+  const [editedDims, setEditedDims] = useState<SpiroDimensions | null>(null);
+  const [savingDims, setSavingDims] = useState(false);
   const answerChanged = answer !== star.answer;
+
+  // Keep editedDims in sync if dims update from the server (regen / save)
+  useEffect(() => {
+    if (dims) setEditedDims(dims as SpiroDimensions);
+  }, [dims]);
 
   async function save() {
     setSaving(true);
@@ -196,10 +339,23 @@ function StarDetailPanel({
     }
   }
 
+  async function saveDims() {
+    if (!editedDims) return;
+    setSavingDims(true);
+    const res = await fetch(`/api/admin/stars/${star.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dimensions: editedDims }),
+    });
+    const data = await res.json();
+    setSavingDims(false);
+    if (data.ok) { setDims(data.star.dimensions); onSaved(data.star); }
+  }
+
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
       <style>{`@media(max-width:700px){.btw-detail-grid{grid-template-columns:1fr!important}}`}</style>
-      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
+      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Answer</div>
@@ -250,9 +406,18 @@ function StarDetailPanel({
             {star.approved_at && <div>approved: {new Date(star.approved_at).toLocaleString()}</div>}
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          {dims && <Spirograph dimensions={dims} size={200} animate={true} />}
-          <button onClick={onClose} style={{ ...S.btn(), fontSize: 11 }}>✕ close</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ color: '#666', fontSize: 11, marginBottom: 2 }}>Shape editor</div>
+          {editedDims
+            ? <SpiroEditor
+                dims={editedDims}
+                onChange={setEditedDims}
+                onSave={saveDims}
+                saving={savingDims}
+              />
+            : <span style={{ color: '#444', fontSize: 12 }}>No dimensions yet</span>
+          }
+          <button onClick={onClose} style={{ ...S.btn(), fontSize: 11, alignSelf: 'flex-start' }}>✕ close</button>
         </div>
       </div>
     </div>
