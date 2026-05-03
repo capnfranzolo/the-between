@@ -73,7 +73,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 // ─── Shared styles ───────────────────────────────────────────────────────────
 
 const S = {
-  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
+  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13, overflowX: 'hidden' as const },
   topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, position: 'sticky' as const, top: 0, zIndex: 100, flexWrap: 'wrap' as const },
   tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
   btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
@@ -185,7 +185,7 @@ function SpiroEditor({
     <div style={{ display: 'flex', gap: 16 }}>
       {/* Live preview */}
       <div style={{ flexShrink: 0 }}>
-        <SpiroPreview dims={dims} size={200} />
+        <SpiroPreview dims={dims} size={140} />
       </div>
 
       {/* Controls */}
@@ -355,7 +355,7 @@ function StarDetailPanel({
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
       <style>{`@media(max-width:700px){.btw-detail-grid{grid-template-columns:1fr!important}}`}</style>
-      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
+      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Answer</div>
