@@ -1,11 +1,12 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { BTW, withAlpha } from '@/lib/btw';
+import { BTW, SERIF, withAlpha } from '@/lib/btw';
 
 interface ShareButtonProps {
   url: string;
   style?: React.CSSProperties;
+  nudge?: boolean;
 }
 
 // Social share URL builders
@@ -76,10 +77,19 @@ const CheckIcon = () => (
 const TRAY_WIDTH  = 164;
 const TRAY_HEIGHT = 216;
 
-export default function ShareButton({ url, style }: ShareButtonProps) {
+export default function ShareButton({ url, style, nudge }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [nudgePhase, setNudgePhase] = useState<'visible' | 'fading' | 'gone'>('gone');
+
+  useEffect(() => {
+    if (!nudge) return;
+    setNudgePhase('visible');
+    const fadeTimer = setTimeout(() => setNudgePhase('fading'), 3200);
+    const goneTimer = setTimeout(() => setNudgePhase('gone'), 3900); // 700ms for transition
+    return () => { clearTimeout(fadeTimer); clearTimeout(goneTimer); };
+  }, [nudge]);
   // Fixed coordinates for the tray (set when opening)
   const [trayPos, setTrayPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -152,117 +162,155 @@ export default function ShareButton({ url, style }: ShareButtonProps) {
     { id: 'link',      label: copied ? 'Copied!' : 'Link', Icon: copied ? CheckIcon : LinkIcon },
   ];
 
+  const iconButton = (
+    <button
+      ref={triggerRef}
+      onClick={() => open ? setOpen(false) : openTray()}
+      title="Share this star"
+      aria-label="Share this star"
+      aria-expanded={open}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 34,
+        height: 34,
+        borderRadius: '50%',
+        background: open ? withAlpha(BTW.horizon[3], 0.12) : 'transparent',
+        border: `1px solid ${open ? withAlpha(BTW.horizon[3], 0.6) : withAlpha(BTW.textPri, 0.18)}`,
+        color: open ? BTW.horizon[3] : BTW.textDim,
+        cursor: 'pointer',
+        transition: 'color .2s, border-color .2s, background .2s',
+        flexShrink: 0,
+      }}
+      onMouseEnter={e => {
+        if (!open) {
+          e.currentTarget.style.color = BTW.textPri;
+          e.currentTarget.style.borderColor = withAlpha(BTW.horizon[3], 0.6);
+        }
+      }}
+      onMouseLeave={e => {
+        if (!open) {
+          e.currentTarget.style.color = BTW.textDim;
+          e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.18);
+        }
+      }}
+    >
+      <ShareIcon />
+    </button>
+  );
+
+  const trayPortal = open && trayPos && typeof document !== 'undefined' && createPortal(
+    <div
+      id="btw-share-tray"
+      style={{
+        position: 'fixed',
+        top: trayPos.top,
+        left: trayPos.left,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        background: 'rgba(14,10,32,0.96)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: `1px solid ${withAlpha(BTW.textPri, 0.13)}`,
+        borderRadius: 14,
+        padding: '8px 6px',
+        zIndex: 9999,
+        width: TRAY_WIDTH,
+        animation: 'shareSlideUp .2s cubic-bezier(.2,.8,.3,1)',
+      }}
+    >
+      <style>{`
+        @keyframes shareSlideUp {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      {items.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          onClick={() => handleItem(id)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 12px',
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 8,
+            color: id === 'link' && copied ? BTW.horizon[3] : BTW.textDim,
+            cursor: 'pointer',
+            fontSize: 11,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            fontFamily: 'inherit',
+            width: '100%',
+            textAlign: 'left',
+            transition: 'background .15s, color .15s',
+            whiteSpace: 'nowrap',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07);
+            e.currentTarget.style.color = BTW.textPri;
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = id === 'link' && copied ? BTW.horizon[3] : BTW.textDim;
+          }}
+        >
+          <span style={{ width: 18, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon />
+          </span>
+          {label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+
+  if (nudgePhase !== 'gone') {
+    return (
+      <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', ...style }}>
+        {/* Nudge pill wraps icon + expanding label */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          overflow: 'hidden',
+          borderRadius: 999,
+          border: `1px solid ${withAlpha(BTW.horizon[3], nudgePhase === 'visible' ? 0.5 : 0)}`,
+          background: 'transparent',
+          maxWidth: nudgePhase === 'visible' ? 160 : 34,
+          opacity: nudgePhase === 'fading' ? 0 : 1,
+          transition: 'max-width .55s cubic-bezier(.2,.8,.3,1), opacity .5s ease, border-color .4s ease',
+        }}>
+          {iconButton}
+          <span style={{
+            fontFamily: SERIF,
+            fontStyle: 'italic',
+            fontSize: 13,
+            color: BTW.textDim,
+            whiteSpace: 'nowrap',
+            paddingLeft: 6,
+            paddingRight: 14,
+            pointerEvents: 'none',
+          }}>
+            Share this!
+          </span>
+        </div>
+        {trayPortal}
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: 'relative', display: 'inline-flex', ...style }}>
       {/* Trigger button */}
-      <button
-        ref={triggerRef}
-        onClick={() => open ? setOpen(false) : openTray()}
-        title="Share this star"
-        aria-label="Share this star"
-        aria-expanded={open}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 34,
-          height: 34,
-          borderRadius: '50%',
-          background: open ? withAlpha(BTW.horizon[3], 0.12) : 'transparent',
-          border: `1px solid ${open ? withAlpha(BTW.horizon[3], 0.6) : withAlpha(BTW.textPri, 0.18)}`,
-          color: open ? BTW.horizon[3] : BTW.textDim,
-          cursor: 'pointer',
-          transition: 'color .2s, border-color .2s, background .2s',
-          flexShrink: 0,
-        }}
-        onMouseEnter={e => {
-          if (!open) {
-            e.currentTarget.style.color = BTW.textPri;
-            e.currentTarget.style.borderColor = withAlpha(BTW.horizon[3], 0.6);
-          }
-        }}
-        onMouseLeave={e => {
-          if (!open) {
-            e.currentTarget.style.color = BTW.textDim;
-            e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.18);
-          }
-        }}
-      >
-        <ShareIcon />
-      </button>
-
+      {iconButton}
       {/* Tray is portalled to document.body so it escapes any transformed
           ancestor (StarDetail uses transform:translateX(-50%) which would
           otherwise break position:fixed coordinates). */}
-      {open && trayPos && typeof document !== 'undefined' && createPortal(
-        <div
-          id="btw-share-tray"
-          style={{
-            position: 'fixed',
-            top: trayPos.top,
-            left: trayPos.left,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-            background: 'rgba(14,10,32,0.96)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: `1px solid ${withAlpha(BTW.textPri, 0.13)}`,
-            borderRadius: 14,
-            padding: '8px 6px',
-            zIndex: 9999,
-            width: TRAY_WIDTH,
-            animation: 'shareSlideUp .2s cubic-bezier(.2,.8,.3,1)',
-          }}
-        >
-          <style>{`
-            @keyframes shareSlideUp {
-              from { opacity: 0; transform: translateY(6px); }
-              to   { opacity: 1; transform: translateY(0); }
-            }
-          `}</style>
-          {items.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              onClick={() => handleItem(id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 12px',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: 8,
-                color: id === 'link' && copied ? BTW.horizon[3] : BTW.textDim,
-                cursor: 'pointer',
-                fontSize: 11,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                fontFamily: 'inherit',
-                width: '100%',
-                textAlign: 'left',
-                transition: 'background .15s, color .15s',
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07);
-                e.currentTarget.style.color = BTW.textPri;
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = id === 'link' && copied ? BTW.horizon[3] : BTW.textDim;
-              }}
-            >
-              <span style={{ width: 18, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                <Icon />
-              </span>
-              {label}
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
-
+      {trayPortal}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import CosmosScene, { type ThoughtData } from '@/components/cosmos/CosmosScene';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
-import { BTW, SANS, mulberry32, hashString } from '@/lib/btw';
+import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 
 function starWorldPos(shortcode: string) {
   const rand = mulberry32(hashString(shortcode));
@@ -20,6 +20,104 @@ interface CosmosStarRaw {
   dimensions: { emotionIndex: number; [k: string]: unknown };
 }
 
+// ── Welcome overlay — shown once per browser, dismissed via localStorage ──────
+function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { setVisible(true); }, []);
+
+  function dismiss() {
+    setVisible(false);
+    setTimeout(onDismiss, 300);
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 20,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '0 24px',
+        background: 'rgba(10, 6, 28, 0.72)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        transition: 'opacity 0.3s ease',
+        opacity: visible ? 1 : 0,
+        pointerEvents: visible ? 'auto' : 'none',
+      }}
+    >
+      <div style={{
+        background: 'rgba(30, 24, 64, 0.90)',
+        border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
+        borderRadius: 18,
+        padding: 'clamp(32px, 6vw, 52px) clamp(28px, 6vw, 56px)',
+        maxWidth: 360,
+        width: '100%',
+        textAlign: 'center',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+      }}>
+        {/* Title — all-caps, fills ~80% of the card width */}
+        <div style={{
+          fontFamily: SANS,
+          fontSize: 28,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: BTW.textDim,
+          marginBottom: 6,
+          lineHeight: 1.1,
+          whiteSpace: 'nowrap',
+        }}>
+          The Between
+        </div>
+        <div style={{
+          fontFamily: SERIF,
+          fontStyle: 'italic',
+          fontSize: 'clamp(12px, 1.4vw, 16px)',
+          color: 'rgba(180,148,230,0.62)',
+          letterSpacing: '0.04em',
+          marginBottom: 32,
+          lineHeight: 1.3,
+        }}>
+          (an art project)
+        </div>
+
+        {/* Body lines */}
+        <div style={{
+          fontFamily: SERIF,
+          fontSize: 'clamp(17px, 4vw, 21px)',
+          color: BTW.textPri,
+          lineHeight: 2.0,
+          marginBottom: 36,
+        }}>
+          Answer a question.<br />
+          Your thought becomes a star.<br />
+          Find a star for yours to orbit.
+        </div>
+
+        {/* CTA */}
+        <button
+          onClick={dismiss}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+            color: BTW.horizon[3],
+            padding: '13px 36px',
+            borderRadius: 999,
+            fontFamily: SANS,
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          Begin →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Inner component that uses useSearchParams — must be wrapped in <Suspense>
 // so Next.js can statically pre-render the shell without blocking on params.
 function LandingPageInner() {
@@ -28,6 +126,19 @@ function LandingPageInner() {
   const [questionId, setQuestionId] = useState<string | null>(null);
   const [thoughts, setThoughts] = useState<ThoughtData[]>([]);
   const [pending, setPending] = useState<ValidatedPayload | null>(null);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  // Check localStorage after mount (SSR-safe)
+  useEffect(() => {
+    if (!localStorage.getItem('btw_welcomed')) {
+      setShowWelcome(true);
+    }
+  }, []);
+
+  function dismissWelcome() {
+    localStorage.setItem('btw_welcomed', '1');
+    setShowWelcome(false);
+  }
 
   useEffect(() => {
     if (!questionId || questionId === 'fallback') return;
@@ -68,7 +179,7 @@ function LandingPageInner() {
           }}>
             The Between
           </div>
-          <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: 640 }}>
+          <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: 'min(820px, 92vw)' }}>
             <QuestionCycler
               onQuestionChange={setQuestionId}
               onValidated={setPending}
@@ -77,6 +188,8 @@ function LandingPageInner() {
           </div>
         </div>
       </div>
+
+      {showWelcome && <WelcomeOverlay onDismiss={dismissWelcome} />}
 
       {pending && (
         <UniqueOverlay

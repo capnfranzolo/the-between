@@ -1,18 +1,48 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { createSpirograph, type SpiroDimensions } from '@/lib/spirograph/renderer';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MAX_REASON_LENGTH, MIN_REASON_LENGTH } from '@/lib/constants';
+
+interface UserStar {
+  text: string;
+  dimensions: SpiroDimensions;
+}
 
 interface ConnectionDrawerProps {
   reason: string;
   onChange: (val: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
+  userStar?: UserStar | null;
 }
 
-export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit }: ConnectionDrawerProps) {
+// Mini animated spirograph — renders at 600px (full geometry), CSS-scales to `size`
+const SPIRO_RENDER_SIZE = 600;
+
+function StarMini({ dims, size }: { dims: SpiroDimensions; size: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const inst = createSpirograph(canvas, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
+    let t = 0; let raf: number;
+    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
+    tick();
+    return () => { cancelAnimationFrame(raf); inst.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
+    </div>
+  );
+}
+
+export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit, userStar }: ConnectionDrawerProps) {
   const ready = reason.trim().length >= MIN_REASON_LENGTH;
-  // Extra bottom offset so the drawer sits above the software keyboard
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -20,13 +50,10 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-
     const update = () => {
-      // How much the keyboard pushes the viewport up from the bottom of the layout viewport
       const pushed = window.innerHeight - vv.height - vv.offsetTop;
       setKeyboardOffset(Math.max(0, pushed));
     };
-
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
@@ -43,7 +70,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
         position: 'absolute',
         left: '50%',
         bottom: keyboardOffset > 0
-          ? keyboardOffset + 8   // sit just above keyboard
+          ? keyboardOffset + 8
           : 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
         transform: 'translateX(-50%)',
         width: 'min(640px, 94%)',
@@ -64,7 +91,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
         Why do these belong together?
       </div>
 
-      {/* Textarea — ≥16px prevents iOS auto-zoom; grows up to ~4 lines */}
+      {/* Textarea */}
       <textarea
         ref={inputRef}
         value={reason}
@@ -86,7 +113,6 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
           outline: 'none',
           boxSizing: 'border-box',
           resize: 'none',
-          // Minimum 44px touch target height
           minHeight: 52,
         }}
       />
@@ -95,7 +121,37 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
         {reason.length}/{MAX_REASON_LENGTH}
       </div>
 
-      {/* Full-width primary CTA, then cancel below */}
+      {/* User's own star context — shown above the CTA */}
+      {userStar && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginTop: 12,
+          padding: '10px 14px',
+          background: 'rgba(240,232,224,0.04)',
+          border: `1px solid ${withAlpha(BTW.textPri, 0.10)}`,
+          borderRadius: 12,
+        }}>
+          <StarMini dims={userStar.dimensions} size={52} />
+          <div style={{
+            flex: 1,
+            fontFamily: SERIF,
+            fontStyle: 'italic',
+            fontSize: 17,
+            color: BTW.textDim,
+            lineHeight: 1.5,
+            overflow: 'hidden',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+          }}>
+            {userStar.text}
+          </div>
+        </div>
+      )}
+
+      {/* CTA */}
       <button
         onClick={onSubmit}
         disabled={!ready}
@@ -105,7 +161,6 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
           background: ready ? withAlpha(BTW.horizon[3], 0.22) : 'rgba(240,232,224,0.04)',
           border: `1px solid ${withAlpha(BTW.horizon[3], ready ? 0.7 : 0.2)}`,
           color: ready ? BTW.horizon[3] : BTW.textDim,
-          // 48px height — comfortable thumb tap target
           padding: '14px 20px',
           minHeight: 48,
           borderRadius: 999,
@@ -115,7 +170,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit 
           fontFamily: SANS, transition: 'all .25s',
         }}
       >
-        Bind them
+        Connect to this star
       </button>
 
       <button

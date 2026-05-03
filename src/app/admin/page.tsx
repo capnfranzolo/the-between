@@ -74,7 +74,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 
 const S = {
   page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
-  topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 16, position: 'sticky' as const, top: 0, zIndex: 100 },
+  topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, position: 'sticky' as const, top: 0, zIndex: 100, flexWrap: 'wrap' as const },
   tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
   btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
     padding: '5px 12px', border: `1px solid ${variant === 'danger' ? '#cc4444' : '#444'}`,
@@ -82,7 +82,7 @@ const S = {
     background: variant === 'primary' ? '#1a472a' : variant === 'danger' ? '#2a0000' : 'transparent',
     color: variant === 'danger' ? '#cc4444' : '#ccc',
   }),
-  iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, padding: '2px 6px', color: '#888' },
+  iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 8px', color: '#888' },
   input:   { background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '6px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none' },
   textarea:{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '8px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none', resize: 'vertical' as const, width: '100%', boxSizing: 'border-box' as const },
   row:     { borderBottom: '1px solid #1a1a1a', display: 'grid' as const, alignItems: 'center', padding: '6px 8px', gap: 8 },
@@ -198,7 +198,8 @@ function StarDetailPanel({
 
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
+      <style>{`@media(max-width:700px){.btw-detail-grid{grid-template-columns:1fr!important}}`}</style>
+      <div className="btw-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Answer</div>
@@ -290,7 +291,8 @@ function ConnectionDetailPanel({
 
   return (
     <div style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '16px 20px', marginBottom: 2 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
+      <style>{`@media(max-width:700px){.btw-conn-grid{grid-template-columns:1fr!important}}`}</style>
+      <div className="btw-conn-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
         {([conn.from_star, conn.to_star] as const).map((star, i) => star && (
           <div key={i}>
             <div style={{ color: '#555', fontSize: 11, marginBottom: 4 }}>{i === 0 ? '↑ From (orbiter)' : '↓ To (anchor)'}</div>
@@ -325,11 +327,95 @@ function ConnectionDetailPanel({
   );
 }
 
+// ─── ConnectModal ─────────────────────────────────────────────────────────────
+
+function ConnectModal({
+  from, to, onClose, onCreated,
+}: {
+  from: AdminStar;
+  to: AdminStar;
+  onClose: () => void;
+  onCreated: (msg: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSaving(true);
+    setErr(null);
+    const res = await fetch('/api/admin/connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromStarId: from.id, toStarId: to.id, reason }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (data.ok) {
+      onCreated(data.hadExisting
+        ? `Connected — note: ${from.shortcode} already had an active connection`
+        : `${from.shortcode} now orbits ${to.shortcode}`);
+      onClose();
+    } else {
+      setErr(data.error ?? 'Failed');
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        background: '#141414', border: '1px solid #333', borderRadius: 8,
+        padding: 24, width: '100%', maxWidth: 480,
+      }}>
+        <div style={{ fontSize: 12, color: '#555', letterSpacing: '0.08em', marginBottom: 16 }}>CREATE CONNECTION</div>
+
+        {/* Visual summary */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+          <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 12px' }}>
+            <span style={{ ...S.mono, color: '#6af', marginRight: 8 }}>{from.shortcode}</span>
+            <span style={{ color: '#aaa', fontSize: 12 }}>{trunc(from.answer, 80)}</span>
+          </div>
+          <div style={{ textAlign: 'center', color: '#555', fontSize: 12, letterSpacing: '0.06em' }}>will orbit ↓</div>
+          <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 5, padding: '8px 12px' }}>
+            <span style={{ ...S.mono, color: '#6af', marginRight: 8 }}>{to.shortcode}</span>
+            <span style={{ color: '#aaa', fontSize: 12 }}>{trunc(to.answer, 80)}</span>
+          </div>
+        </div>
+
+        <div style={{ color: '#555', fontSize: 11, marginBottom: 6 }}>Reason <span style={{ color: '#444' }}>(optional)</span></div>
+        <textarea
+          autoFocus
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) submit(); if (e.key === 'Escape') onClose(); }}
+          rows={3}
+          placeholder="Why does this thought orbit that one?"
+          style={{ ...S.textarea, marginBottom: 12 }}
+        />
+        {err && <div style={{ color: '#ff6666', fontSize: 12, marginBottom: 8 }}>⚠ {err}</div>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={S.btn()}>Cancel</button>
+          <button onClick={submit} disabled={saving} style={S.btn('primary')}>
+            {saving ? 'Connecting…' : 'Connect →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── StarsTab ────────────────────────────────────────────────────────────────
 
 function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [stars, setStars] = useState<AdminStar[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('approved');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -339,6 +425,12 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadingRef = useRef(false); // guard against concurrent fetches
+
+  // Drag-to-connect state
+  const [draggedStar, setDraggedStar] = useState<AdminStar | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [connectModal, setConnectModal] = useState<{ from: AdminStar; to: AdminStar } | null>(null);
+  const [connectToast, setConnectToast] = useState<string | null>(null);
 
   const load = useCallback(async (pg = 0, reset = false) => {
     // Prevent duplicate concurrent fetches
@@ -458,8 +550,54 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
   const allChecked = stars.length > 0 && stars.every(s => selected.has(s.id));
 
+  function showToast(msg: string) {
+    setConnectToast(msg);
+    setTimeout(() => setConnectToast(null), 4000);
+  }
+
+  // Drag handlers — build the from→to pair, open modal on drop
+  function onDragStart(e: React.DragEvent, star: AdminStar) {
+    setDraggedStar(star);
+    e.dataTransfer.effectAllowed = 'link';
+    // Ghost label
+    const ghost = document.createElement('div');
+    ghost.textContent = star.shortcode;
+    ghost.style.cssText = 'position:absolute;top:-999px;left:-999px;background:#1a472a;color:#ccc;padding:4px 10px;border-radius:4px;font-family:monospace;font-size:12px;pointer-events:none';
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    setTimeout(() => document.body.removeChild(ghost), 0);
+  }
+
+  function onDragOver(e: React.DragEvent, targetId: string) {
+    if (!draggedStar || draggedStar.id === targetId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'link';
+    setDragOverId(targetId);
+  }
+
+  function onDrop(e: React.DragEvent, target: AdminStar) {
+    e.preventDefault();
+    setDragOverId(null);
+    if (!draggedStar || draggedStar.id === target.id) return;
+    setConnectModal({ from: draggedStar, to: target });
+    setDraggedStar(null);
+  }
+
   return (
     <div>
+      {connectModal && (
+        <ConnectModal
+          from={connectModal.from}
+          to={connectModal.to}
+          onClose={() => setConnectModal(null)}
+          onCreated={showToast}
+        />
+      )}
+      {connectToast && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a472a', color: '#aaffcc', padding: '10px 20px', borderRadius: 6, fontSize: 13, boxShadow: '0 4px 20px rgba(0,0,0,0.5)', pointerEvents: 'none' }}>
+          ✓ {connectToast}
+        </div>
+      )}
       {error && (
         <div style={{ background: '#2a0000', color: '#ff6666', padding: '8px 16px', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           ⚠ {error}
@@ -467,11 +605,12 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
+      <div className="btw-admin-filters" style={{ display: 'flex', gap: 8, padding: '10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
         ))}
-        <input placeholder="Search answer or byline…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 240 }} />
+        <span style={{ color: '#444', fontSize: 11, marginLeft: 8 }}>drag a row onto another to connect</span>
+        <input className="btw-admin-search" placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }} style={{ ...S.input, marginLeft: 'auto', width: 200 }} />
       </div>
 
       {selected.size > 0 && (
@@ -494,17 +633,31 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
         <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(stars.map(s => s.id)) : new Set())} />
         <span>status</span><span>code</span><span>answer</span><span>byline</span><span>question</span><span>ips</span><span>age</span><span>actions</span>
       </div>
 
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
 
-      {stars.map(star => (
-        <div key={star.id}>
+      {stars.map(star => {
+        const isDropTarget = dragOverId === star.id && draggedStar?.id !== star.id;
+        const isDragging = draggedStar?.id === star.id;
+        const dropStyle: React.CSSProperties = isDropTarget
+          ? { outline: '2px solid #4a9', outlineOffset: -2, background: '#0d2a1a' }
+          : {};
+        return (
+        <div key={star.id} style={{ borderBottom: '1px solid #1a1a1a', opacity: isDragging ? 0.45 : 1, transition: 'opacity .15s' }}>
+          {/* Desktop row */}
           <div
-            style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent' }}
+            className="btw-admin-desktop"
+            draggable
+            onDragStart={e => onDragStart(e, star)}
+            onDragEnd={() => { setDraggedStar(null); setDragOverId(null); }}
+            onDragOver={e => onDragOver(e, star.id)}
+            onDragLeave={() => setDragOverId(null)}
+            onDrop={e => onDrop(e, star)}
+            style={{ ...S.row, ...dropStyle, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'grab', background: expanded === star.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === star.id ? null : star.id)}
           >
             <input
@@ -535,6 +688,37 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
               <button title="delete" onClick={() => quickDelete(star.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
             </span>
           </div>
+          {/* Mobile card */}
+          <div
+            className="btw-admin-card"
+            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === star.id ? '#181818' : 'transparent', ...dropStyle }}
+            onClick={() => setExpanded(e => e === star.id ? null : star.id)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <input
+                type="checkbox"
+                checked={selected.has(star.id)}
+                onClick={e => e.stopPropagation()}
+                onChange={e => { const s = new Set(selected); e.target.checked ? s.add(star.id) : s.delete(star.id); setSelected(s); }}
+              />
+              <StatusBadge status={star.status} />
+              <a
+                href={`/cosmos/${star.question_id}?star=${star.shortcode}`}
+                target="_blank" rel="noreferrer"
+                style={{ ...S.mono, color: '#6af', textDecoration: 'none', fontSize: 12 }}
+                onClick={e => e.stopPropagation()}
+              >{star.shortcode}</a>
+              <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(star.created_at)}</span>
+            </div>
+            <div style={{ color: '#ddd', fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{trunc(star.answer, 120)}</div>
+            {star.unique_fact && <div style={{ color: '#777', fontSize: 12, marginBottom: 6 }}>{trunc(star.unique_fact, 80)}</div>}
+            <div style={{ display: 'flex', gap: 0 }} onClick={e => e.stopPropagation()}>
+              <button title="approve" onClick={() => quickAction(star.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button title="reject" onClick={() => quickAction(star.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <a title="preview" href={`/cosmos/${star.question_id}?star=${star.shortcode}`} target="_blank" rel="noreferrer" style={{ ...S.iconBtn, textDecoration: 'none' }}>👁</a>
+              <button title="delete" onClick={() => quickDelete(star.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </div>
+          </div>
           {expanded === star.id && (
             <StarDetailPanel
               star={star}
@@ -544,7 +728,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
             />
           )}
         </div>
-      ))}
+      ); })}
 
       {!loading && stars.length === 0 && (
         <div style={{ padding: 32, color: '#444', textAlign: 'center' }}>No stars found.</div>
@@ -565,7 +749,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
 function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
   const [connections, setConnections] = useState<AdminConnection[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('approved');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -649,7 +833,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', borderBottom: '1px solid #222', background: '#0d0d0d', color: '#555', fontSize: 11 }}>
         <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(connections.map(c => c.id)) : new Set())} />
         <span>status</span><span>from</span><span>to</span><span>reason</span><span>question</span><span>age</span><span>actions</span>
       </div>
@@ -657,9 +841,11 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
 
       {connections.map(conn => (
-        <div key={conn.id}>
+        <div key={conn.id} style={{ borderBottom: '1px solid #1a1a1a' }}>
+          {/* Desktop row */}
           <div
-            style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
+            className="btw-admin-desktop"
+            style={{ ...S.row, gridTemplateColumns: '24px 72px 1fr 1fr 200px 60px 70px 80px', borderBottom: 'none', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
           >
             <input
@@ -686,6 +872,30 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
               <button onClick={() => quickDelete(conn.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
             </span>
           </div>
+          {/* Mobile card */}
+          <div
+            className="btw-admin-card"
+            style={{ padding: '10px 12px', cursor: 'pointer', background: expanded === conn.id ? '#181818' : 'transparent' }}
+            onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <input type="checkbox" checked={selected.has(conn.id)} onClick={e => e.stopPropagation()} onChange={e => { const s = new Set(selected); e.target.checked ? s.add(conn.id) : s.delete(conn.id); setSelected(s); }} />
+              <StatusBadge status={conn.status} />
+              <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(conn.created_at)}</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 3 }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.from_star?.shortcode}</span> {trunc(conn.from_star?.answer ?? '', 60)}
+            </div>
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 4 }}>
+              <span style={{ ...S.mono, color: '#6af' }}>{conn.to_star?.shortcode}</span> {trunc(conn.to_star?.answer ?? '', 60)}
+            </div>
+            {conn.reason && <div style={{ color: '#888', fontStyle: 'italic', fontSize: 12, marginBottom: 6 }}>"{trunc(conn.reason, 80)}"</div>}
+            <div style={{ display: 'flex', gap: 0 }} onClick={e => e.stopPropagation()}>
+              <button onClick={() => quickAction(conn.id, 'approved')} style={S.iconBtn}>✓</button>
+              <button onClick={() => quickAction(conn.id, 'rejected')} style={S.iconBtn}>✗</button>
+              <button onClick={() => quickDelete(conn.id)} style={{ ...S.iconBtn, color: '#844' }}>🗑</button>
+            </div>
+          </div>
           {expanded === conn.id && (
             <ConnectionDetailPanel
               conn={conn}
@@ -706,6 +916,275 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
           <button onClick={() => load(page + 1)} style={S.btn()}>Load more</button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── QuestionsTab ────────────────────────────────────────────────────────────
+
+interface AdminQuestion {
+  id: string;
+  slug: string;
+  text: string;
+  active: boolean;
+  display_order: number;
+  created_at: string;
+  stars: { total: number; approved: number; pending: number; rejected: number };
+  connections: { total: number; approved: number; pending: number };
+}
+
+function QuestionsTab() {
+  const [questions, setQuestions] = useState<AdminQuestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Edit state per question
+  const [editText, setEditText] = useState('');
+  const [editSlug, setEditSlug] = useState('');
+  const [editActive, setEditActive] = useState(true);
+  const [editSaving, setEditSaving] = useState(false);
+
+  function load() {
+    setLoading(true);
+    fetch('/api/admin/questions')
+      .then(r => r.json())
+      .then(d => { setQuestions(d.questions ?? []); setLoading(false); })
+      .catch(() => { setError('Failed to load questions'); setLoading(false); });
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function openEdit(q: AdminQuestion) {
+    setExpanded(q.id);
+    setEditText(q.text);
+    setEditSlug(q.slug);
+    setEditActive(q.active);
+    setEditSaving(false);
+  }
+
+  async function saveEdit(id: string) {
+    setEditSaving(true);
+    const res = await fetch(`/api/admin/questions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: editText, slug: editSlug, active: editActive }),
+    });
+    const d = await res.json();
+    setEditSaving(false);
+    if (d.ok) {
+      setQuestions(prev => prev.map(q => q.id === id ? { ...q, ...d.question } : q));
+      setExpanded(null);
+    } else {
+      setError(d.error ?? 'Save failed');
+    }
+  }
+
+  async function doDelete(id: string) {
+    setDeleting(true);
+    const res = await fetch(`/api/admin/questions/${id}`, { method: 'DELETE' });
+    const d = await res.json();
+    setDeleting(false);
+    if (d.ok) {
+      setQuestions(prev => prev.filter(q => q.id !== id));
+      setDeleteConfirm(null);
+      setExpanded(null);
+    } else {
+      setError(d.error ?? 'Delete failed');
+    }
+  }
+
+  async function createQuestion() {
+    if (!newText.trim() || !newSlug.trim()) return;
+    setSaving(true);
+    const res = await fetch('/api/admin/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: newText, slug: newSlug }),
+    });
+    const d = await res.json();
+    setSaving(false);
+    if (d.ok) {
+      setNewText(''); setNewSlug('');
+      setCreating(false);
+      load(); // reload with fresh stats
+    } else {
+      setError(d.error ?? 'Create failed');
+    }
+  }
+
+  const totalStars = questions.reduce((s, q) => s + q.stars.total, 0);
+  const totalConns = questions.reduce((s, q) => s + q.connections.total, 0);
+  const approvedStars = questions.reduce((s, q) => s + q.stars.approved, 0);
+  const pendingStars = questions.reduce((s, q) => s + q.stars.pending, 0);
+
+  return (
+    <div style={{ padding: '16px 20px', maxWidth: 900 }}>
+      {error && (
+        <div style={{ background: '#2a0000', color: '#ff6666', padding: '8px 16px', borderRadius: 4, marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+          ⚠ {error}
+          <button onClick={() => setError(null)} style={S.iconBtn}>×</button>
+        </div>
+      )}
+
+      {/* Global stats banner */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 24 }}>
+        {[
+          { label: 'Questions', val: questions.length, color: '#9ba8c0' },
+          { label: 'Total Stars', val: totalStars, color: '#aaa' },
+          { label: 'Approved Stars', val: approvedStars, color: '#00cc44' },
+          { label: 'Pending Stars', val: pendingStars, color: '#ffaa00' },
+          { label: 'Total Connections', val: totalConns, color: '#6af' },
+        ].map(({ label, val, color }) => (
+          <div key={label} style={{ background: '#111', border: '1px solid #222', borderRadius: 6, padding: '12px 16px' }}>
+            <div style={{ fontSize: 11, color: '#555', letterSpacing: '0.06em', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color, fontFamily: 'monospace' }}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Create new question */}
+      <div style={{ marginBottom: 20 }}>
+        {!creating ? (
+          <button onClick={() => setCreating(true)} style={{ ...S.btn('primary'), padding: '8px 16px' }}>
+            + New question
+          </button>
+        ) : (
+          <div style={{ background: '#111', border: '1px solid #2a472a', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ color: '#6a9', fontSize: 11, letterSpacing: '0.08em', marginBottom: 12 }}>NEW QUESTION</div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Question text</div>
+              <textarea
+                autoFocus
+                value={newText}
+                onChange={e => setNewText(e.target.value)}
+                rows={3}
+                placeholder="What do you know is true but can't prove?"
+                style={{ ...S.textarea }}
+              />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Slug (URL-safe)</div>
+              <input
+                value={newSlug}
+                onChange={e => setNewSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
+                placeholder="what-you-know-is-true"
+                style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={createQuestion} disabled={saving || !newText.trim() || !newSlug.trim()} style={S.btn('primary')}>
+                {saving ? 'Creating…' : 'Create question'}
+              </button>
+              <button onClick={() => { setCreating(false); setNewText(''); setNewSlug(''); }} style={S.btn()}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Question list */}
+      {loading && <div style={{ color: '#555', padding: 16 }}>Loading…</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {questions.map(q => (
+          <div key={q.id} style={{ background: '#111', border: `1px solid ${expanded === q.id ? '#334' : '#1e1e1e'}`, borderRadius: 8 }}>
+            {/* Row header */}
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer' }}
+              onClick={() => expanded === q.id ? setExpanded(null) : openEdit(q)}
+            >
+              <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: q.active ? '#002200' : '#220000', color: q.active ? '#00cc44' : '#cc4444', fontFamily: 'monospace' }}>
+                {q.active ? 'live' : 'off'}
+              </span>
+              <span style={{ color: '#ddd', flex: 1, fontSize: 13, lineHeight: 1.4 }}>{q.text}</span>
+              <span style={{ ...S.mono, color: '#555', fontSize: 11 }}>{q.slug}</span>
+              {/* Per-question mini stats */}
+              <div style={{ display: 'flex', gap: 10, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap' as const }}>
+                <span style={{ color: '#aaa' }}>{q.stars.approved}⭐</span>
+                <span style={{ color: q.stars.pending > 0 ? '#ffaa00' : '#555' }}>{q.stars.pending}↑</span>
+                <span style={{ color: '#6af' }}>{q.connections.approved}⟂</span>
+              </div>
+              <span style={{ color: '#555', fontSize: 11 }}>{expanded === q.id ? '▲' : '▼'}</span>
+            </div>
+
+            {/* Expanded edit panel */}
+            {expanded === q.id && (
+              <div style={{ padding: '0 16px 16px', borderTop: '1px solid #1e1e1e' }}>
+                {/* Detail stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, auto)', gap: '6px 18px', padding: '12px 0', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>
+                  <span>Total stars:</span><span style={{ color: '#aaa' }}>{q.stars.total}</span>
+                  <span>Approved:</span><span style={{ color: '#00cc44' }}>{q.stars.approved}</span>
+                  <span>Pending:</span><span style={{ color: '#ffaa00' }}>{q.stars.pending}</span>
+                  <span>Rejected:</span><span style={{ color: '#cc4444' }}>{q.stars.rejected}</span>
+                  <span>Connections:</span><span style={{ color: '#6af' }}>{q.connections.total}</span>
+                  <span>Pending conns:</span><span style={{ color: '#ffaa00' }}>{q.connections.pending}</span>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Question text</div>
+                  <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={3} style={{ ...S.textarea }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 14 }}>
+                  <div>
+                    <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Slug</div>
+                    <input
+                      value={editSlug}
+                      onChange={e => setEditSlug(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))}
+                      style={{ ...S.input, width: '100%', boxSizing: 'border-box' as const }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ color: '#666', fontSize: 11, marginBottom: 4 }}>Active</div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', paddingTop: 8 }}>
+                      <input type="checkbox" checked={editActive} onChange={e => setEditActive(e.target.checked)} />
+                      <span style={{ color: '#aaa', fontSize: 12 }}>{editActive ? 'Live' : 'Hidden'}</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+                  <button onClick={() => saveEdit(q.id)} disabled={editSaving} style={S.btn('primary')}>
+                    {editSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                  <a
+                    href={`/cosmos/${q.id}`}
+                    target="_blank" rel="noreferrer"
+                    style={{ ...S.btn(), textDecoration: 'none', display: 'inline-block' }}
+                  >
+                    👁 Preview cosmos
+                  </a>
+                  <button onClick={() => setExpanded(null)} style={S.btn()}>Cancel</button>
+
+                  {/* Delete with confirmation */}
+                  {deleteConfirm !== q.id ? (
+                    <button
+                      onClick={() => setDeleteConfirm(q.id)}
+                      style={{ ...S.btn('danger'), marginLeft: 'auto' }}
+                    >
+                      🗑 Delete question
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 'auto' }}>
+                      <span style={{ color: '#cc4444', fontSize: 12 }}>
+                        Delete &ldquo;{q.slug}&rdquo; + {q.stars.total} stars + {q.connections.total} connections?
+                      </span>
+                      <button onClick={() => doDelete(q.id)} disabled={deleting} style={S.btn('danger')}>
+                        {deleting ? 'Deleting…' : 'Confirm delete'}
+                      </button>
+                      <button onClick={() => setDeleteConfirm(null)} style={S.btn()}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -778,6 +1257,23 @@ function SettingsTab() {
   );
 }
 
+// ─── Mobile CSS injection ────────────────────────────────────────────────────
+// Injected once; targets .btw-admin-* classes used in the star/connection rows.
+const ADMIN_MOBILE_CSS = `
+  .btw-admin-desktop { display: grid; }
+  .btw-admin-card    { display: none; }
+  @media (max-width: 700px) {
+    .btw-admin-desktop { display: none !important; }
+    .btw-admin-card    { display: block; }
+    .btw-admin-filters { flex-wrap: wrap; }
+    .btw-admin-search  { width: 100% !important; margin-left: 0 !important; }
+  }
+`;
+
+function AdminStyles() {
+  return <style>{ADMIN_MOBILE_CSS}</style>;
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -787,7 +1283,7 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState('');
   const [checking, setChecking] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [tab, setTab] = useState<'stars' | 'connections' | 'settings'>('stars');
+  const [tab, setTab] = useState<'stars' | 'connections' | 'questions' | 'settings'>('stars');
   const [questionFilter, setQuestionFilter] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
   const prevPending = useRef(0);
@@ -887,22 +1383,22 @@ export default function AdminPage() {
 
   return (
     <div style={S.page}>
+      <AdminStyles />
       <div style={S.topbar}>
-        <span style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.08em', color: '#666', marginRight: 8, whiteSpace: 'nowrap' as const }}>THE BETWEEN — ADMIN</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.08em', color: '#666', whiteSpace: 'nowrap' as const }}>ADMIN</span>
         {stats && (
-          <span style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap' as const }}>
+          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' as const }}>
             <span style={{ color: pendingPulse ? '#ffaa00' : '#888', fontWeight: pendingPulse ? 700 : 400, transition: 'color .3s' }}>
-              {stats.pendingStars} pending
+              {stats.pendingStars}↑
             </span>
-            {' · '}{stats.approvedStars} approved · {stats.rejectedStars} rejected
-            {' · '}{stats.totalConnections} connections ({stats.pendingConnections} pending)
+            {' '}{stats.approvedStars}✓ {stats.rejectedStars}✗
           </span>
         )}
-        <select value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ ...S.input, marginLeft: 'auto' }}>
-          <option value="">All questions</option>
+        <select value={questionFilter} onChange={e => setQuestionFilter(e.target.value)} style={{ ...S.input, marginLeft: 'auto', maxWidth: 160 }}>
+          <option value="">All Qs</option>
           {questions.map(q => <option key={q.id} value={q.id}>{q.slug}</option>)}
         </select>
-        <button onClick={logout} style={S.btn()}>Logout</button>
+        <button onClick={logout} style={S.btn()}>Out</button>
       </div>
 
       <div style={{ display: 'flex', gap: 4, padding: '8px 16px', borderBottom: '1px solid #1a1a1a', background: '#0d0d0d' }}>
@@ -912,11 +1408,13 @@ export default function AdminPage() {
         <button onClick={() => setTab('connections')} style={S.tab(tab === 'connections')}>
           Connections{stats && stats.pendingConnections > 0 && tab !== 'connections' && <span style={{ color: '#ffaa00', marginLeft: 4 }}>({stats.pendingConnections})</span>}
         </button>
+        <button onClick={() => setTab('questions')} style={S.tab(tab === 'questions')}>Questions</button>
         <button onClick={() => setTab('settings')} style={S.tab(tab === 'settings')}>Settings</button>
       </div>
 
       {tab === 'stars' && <StarsTab questionFilter={questionFilter} />}
       {tab === 'connections' && <ConnectionsTab questionFilter={questionFilter} />}
+      {tab === 'questions' && <QuestionsTab />}
       {tab === 'settings' && <SettingsTab />}
     </div>
   );

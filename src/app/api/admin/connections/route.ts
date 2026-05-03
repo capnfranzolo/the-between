@@ -5,6 +5,58 @@ function isAuthed(req: NextRequest) {
   return req.cookies.get('admin_session')?.value === '1';
 }
 
+export async function POST(req: NextRequest) {
+  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { fromStarId, toStarId, reason } = await req.json();
+  if (!fromStarId || !toStarId) {
+    return Response.json({ error: 'fromStarId and toStarId required' }, { status: 400 });
+  }
+  if (fromStarId === toStarId) {
+    return Response.json({ error: 'Cannot connect a star to itself' }, { status: 400 });
+  }
+
+  // Fetch both stars to get question_id and validate existence
+  const { data: stars, error: starsErr } = await supabaseServer
+    .from('stars')
+    .select('id, shortcode, question_id')
+    .in('id', [fromStarId, toStarId]);
+
+  if (starsErr || !stars || stars.length < 2) {
+    return Response.json({ error: 'One or both stars not found' }, { status: 404 });
+  }
+
+  const fromStar = stars.find(s => s.id === fromStarId)!;
+
+  // Warn if the from-star already has an active outgoing connection
+  const { data: existing } = await supabaseServer
+    .from('connections')
+    .select('id')
+    .eq('from_star_id', fromStarId)
+    .neq('status', 'rejected')
+    .maybeSingle();
+
+  const { data: conn, error } = await supabaseServer
+    .from('connections')
+    .insert({
+      question_id: fromStar.question_id,
+      from_star_id: fromStarId,
+      to_star_id: toStarId,
+      reason: (reason ?? '').trim() || '(admin connection)',
+      ip_hash: 'admin',
+      status: 'approved',
+      approved_at: new Date().toISOString(),
+    })
+    .select('id, from_star_id, to_star_id, reason, status, created_at, question_id')
+    .single();
+
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+
+  return Response.json({ ok: true, connection: conn, hadExisting: !!existing });
+}
+
 export async function GET(req: NextRequest) {
   if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 

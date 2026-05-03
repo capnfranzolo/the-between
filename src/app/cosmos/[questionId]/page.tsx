@@ -1,9 +1,11 @@
 'use client';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
+import { createSpirograph } from '@/lib/spirograph/renderer';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
+import ControlsHint from '@/components/ControlsHint';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import { type CosmosBond } from '@/components/BondCurves';
@@ -27,6 +29,231 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 
+// ── Shared inline star canvas with circular clip + hover smoke ────────────────
+function ensureSmokeCSSInline() {
+  const SMOKE_STYLE_ID = 'btw-smoke-css';
+  if (typeof document === 'undefined' || document.getElementById(SMOKE_STYLE_ID)) return;
+  const s = document.createElement('style');
+  s.id = SMOKE_STYLE_ID;
+  s.textContent = `
+    @keyframes btwSmokeRise {
+      0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
+      30%  { opacity:0.85; }
+      100% { opacity:0.85; transform: translate(-50%,-100%) translateY(-24px); }
+    }
+    @keyframes btwSmokeSplit {
+      0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
+      100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+// Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas to render
+// the full pattern. We render at SPIRO_RENDER_SIZE then CSS-scale down to `size`.
+const SPIRO_RENDER_SIZE = 600;
+
+function showSmokeFromEl(
+  wrapEl: HTMLElement,
+  text: string,
+): { timers: ReturnType<typeof setTimeout>[]; bubble: HTMLDivElement } {
+  ensureSmokeCSSInline();
+  const bubble = document.createElement('div');
+  // Use setProperty so inherited values (text-transform, font-*) are overridden
+  const props: [string, string][] = [
+    ['position', 'absolute'],
+    ['left', '50%'],
+    ['bottom', 'calc(100% + 6px)'],
+    ['text-align', 'center'],
+    // Explicit width so the bubble isn't constrained to the 40px containing block
+    ['width', '200px'],
+    ['max-width', '220px'],
+    ['pointer-events', 'none'],
+    ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
+    ['font-style', 'italic'],
+    ['font-weight', '300'],
+    ['font-size', '17px'],
+    ['line-height', '1.65'],
+    ['color', 'rgba(240,232,224,0.82)'],
+    ['text-shadow', '0 0 18px rgba(240,200,150,0.22)'],
+    ['letter-spacing', '0.02em'],
+    ['text-transform', 'none'],
+    ['opacity', '0'],
+    ['animation', 'btwSmokeRise 2s ease-out forwards'],
+    ['z-index', '99'],
+  ];
+  props.forEach(([p, v]) => bubble.style.setProperty(p, v));
+
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const spans: HTMLSpanElement[] = [];
+  words.forEach(w => {
+    const span = document.createElement('span');
+    span.textContent = w + ' ';
+    span.style.setProperty('display', 'inline');
+    bubble.appendChild(span);
+    spans.push(span);
+  });
+
+  wrapEl.appendChild(bubble);
+
+  const t1 = setTimeout(() => {
+    if (!wrapEl.contains(bubble)) return;
+    bubble.style.setProperty('animation', 'none');
+    bubble.style.setProperty('opacity', '0.85');
+    bubble.style.setProperty('transform', 'translate(-50%, -100%) translateY(-24px)');
+    spans.forEach((span, i) => {
+      const ang  = Math.random() * Math.PI * 2;
+      const dist = 35 + Math.random() * 55;
+      span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+      span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 35).toFixed(0)}px`);
+      span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 30 + Math.random() * 40).toFixed(0)}ms forwards`);
+    });
+  }, 1300);
+  const t2 = setTimeout(() => { bubble.remove(); }, 2600);
+
+  return { timers: [t1, t2], bubble };
+}
+
+function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef   = useRef<HTMLDivElement>(null);
+  const smokeTimers  = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const smokeBubble  = useRef<HTMLDivElement | null>(null);
+  const dims = star.dimensions ?? DIM_DEFAULTS;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // Render at full geometry size, then CSS-scale down to `size`
+    const inst = createSpirograph(canvas, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
+    let t = 0; let raf: number;
+    const tick = () => { t += 0.016; inst.renderStatic(t); raf = requestAnimationFrame(tick); };
+    tick();
+    return () => { cancelAnimationFrame(raf); inst.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [star.id]);
+
+  function clearSmoke() {
+    smokeTimers.current.forEach(clearTimeout);
+    smokeTimers.current = [];
+    smokeBubble.current?.remove();
+    smokeBubble.current = null;
+  }
+
+  function showSmoke() {
+    if (smokeBubble.current || !star.text?.trim() || !wrapRef.current) return;
+    const { timers, bubble } = showSmokeFromEl(wrapRef.current, star.text);
+    smokeTimers.current = timers;
+    smokeBubble.current = bubble;
+  }
+
+  useEffect(() => () => clearSmoke(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-block', cursor: 'pointer', flexShrink: 0 }}
+      onMouseEnter={showSmoke}
+      onMouseLeave={clearSmoke}
+    >
+      <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden' }}>
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
+      </div>
+    </div>
+  );
+}
+
+
+// ── Reusable ghost prompt — DOM-driven so animation state never resets ─────────
+// Renders a centered fixed container; injects bubble via DOM to avoid
+// React re-render fighting with CSS animation state.
+function GhostPrompt({ text, onDone }: { text: string; onDone: () => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    ensureSmokeCSSInline();
+    // Vertical-only rise (no horizontal translate — container already centers)
+    const STYLE_ID = 'btw-ghost-rise-css';
+    if (!document.getElementById(STYLE_ID)) {
+      const s = document.createElement('style');
+      s.id = STYLE_ID;
+      s.textContent = `
+        @keyframes btwGhostRise {
+          0%   { opacity:0;    transform:translateY(0); }
+          30%  { opacity:0.85; }
+          100% { opacity:0.85; transform:translateY(-24px); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
+    const bubble = document.createElement('div');
+    const props: [string, string][] = [
+      ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
+      ['font-style', 'italic'],
+      ['font-weight', '300'],
+      ['font-size', '20px'],
+      ['line-height', '1.65'],
+      ['color', 'rgba(240,232,224,0.85)'],
+      ['text-shadow', '0 0 22px rgba(240,200,150,0.22)'],
+      ['letter-spacing', '0.02em'],
+      ['text-align', 'center'],
+      ['opacity', '0'],
+      ['animation', 'btwGhostRise 2s ease-out forwards'],
+    ];
+    props.forEach(([p, v]) => bubble.style.setProperty(p, v));
+
+    const words = text.split(' ');
+    const spans: HTMLSpanElement[] = [];
+    words.forEach(w => {
+      const span = document.createElement('span');
+      span.textContent = w + ' ';
+      span.style.display = 'inline';
+      bubble.appendChild(span);
+      spans.push(span);
+    });
+    container.appendChild(bubble);
+
+    const t1 = setTimeout(() => {
+      bubble.style.setProperty('animation', 'none');
+      bubble.style.setProperty('opacity', '0.85');
+      bubble.style.setProperty('transform', 'translateY(-24px)');
+      spans.forEach((span, i) => {
+        span.style.setProperty('display', 'inline-block');
+        const ang  = Math.random() * Math.PI * 2;
+        const dist = 45 + Math.random() * 80;
+        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 40).toFixed(0)}px`);
+        span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 40).toFixed(0)}ms forwards`);
+      });
+    }, 3000);
+    const t2 = setTimeout(() => { bubble.remove(); onDone(); }, 4400);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); bubble.remove(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        position: 'fixed',
+        top: '30%',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 12,
+        pointerEvents: 'none',
+        width: 360,
+        textAlign: 'center',
+      }}
+    />
+  );
+}
+
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
   const searchParams = useSearchParams();
@@ -42,8 +269,10 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
+  const [triggerControlsHint, setTriggerControlsHint] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
+  const panelDismissedOnce = useRef(false);
 
   // Fetch all questions so we can cycle to the next one
   useEffect(() => {
@@ -109,6 +338,7 @@ export default function CosmosPage() {
         ...positions.get(star.id)!,
         emotionIndex: dims.emotionIndex,
         dimensions: dims,
+        answer: star.text ?? '',
       };
     });
   }, [allStars, myShortcode]);
@@ -217,6 +447,11 @@ export default function CosmosPage() {
     setConnecting(false);
     setConnectConfirmed(false);
     setReason('');
+    // Trigger controls hint the first time a panel is dismissed
+    if (!panelDismissedOnce.current) {
+      panelDismissedOnce.current = true;
+      setTriggerControlsHint(true);
+    }
   };
 
   return (
@@ -299,31 +534,16 @@ export default function CosmosPage() {
           })()}
         </div>
 
-        {/* Bottom hint — desktop only (keyboard shortcut is meaningless on mobile) */}
-        {!selected && !connecting && (
-          <div style={{
-            position: 'absolute', left: '50%', bottom: 28,
-            transform: 'translateX(-50%)',
-            fontSize: 13, color: BTW.textDim,
-            letterSpacing: '0.18em', textTransform: 'uppercase',
-            whiteSpace: 'nowrap', pointerEvents: 'none',
-          }}
-            className="btw-desktop-hint"
-          >
-            hold space to drift faster &middot; click a star to read it
-          </div>
-        )}
-
         {/* Edge hotspot indicators — pointer-events none; canvas handles actual click */}
         <div style={{
-          position: 'absolute', left: 0, top: 0, width: '5%', height: '100%',
+          position: 'absolute', left: 0, top: 0, width: '10%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none', zIndex: 2,
         }}>
           <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>‹</span>
         </div>
         <div style={{
-          position: 'absolute', right: 0, top: 0, width: '5%', height: '100%',
+          position: 'absolute', right: 0, top: 0, width: '10%', height: '100%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none', zIndex: 2,
         }}>
@@ -354,6 +574,10 @@ export default function CosmosPage() {
             connections={selectedConnections}
             onConnectionClick={handleThoughtClick}
             onDismiss={clearSelection}
+            nudge={hashString(selectedStar.shortcode) % 5 === 0}
+            userStar={userStarId && byId[userStarId] && !selectedStar.mine
+              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              : null}
           />
         )}
 
@@ -404,6 +628,9 @@ export default function CosmosPage() {
             onChange={setReason}
             onCancel={() => { setConnecting(false); setReason(''); }}
             onSubmit={() => handleConnect(selectedStar.id)}
+            userStar={userStarId && byId[userStarId]
+              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              : null}
           />
         )}
 
@@ -422,7 +649,6 @@ export default function CosmosPage() {
 
           /* Mobile: width breakpoint OR touch-only device */
           @media (max-width: 768px), (hover: none) and (pointer: coarse) {
-            .btw-desktop-hint   { display: none !important; }
             .btw-next-q-desktop { display: none !important; }
             .btw-next-q-mobile  { display: block !important; }
           }
@@ -437,31 +663,39 @@ export default function CosmosPage() {
         position: 'fixed',
         left: 0, right: 0,
         bottom: 0,
-        height: 'calc(env(safe-area-inset-bottom, 0px) + 62px)',
+        height: 'calc(env(safe-area-inset-bottom, 0px) + 100px)',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'space-between',
         padding: '0 24px',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
         zIndex: 0,
         pointerEvents: 'none',
       }}>
-        {/* Brand / about */}
-        <button
-          onClick={() => setShowAbout(true)}
-          style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
-            color: BTW.textDim, padding: '6px 0',
-            minHeight: 44,
-            transition: 'color .2s',
-            pointerEvents: 'auto',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
-          onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
-        >
-          The Between
-        </button>
+        {/* Brand + user's star to the right (hidden when viewing own star) */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          pointerEvents: 'auto',
+        }}>
+          <button
+            onClick={() => setShowAbout(true)}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 11, letterSpacing: '0.34em', textTransform: 'uppercase',
+              color: BTW.textDim, padding: '6px 0',
+              minHeight: 44,
+              transition: 'color .2s',
+              fontFamily: SANS,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; }}
+            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; }}
+          >
+            The Between
+          </button>
+          {userStarId && byId[userStarId] && !selected && !userHasOutgoingBond && (
+            <StarMiniInline star={byId[userStarId]} size={80} />
+          )}
+        </div>
 
         {/* Add star */}
         <button
@@ -484,9 +718,24 @@ export default function CosmosPage() {
         </button>
       </div>
 
+      <ControlsHint
+        trigger={triggerControlsHint}
+        onDone={() => setTriggerControlsHint(false)}
+      />
+
+      {connecting && (
+        <GhostPrompt
+          key="connect-mode"
+          text="Find a star to orbit."
+          onDone={() => {/* stays until connecting changes */}}
+        />
+      )}
+
       <AddToHomeScreen />
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
-    </>
+
+
+</>
   );
 }

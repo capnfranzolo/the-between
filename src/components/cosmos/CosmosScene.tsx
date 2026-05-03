@@ -10,6 +10,8 @@ export interface ThoughtData {
   z: number;
   emotionIndex: number;
   dimensions: SpiroDimensions;
+  /** Answer text — shown as a smoke/ghost effect on hover */
+  answer?: string;
 }
 
 export interface BondData {
@@ -23,6 +25,7 @@ export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
   turnLeft: () => void;
   turnRight: () => void;
+  setPitch: (p: number) => void;
 }
 
 interface CosmosSceneProps {
@@ -85,6 +88,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
     const turnRightFnRef = useRef<(() => void) | null>(null);
     const turnLeftFnRef  = useRef<(() => void) | null>(null);
+    const setPitchFnRef  = useRef<((p: number) => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -123,6 +127,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       flyToThought: (id: string) => flyToFnRef.current?.(id),
       turnLeft:  () => turnLeftFnRef.current?.(),
       turnRight: () => turnRightFnRef.current?.(),
+      setPitch:  (p: number) => setPitchFnRef.current?.(p),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -406,7 +411,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
         ctx.globalCompositeOperation = 'source-over';
         const tex = new THREE.CanvasTexture(c);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.8 });
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.3 });
         const sprite = new THREE.Sprite(mat);
         const angle = Math.random() * Math.PI * 2;
         const dist = 20 + Math.random() * 280;
@@ -480,7 +485,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           group.add(sprite);
           spiro = { canvas, texture, sprite, inst, timeOffset, frameCount: 0, dims: t.dimensions };
         } else {
-          // Glowing dot fallback beyond the 50-star cap
+          // Glowing dot fallback beyond the 50-star cap.
+          // Store dims so activateLive() can upgrade this dot to a full spirograph on demand.
           const dc = document.createElement('canvas'); dc.width = 32; dc.height = 32;
           const dctx = dc.getContext('2d')!;
           const gr = dctx.createRadialGradient(16, 16, 0, 16, 16, 16);
@@ -488,11 +494,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.5)`);
           gr.addColorStop(1, 'rgba(0,0,0,0)');
           dctx.fillStyle = gr; dctx.fillRect(0, 0, 32, 32);
-          const dot = new THREE.Sprite(new THREE.SpriteMaterial({
+          const dotSprite = new THREE.Sprite(new THREE.SpriteMaterial({
             map: new THREE.CanvasTexture(dc), transparent: true, depthWrite: false,
           }));
-          dot.scale.set(4, 4, 1);
-          group.add(dot);
+          dotSprite.scale.set(4, 4, 1);
+          dotSprite.userData = { isDotFallback: true };
+          group.add(dotSprite);
         }
 
         // Cheap glow halo via additive sprite — replaces per-star PointLight
@@ -532,6 +539,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
           spiro,
+          // dotDims: stored when spiro is null (beyond MAX_BAKED cap) so activateLive()
+          // can upgrade the dot fallback to a full spirograph on first selection.
+          dotDims: spiro ? undefined : t.dimensions,
+          answer: t.answer ?? '',
           scaleMult: 1.0,
         };
         scene.add(group);
@@ -542,21 +553,47 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (liveStars.has(id)) return;
         const g = thoughtGroups.get(id);
         if (!g) return;
-        const spiro = g.userData.spiro as StarSpiro | null;
+        let spiro = g.userData.spiro as StarSpiro | null;
+
+        // Dot-fallback upgrade: if this star was beyond MAX_BAKED at creation time,
+        // build a full spirograph now so the selected star always animates properly.
+        if (!spiro && g.userData.dotDims) {
+          const dims = g.userData.dotDims as SpiroDimensions;
+          const canvas = document.createElement('canvas');
+          const inst = createSpirograph(canvas, dims, { size: SPIRO_SIZE, dpr: 1 });
+          const timeOffset = (hashStr(id) % 10000) / 1000;
+          inst.renderStatic(timeOffset);
+          const texture = new THREE.CanvasTexture(canvas);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (texture as any).encoding = 3001;
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture, transparent: true, depthWrite: false, opacity: 1.0,
+          }));
+          sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+          // Hide the dot fallback sprite(s), show the new spirograph sprite
+          g.children.forEach(child => {
+            if (child instanceof THREE.Sprite && child.userData.isDotFallback) child.visible = false;
+          });
+          g.add(sprite);
+          spiro = { canvas, texture, sprite, inst, timeOffset, frameCount: 0, dims };
+          g.userData.spiro = spiro;
+          g.userData.dotDims = undefined;
+        }
+
         if (!spiro) return;
-        const canvas = document.createElement('canvas');
+        const liveCanvas = document.createElement('canvas');
         // dpr=1 — sharper doesn't justify the VRAM at this size
-        const inst = createSpirograph(canvas, spiro.dims, { size: SPIRO_SIZE, dpr: 1 });
+        const liveInst = createSpirograph(liveCanvas, spiro.dims, { size: SPIRO_SIZE, dpr: 1 });
         // Do NOT call inst.start() — we drive renderStatic from the main RAF loop.
         // That keeps exactly ONE requestAnimationFrame loop running for the whole scene.
-        const texture = new THREE.CanvasTexture(canvas);
+        const liveTexture = new THREE.CanvasTexture(liveCanvas);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (texture as any).encoding = 3001; // THREE.sRGBEncoding
+        (liveTexture as any).encoding = 3001; // THREE.sRGBEncoding
         const mat = spiro.sprite.material as THREE.SpriteMaterial;
         const origTexture = mat.map!;
-        mat.map = texture;
+        mat.map = liveTexture;
         mat.needsUpdate = true;
-        liveStars.set(id, { canvas, inst, texture, origTexture });
+        liveStars.set(id, { canvas: liveCanvas, inst: liveInst, texture: liveTexture, origTexture });
       }
 
       function deactivateLive(id: string) {
@@ -643,21 +680,28 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // Initial heading toward SUN_DIRECTION (sunset straight ahead)
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let targetHeading: number | null = null;
-      // Separate target for the auto-rotate-toward-nearest-star behaviour.
-      // Uses a much slower interpolation rate so the pan is lazy, not snappy.
-      let autoRotateTarget: number | null = null;
       let pitchTarget: number | null = null;
       let flyTargetXZ: { x: number; z: number } | null = null;
       let flyStarTargetY = BASE_CAM_Y;
       let camTargetY = BASE_CAM_Y;
       let speed = 4;
-      let pitch = 0.05;
+      let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
+      let strafeVel = 0; // units/s — Q/E lateral slide
+      let pitch = 0.30;
+      // Default rest pitch — updated by setPitch handle and pitch-click navigation
+      let defaultPitch = 0.30;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
-      // Seconds elapsed with no star in the camera's field of view
+
+      // Auto-rotate toward nearest star when none visible for 10 seconds
       let noStarVisibleSec = 0;
+      let autoRotateTarget: number | null = null;
+      // Angular speed: ~0.2 rad/s → a 90° turn takes ~4.7 seconds
+      const AUTO_ROTATE_SPEED = 0.07; // rad/s — ~13 s per 90°, very glacial
+      // Only consider stars within ±90° of current heading (cos 90° = 0)
+      const AUTO_ROTATE_MAX_COS = 0.0; // dot product threshold
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
@@ -668,6 +712,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dist = Math.sqrt(dx * dx + dz * dz);
         targetHeading = Math.atan2(dx, -dz);
         autoRotateTarget = null;
+        noStarVisibleSec = 0;
         const stopDist = 60;
         if (dist > stopDist + 2) {
           const t = (dist - stopDist) / dist;
@@ -694,6 +739,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         flyTargetXZ = null;
       };
 
+      setPitchFnRef.current = (p: number) => {
+        defaultPitch = Math.max(-0.4, Math.min(0.7, p));
+        pitchTarget = defaultPitch;
+      };
+
       // ─── INPUT ───
       const keys: Record<string, boolean> = {};
       const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; };
@@ -714,27 +764,201 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         raycaster.setFromCamera(mouse, camera);
         const hits = raycaster.intersectObjects(thoughtMeshes);
         if (hits.length > 0) {
-          // Stars always win over all edge zones
+          // Stars always win — even with a panel open
           const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
           const dx = thoughtGroup.position.x - camera.position.x;
           const dz = thoughtGroup.position.z - camera.position.z;
           targetHeading = Math.atan2(dx, -dz);
           onClickRef.current?.(thoughtId);
-        } else if (relY < 0.05) {
-          pitchTarget = Math.min(pitch + Math.PI / 8, 0.70);
-        } else if (relY > 0.95) {
-          pitchTarget = Math.max(pitch - Math.PI / 8, -0.40);
-        } else if (relX < 0.05) {
-          targetHeading = heading - Math.PI / 6;
-          flyTargetXZ = null;
-        } else if (relX > 0.95) {
-          targetHeading = heading + Math.PI / 6;
-          flyTargetXZ = null;
-        } else {
+        } else if (activeStarRef.current) {
+          // Panel is open — any background click dismisses it; no navigation
           onBgClickRef.current?.();
+        } else {
+          // Bullseye navigation: center quarter → background click, outer ring → navigate
+          // nx/ny: -1 = left/top, +1 = right/bottom (screen space, y down)
+          const nx = (relX - 0.5) * 2;
+          const ny = (relY - 0.5) * 2;
+          const dist = Math.sqrt(nx * nx + ny * ny);
+
+          if (dist < 0.5) {
+            // Inner circle (≈ center 1/4 of screen area) — treat as background tap
+            onBgClickRef.current?.();
+          } else {
+            // Outer zone — navigate with intensity proportional to dist from center
+            // Scale: 0 at dist=0.5, 1 at dist=1.42 (full corner)
+            const t = Math.min((dist - 0.5) / 0.92, 1.0);
+            const maxPush = Math.PI / 6 + t * (Math.PI / 3 - Math.PI / 6); // π/6 → π/3
+
+            const ux = nx / dist; // unit direction
+            const uy = ny / dist;
+
+            // Heading component (left/right)
+            if (Math.abs(ux) > 0.15) {
+              targetHeading = heading + ux * maxPush;
+              flyTargetXZ = null;
+            }
+            // Pitch component (up/down) — also updates defaultPitch so the
+            // camera holds at the new angle instead of snapping back
+            if (Math.abs(uy) > 0.15) {
+              const newP = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
+              pitchTarget = newP;
+              defaultPitch = newP;
+            }
+          }
         }
       };
       renderer.domElement.addEventListener('click', onClickCanvas);
+
+      // ─── HOVER SMOKE EFFECT ───────────────────────────────────────────────
+      // When the mouse rests on a star for 500 ms, its answer text rises up
+      // word-by-word like smoke and drifts away. Clicking still works normally.
+
+      // Inject CSS keyframes once per document lifetime
+      const SMOKE_STYLE_ID = 'btw-smoke-css';
+      if (!document.getElementById(SMOKE_STYLE_ID)) {
+        const ss = document.createElement('style');
+        ss.id = SMOKE_STYLE_ID;
+        ss.textContent = `
+          @keyframes btwSmokeRise {
+            0%   { opacity:0;    transform: translate(-50%,-100%) translateY(0px); }
+            30%  { opacity:0.85; }
+            100% { opacity:0.85; transform: translate(-50%,-100%) translateY(-24px); }
+          }
+          @keyframes btwSmokeSplit {
+            0%   { opacity:0.85; transform: translate(0,0) scale(1);   filter:blur(0px); }
+            100% { opacity:0;    transform: translate(var(--btw-sdx),var(--btw-sdy)) scale(0.65); filter:blur(6px); }
+          }
+        `;
+        document.head.appendChild(ss);
+      }
+
+      // Overlay sits on top of the canvas, pointer-events:none so clicks pass through
+      const smokeOverlay = document.createElement('div');
+      smokeOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1;';
+      container.appendChild(smokeOverlay);
+
+      let hoverStarId: string | null = null;
+      let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeDisperseTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+      let smokeInFlight = false;
+      let smokeNextStarId: string | null = null;
+
+      // clearSmoke is only called for hard resets (star selected, component cleanup).
+      // It force-stops any in-flight animation immediately.
+      function clearSmoke() {
+        if (smokeDisperseTimer) { clearTimeout(smokeDisperseTimer); smokeDisperseTimer = null; }
+        if (smokeCleanupTimer)  { clearTimeout(smokeCleanupTimer);  smokeCleanupTimer  = null; }
+        smokeInFlight = false;
+        smokeNextStarId = null;
+        smokeOverlay.innerHTML = '';
+      }
+
+      function triggerSmoke(starId: string) {
+        if (!container) return;
+        const g = thoughtGroups.get(starId);
+        if (!g) return;
+        const answer = (g.userData.answer as string | undefined) ?? '';
+        if (!answer.trim()) return;
+
+        // Project 3D position to screen space
+        const pos3d = g.position.clone();
+        pos3d.project(camera);
+        const sx = Math.round((pos3d.x + 1) / 2 * container.clientWidth);
+        const sy = Math.round((-pos3d.y + 1) / 2 * container.clientHeight);
+
+        clearSmoke();
+
+        // Whole phrase rises as one block, then each word scatters
+        const bubble = document.createElement('div');
+        bubble.style.cssText = [
+          'position:absolute',
+          `left:${sx}px`,
+          `top:${sy - 36}px`,
+          'text-align:center',
+          'max-width:300px',
+          'pointer-events:none',
+          "font-family:'Cormorant Garamond','Playfair Display',Georgia,serif",
+          'font-style:italic',
+          'font-weight:300',
+          'font-size:20px',
+          'line-height:1.65',
+          'color:rgba(240,232,224,0.82)',
+          'text-shadow:0 0 22px rgba(240,200,150,0.22)',
+          'letter-spacing:0.02em',
+          'opacity:0',
+          'animation:btwSmokeRise 2s ease-out forwards',
+        ].join(';');
+
+        const words = answer.trim().split(/\s+/).filter(Boolean);
+        const spans: HTMLSpanElement[] = [];
+        words.forEach(word => {
+          const span = document.createElement('span');
+          span.textContent = word + ' ';
+          span.style.display = 'inline-block';
+          bubble.appendChild(span);
+          spans.push(span);
+        });
+
+        smokeInFlight = true;
+        smokeOverlay.appendChild(bubble);
+
+        // Phase 2 @ 1.3 s: freeze phrase, scatter each word (total ~2.5 s)
+        smokeDisperseTimer = setTimeout(() => {
+          smokeDisperseTimer = null;
+          bubble.style.animation = 'none';
+          bubble.style.opacity = '0.85';
+          bubble.style.transform = 'translate(-50%, -100%) translateY(-24px)';
+          spans.forEach((span, i) => {
+            const angle = Math.random() * Math.PI * 2;
+            const dist  = 45 + Math.random() * 80;
+            const dx = (Math.cos(angle) * dist).toFixed(0);
+            const dy = (Math.sin(angle) * dist - 40).toFixed(0); // bias upward
+            span.style.setProperty('--btw-sdx', `${dx}px`);
+            span.style.setProperty('--btw-sdy', `${dy}px`);
+            const delay = (i * 30 + Math.random() * 40).toFixed(0);
+            span.style.animation = `btwSmokeSplit 1.2s ease-out ${delay}ms forwards`;
+          });
+        }, 1300);
+
+        // Cleanup after full animation completes (~2.6 s total)
+        smokeCleanupTimer = setTimeout(() => {
+          smokeCleanupTimer = null;
+          smokeInFlight = false;
+          if (smokeOverlay.contains(bubble)) smokeOverlay.removeChild(bubble);
+          // Trigger queued next star if any
+          const next = smokeNextStarId;
+          smokeNextStarId = null;
+          if (next) triggerSmoke(next);
+        }, 2600);
+      }
+      const onMouseMove = (e: MouseEvent) => {
+        // Skip smoke when a star detail is open or in passive mode
+        if (activeStarRef.current || modeRef.current === 'passive') return;
+        const relX = e.clientX / container.clientWidth;
+        const relY = e.clientY / container.clientHeight;
+        const hoverMouse = new THREE.Vector2(relX * 2 - 1, -(relY * 2 - 1));
+        raycaster.setFromCamera(hoverMouse, camera);
+        const hits = raycaster.intersectObjects(thoughtMeshes);
+        const hitId = hits.length > 0 ? (hits[0].object.userData.thoughtId as string | undefined) ?? null : null;
+        if (hitId !== hoverStarId) {
+          if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+          hoverStarId = hitId;
+          if (hitId) {
+            if (!smokeInFlight) {
+              // Nothing playing — start immediately after short delay
+              hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
+            } else {
+              // Let current smoke finish, queue this star for after
+              smokeNextStarId = hitId;
+            }
+          } else {
+            // Moved to empty space — cancel queued next but let current finish
+            smokeNextStarId = null;
+          }
+        }
+      };
+      renderer.domElement.addEventListener('mousemove', onMouseMove);
 
       // ─── TOUCH CONTROLS ─────────────────────────────────────────────────
       // Swipe → yaw/pitch with momentum, pinch → zoom, tap → select, double-tap → boost
@@ -791,9 +1015,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.lastX = t.clientX;
           touch.lastY = t.clientY;
 
-          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 90°.
-          const sensX = (Math.PI * 0.65) / container.clientWidth;
-          const sensY = (Math.PI * 0.32) / container.clientHeight;
+          // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
+          const sensX = (Math.PI * 1.4) / container.clientWidth;
+          const sensY = (Math.PI * 0.7) / container.clientHeight;
 
           // Immediately apply delta (no lag) AND store as velocity for momentum
           heading += dx * sensX;
@@ -804,8 +1028,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.velX = dx * sensX;
           touch.velY = -dy * sensY;
 
-          // Clear any keyboard-triggered targetHeading so swipe takes over
+          // Clear any keyboard-triggered targetHeading / auto-rotate so swipe takes over
           targetHeading = null;
+          autoRotateTarget = null;
+          noStarVisibleSec = 0;
 
         } else if (e.touches.length === 2) {
           const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -898,7 +1124,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
               freeTargetY = BASE_CAM_Y;
             }
           }
-          if (currentActiveStar) activateLive(currentActiveStar);
+          if (currentActiveStar) {
+            activateLive(currentActiveStar);
+            // Clear any lingering smoke when a star is selected
+            clearSmoke();
+            if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+            hoverStarId = null;
+          }
           prevActiveStar = currentActiveStar;
         }
 
@@ -920,7 +1152,48 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           touch.pinchVel *= 0.82;
         } else { touch.pinchVel = 0; }
 
-        // Heading: smooth toward target, or very slow drift when idle
+        // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
+        // Q/E = lateral strafe (slide perpendicular to heading)
+        const MAX_TURN_VEL  = 1.8;  // max rad/s
+        const TURN_ACCEL    = 5.0;  // rad/s² spin-up
+        const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
+        const MAX_STRAFE    = 22;   // units/s
+        const STRAFE_ACCEL  = 55;
+        const STRAFE_DECEL  = 80;
+        if (!isPaused) {
+          const wantLeft  = keys['KeyA'] || keys['ArrowLeft'];
+          const wantRight = keys['KeyD'] || keys['ArrowRight'];
+          if (wantLeft) {
+            turnVel = Math.max(turnVel - TURN_ACCEL * dt, -MAX_TURN_VEL);
+            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
+          } else if (wantRight) {
+            turnVel = Math.min(turnVel + TURN_ACCEL * dt, MAX_TURN_VEL);
+            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
+          } else {
+            const decel = TURN_DECEL * dt;
+            if (Math.abs(turnVel) <= decel) turnVel = 0;
+            else turnVel -= Math.sign(turnVel) * decel;
+          }
+          if (turnVel !== 0) heading += turnVel * dt;
+
+          const wantStrafeLeft  = keys['KeyQ'];
+          const wantStrafeRight = keys['KeyE'];
+          if (wantStrafeLeft) {
+            strafeVel = Math.max(strafeVel - STRAFE_ACCEL * dt, -MAX_STRAFE);
+          } else if (wantStrafeRight) {
+            strafeVel = Math.min(strafeVel + STRAFE_ACCEL * dt, MAX_STRAFE);
+          } else {
+            const sd = STRAFE_DECEL * dt;
+            if (Math.abs(strafeVel) <= sd) strafeVel = 0;
+            else strafeVel -= Math.sign(strafeVel) * sd;
+          }
+        } else {
+          // Paused — bleed off any existing velocity
+          if (Math.abs(turnVel)   > 0) turnVel   = 0;
+          if (Math.abs(strafeVel) > 0) strafeVel = 0;
+        }
+
+        // Heading: smooth toward target, auto-rotate when idle, or very slow drift
         if (targetHeading !== null) {
           let diff = targetHeading - heading;
           while (diff > Math.PI) diff -= Math.PI * 2;
@@ -928,12 +1201,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           heading += diff * dt * 1.5;
           if (Math.abs(diff) < 0.05) targetHeading = null;
         } else if (autoRotateTarget !== null) {
-          // Lazy auto-rotate toward nearest star — ~4× slower than a normal fly-to
+          // Constant angular velocity: ~0.2 rad/s → 90° takes ~4.7 s
           let diff = autoRotateTarget - heading;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          heading += diff * dt * 0.32;
-          if (Math.abs(diff) < 0.05) autoRotateTarget = null;
+          const step = Math.sign(diff) * Math.min(Math.abs(diff), AUTO_ROTATE_SPEED * dt);
+          heading += step;
+          if (Math.abs(diff) < 0.04) autoRotateTarget = null;
         } else if (!isPaused && !flyTargetXZ) {
           // One rotation every ~50 minutes — sunset slowly sweeps across the view
           heading += 0.002 * dt;
@@ -944,8 +1218,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Sun always in front of camera so warm glow stays ahead
         skyMat.uniforms.uSunDir.value.set(fwdX, -0.15, fwdZ).normalize();
 
-        // Speed for free drift
-        const targetSpeed = isPaused ? 0 : (keys['Space'] ? 25 : 4);
+        // Speed for free drift — W/ArrowUp/Space accelerate; S/ArrowDown brakes
+        const targetSpeed = isPaused ? 0 : (
+          (keys['Space'] || keys['KeyW'] || keys['ArrowUp']) ? 25 :
+          (keys['KeyS'] || keys['ArrowDown']) ? 0 : 4
+        );
         speed += (targetSpeed - speed) * dt * 3;
 
         // Horizontal position
@@ -963,6 +1240,13 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else if (!isPaused) {
           camera.position.x += fwdX * speed * dt;
           camera.position.z += fwdZ * speed * dt;
+          // Q/E strafe — slide perpendicular to heading
+          if (strafeVel !== 0) {
+            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
+            const sideZ = Math.sin(heading);  // perpendicular Z
+            camera.position.x += sideX * strafeVel * dt;
+            camera.position.z += sideZ * strafeVel * dt;
+          }
         }
 
         // Camera Y — always at BASE_CAM_Y; stars (y=80-140) are above so we always look up
@@ -982,7 +1266,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
           }
         } else {
-          const restP = pitchTarget !== null ? pitchTarget : 0.05;
+          const restP = pitchTarget !== null ? pitchTarget : defaultPitch;
           pitch += (restP - pitch) * Math.min(dt * 1.5, 1);
           if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
         }
@@ -995,47 +1279,59 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z + fwdZ * cosP * 200,
         ));
 
-        // ── Auto-rotate toward nearest star if none visible for 10 s ──────────
-        if (thoughtGroups.size > 0 && !isPaused) {
-          // Dot-product frustum check: star is "visible" if within ~±50° of forward
-          const COS_HALF_FOV = 0.64; // cos(50°)
-          const anyVisible = (() => {
-            for (const g of thoughtGroups.values()) {
-              const dx = g.position.x - camera.position.x;
-              const dy = g.position.y - camera.position.y;
-              const dz = g.position.z - camera.position.z;
-              const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-              const dot = (dx / len) * fwdX * cosP
-                        + (dy / len) * sinP
-                        + (dz / len) * fwdZ * cosP;
-              if (dot > COS_HALF_FOV) return true;
-            }
-            return false;
-          })();
+        // ── Auto-rotate toward nearest star when none visible for 10 s ──────────
+        // Only run when no star is selected and no manual turn is active.
+        if (!activeStarRef.current && targetHeading === null && autoRotateTarget === null && !isPaused) {
+          // Camera forward direction (horizontal only for dot-product test)
+          const camFwdX = fwdX;
+          const camFwdZ = fwdZ;
 
-          // Reset if stars are visible or user is actively swiping
-          if (anyVisible || Math.abs(touch.velX) > 0.001 || Math.abs(touch.velY) > 0.001) {
+          // Check if any thought star is roughly in front of the camera.
+          // Use a ~50° half-angle cone (cos 50° ≈ 0.64).
+          const COS_HALF_FOV = 0.64;
+          let anyVisible = false;
+          thoughtGroups.forEach(g => {
+            if (anyVisible) return;
+            const gx = g.position.x - camera.position.x;
+            const gz = g.position.z - camera.position.z;
+            const hDist = Math.sqrt(gx * gx + gz * gz);
+            if (hDist < 1) return;
+            const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
+            if (dot > COS_HALF_FOV) anyVisible = true;
+          });
+
+          if (anyVisible) {
             noStarVisibleSec = 0;
-            if (anyVisible) autoRotateTarget = null; // stop lazy pan once stars are in view
           } else {
             noStarVisibleSec += dt;
-            if (noStarVisibleSec > 10 && targetHeading === null && autoRotateTarget === null) {
-              // Aim lazily toward the nearest star via the slow-interpolation path
-              let nearestDist = Infinity;
-              let nearestPos: THREE.Vector3 | null = null;
+            if (noStarVisibleSec >= 10) {
+              // Find nearest star within ±90° of current heading
+              // (dot product > 0 means it's in front of us, not behind)
+              let bestDist = Infinity;
+              let bestHeading: number | null = null;
               thoughtGroups.forEach(g => {
-                const d = camera.position.distanceTo(g.position);
-                if (d < nearestDist) { nearestDist = d; nearestPos = g.position; }
+                const gx = g.position.x - camera.position.x;
+                const gz = g.position.z - camera.position.z;
+                const hDist = Math.sqrt(gx * gx + gz * gz);
+                if (hDist < 1) return;
+                const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
+                // Skip stars more than 90° away (behind us or overhead)
+                if (dot < AUTO_ROTATE_MAX_COS) return;
+                if (hDist < bestDist) {
+                  bestDist = hDist;
+                  bestHeading = Math.atan2(gx, -gz);
+                }
               });
-              if (nearestPos) {
-                const nx = (nearestPos as THREE.Vector3).x - camera.position.x;
-                const nz = (nearestPos as THREE.Vector3).z - camera.position.z;
-                autoRotateTarget = Math.atan2(nx, -nz);
+              if (bestHeading !== null) {
+                autoRotateTarget = bestHeading;
                 noStarVisibleSec = 0;
               }
             }
           }
+        } else if (activeStarRef.current || targetHeading !== null) {
+          noStarVisibleSec = 0;
         }
+        // ── end auto-rotate ───────────────────────────────────────────────────
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
@@ -1159,9 +1455,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
         renderer.domElement.removeEventListener('click', onClickCanvas);
+        renderer.domElement.removeEventListener('mousemove', onMouseMove);
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
         renderer.domElement.removeEventListener('touchend',   onTouchEnd);
+        if (hoverTimer) clearTimeout(hoverTimer);
+        if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
+        if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
+        if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
