@@ -86,8 +86,8 @@ export default function ShareButton({ url, style, nudge }: ShareButtonProps) {
   useEffect(() => {
     if (!nudge) return;
     setNudgePhase('visible');
-    const fadeTimer = setTimeout(() => setNudgePhase('fading'), 3000);
-    const goneTimer = setTimeout(() => setNudgePhase('gone'), 3500);
+    const fadeTimer = setTimeout(() => setNudgePhase('fading'), 3200);
+    const goneTimer = setTimeout(() => setNudgePhase('gone'), 3900); // 700ms for transition
     return () => { clearTimeout(fadeTimer); clearTimeout(goneTimer); };
   }, [nudge]);
   // Fixed coordinates for the tray (set when opening)
@@ -278,21 +278,21 @@ export default function ShareButton({ url, style, nudge }: ShareButtonProps) {
           alignItems: 'center',
           overflow: 'hidden',
           borderRadius: 999,
-          border: `1px solid ${withAlpha(BTW.horizon[3], 0.5)}`,
+          border: `1px solid ${withAlpha(BTW.horizon[3], nudgePhase === 'visible' ? 0.5 : 0)}`,
           background: 'transparent',
-          maxWidth: nudgePhase === 'visible' ? 120 : 34,
-          transition: 'max-width .4s cubic-bezier(.2,.8,.3,1)',
+          maxWidth: nudgePhase === 'visible' ? 160 : 34,
+          opacity: nudgePhase === 'fading' ? 0 : 1,
+          transition: 'max-width .55s cubic-bezier(.2,.8,.3,1), opacity .5s ease, border-color .4s ease',
         }}>
           {iconButton}
           <span style={{
             fontFamily: SERIF,
             fontStyle: 'italic',
-            fontSize: 12,
+            fontSize: 13,
             color: BTW.textDim,
             whiteSpace: 'nowrap',
-            paddingRight: 10,
-            opacity: nudgePhase === 'visible' ? 1 : 0,
-            transition: 'opacity .4s ease',
+            paddingLeft: 6,
+            paddingRight: 14,
             pointerEvents: 'none',
           }}>
             Share this!

@@ -687,9 +687,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let speed = 4;
       let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
       let strafeVel = 0; // units/s — Q/E lateral slide
-      let pitch = 0.05;
-      // Default rest pitch — updated externally via setPitch handle
-      let defaultPitch = 0.05;
+      let pitch = 0.30;
+      // Default rest pitch — updated by setPitch handle and pitch-click navigation
+      let defaultPitch = 0.30;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
@@ -764,12 +764,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         raycaster.setFromCamera(mouse, camera);
         const hits = raycaster.intersectObjects(thoughtMeshes);
         if (hits.length > 0) {
-          // Stars always win over all edge zones
+          // Stars always win — even with a panel open
           const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
           const dx = thoughtGroup.position.x - camera.position.x;
           const dz = thoughtGroup.position.z - camera.position.z;
           targetHeading = Math.atan2(dx, -dz);
           onClickRef.current?.(thoughtId);
+        } else if (activeStarRef.current) {
+          // Panel is open — any background click dismisses it; no navigation
+          onBgClickRef.current?.();
         } else {
           // Bullseye navigation: center quarter → background click, outer ring → navigate
           // nx/ny: -1 = left/top, +1 = right/bottom (screen space, y down)
@@ -794,9 +797,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
               targetHeading = heading + ux * maxPush;
               flyTargetXZ = null;
             }
-            // Pitch component (up/down — screen y is inverted for pitch)
+            // Pitch component (up/down) — also updates defaultPitch so the
+            // camera holds at the new angle instead of snapping back
             if (Math.abs(uy) > 0.15) {
-              pitchTarget = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
+              const newP = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
+              pitchTarget = newP;
+              defaultPitch = newP;
             }
           }
         }

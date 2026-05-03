@@ -254,49 +254,6 @@ function GhostPrompt({ text, onDone }: { text: string; onDone: () => void }) {
   );
 }
 
-// ── Pitch calibration slider — bottom-right corner ────────────────────────────
-function PitchSlider({ sceneRef }: { sceneRef: React.RefObject<CosmosSceneHandle | null> }) {
-  const [pitch, setPitchLocal] = useState(0.05);
-  return (
-    <div style={{
-      position: 'fixed',
-      bottom: 80,
-      right: 16,
-      zIndex: 20,
-      pointerEvents: 'auto',
-      background: 'rgba(10,6,28,0.75)',
-      border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: 12,
-      padding: '10px 14px',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 6,
-      minWidth: 120,
-    }}>
-      <div style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', fontFamily: SANS }}>
-        pitch
-      </div>
-      <input
-        type="range"
-        min={-0.4}
-        max={0.7}
-        step={0.01}
-        value={pitch}
-        onChange={e => {
-          const v = parseFloat(e.target.value);
-          setPitchLocal(v);
-          sceneRef.current?.setPitch(v);
-        }}
-        style={{ width: 90, accentColor: 'rgba(180,148,230,0.8)', cursor: 'pointer' }}
-      />
-      <div style={{ fontSize: 11, color: 'rgba(180,148,230,0.8)', fontFamily: SANS, letterSpacing: '0.05em' }}>
-        {pitch.toFixed(2)}
-      </div>
-    </div>
-  );
-}
-
 export default function CosmosPage() {
   const { questionId } = useParams<{ questionId: string }>();
   const searchParams = useSearchParams();
@@ -810,9 +767,7 @@ export default function CosmosPage() {
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
 
-      {/* ── Pitch calibration slider ── temporarily visible to dial in default ── */}
-      <PitchSlider sceneRef={sceneRef} />
 
-    </>
+</>
   );
 }

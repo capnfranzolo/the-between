@@ -326,7 +326,17 @@ export default function StarDetail({
                     lineHeight: 1.45, color: BTW.textSec,
                     minHeight: 44, display: 'flex', alignItems: 'center',
                     cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
+                    borderRadius: 4,
+                    transition: 'color .15s, background .15s',
                   }}
+                  onMouseEnter={c.relatedStarId && onConnectionClick ? e => {
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                  } : undefined}
+                  onMouseLeave={c.relatedStarId && onConnectionClick ? e => {
+                    e.currentTarget.style.color = '';
+                    e.currentTarget.style.background = '';
+                  } : undefined}
                 >
                   {c.reason}
                 </div>
