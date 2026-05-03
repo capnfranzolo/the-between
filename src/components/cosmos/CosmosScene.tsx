@@ -70,6 +70,9 @@ function hashStr(s: string): number {
 }
 
 const MAX_BAKED = 50;
+// Extra slots for on-demand dot→spiro upgrades as the camera approaches.
+// Keeps memory bounded while ensuring nearby stars never stay as blobs.
+const MAX_PROXIMITY_UPGRADES = 20;
 // Canvas must be large enough that the glow (outerRadius 120 × zoom 1.4 + yOffset 30)
 // never clips. At size=560 the bottom margin is ~82px — safe even with glow overlap.
 const SPIRO_SIZE_LIVE = 560; // used for both baked and live so visual size stays identical
@@ -428,6 +431,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       interface LiveEntry { canvas: HTMLCanvasElement; inst: SpirographInstance; texture: THREE.CanvasTexture; origTexture: THREE.Texture }
       const liveStars = new Map<string, LiveEntry>();
       let bakedStarCount = 0;
+      let proximityUpgradeCount = 0;
 
       // SPRITE_SCALE compensates for the spirograph occupying ~71 % of the SPIRO_SIZE_LIVE
       // canvas (vs ~94 % at the old 420 px). 16 × 0.71 / 12 × 0.94 ≈ 1.0 — same apparent size.
@@ -639,6 +643,37 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         thoughtGroups.delete(id);
         const idx = thoughtMeshes.findIndex(m => m.userData.thoughtId === id);
         if (idx >= 0) thoughtMeshes.splice(idx, 1);
+      }
+
+      // Lazy upgrade: swap a dot-fallback star to a real spirograph sprite when the
+      // camera gets close enough that the dot would be ~20+ px on screen. Throttled
+      // to 2 per frame by the caller so we never hitch. Stars upgraded this way use
+      // the same distance-based animation tiers as originally-baked stars.
+      function upgradeDotToSpiro(id: string, g: THREE.Group) {
+        if (!g.userData.dotDims) return; // already upgraded or not a dot
+        if (proximityUpgradeCount >= MAX_PROXIMITY_UPGRADES) return;
+        const dims = g.userData.dotDims as SpiroDimensions;
+        const canvas = document.createElement('canvas');
+        const inst = createSpirograph(canvas, dims, { size: SPIRO_SIZE, dpr: 1 });
+        const timeOffset = (hashStr(id) % 10000) / 1000;
+        inst.renderStatic(timeOffset);
+        const texture = new THREE.CanvasTexture(canvas);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (texture as any).encoding = 3001;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: texture, transparent: true, depthWrite: false, opacity: 1.0,
+        }));
+        sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+        // Hide the dot fallback sprite(s)
+        g.children.forEach(child => {
+          if (child instanceof THREE.Sprite && child.userData.isDotFallback) child.visible = false;
+        });
+        g.add(sprite);
+        const spiro: StarSpiro = { canvas, texture, sprite, inst, timeOffset, frameCount: 0, dims };
+        g.userData.spiro = spiro;
+        g.userData.dotDims = undefined;
+        bakedStarCount++;       // keep destroyThought accounting consistent
+        proximityUpgradeCount++;
       }
 
       // ─── BONDS ───  (orbital mechanics only — no line visuals)
@@ -1365,6 +1400,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           g.position.y = anchorGroup.position.y + Math.sin(angle) * orbit.radius * Math.sin(orbit.tilt);
         });
         // Pass 3: scale pulse + spiro animation for all stars
+        // Throttle dot→spiro upgrades to 2 per frame to avoid mid-frame hitching.
+        let dotUpgradesThisFrame = 0;
         thoughtGroups.forEach(g => {
           const id = g.userData.id as string;
           const isSelected = id === activeStarRef.current;
@@ -1375,8 +1412,20 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           g.userData.scaleMult = newMult;
           g.scale.setScalar(baseScale * newMult);
 
+          // Proximity upgrade: dot-fallback stars get a real spirograph once they're
+          // close enough to be clearly visible (~20+ px on screen ≈ dist < 350).
+          // activateLive() already handles the dot upgrade on click, but this path
+          // upgrades proactively so the star animates before the user clicks it.
+          if (g.userData.dotDims && !g.userData.spiro && dotUpgradesThisFrame < 2) {
+            const distToDot = camera.position.distanceTo(g.position);
+            if (distToDot < 350) {
+              upgradeDotToSpiro(id, g);
+              dotUpgradesThisFrame++;
+            }
+          }
+
           const spiro = g.userData.spiro as StarSpiro | null;
-          if (!spiro) return;
+          if (!spiro) return; // still a dot (beyond proximity threshold or pool full)
 
           const live = liveStars.get(id);
           if (live) {
@@ -1384,21 +1433,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             live.inst.renderStatic(time);
             live.texture.needsUpdate = true;
           } else {
-            // ── Distance-based animation tiers for baked stars ──────────────────
+            // ── Distance-based animation tiers for baked/proximity-upgraded stars ─
             // Closer = more frequent re-renders = livelier. Each tier is cheap
             // (one canvas draw + one GPU upload) and only fires when its frame
             // counter hits the interval, so the total uploads/frame stays low.
             //
             //  dist < 55  →  every  3 frames  (~20 fps) — close, clearly alive
-            //  dist < 140 →  every 10 frames  (~ 6 fps) — medium, noticeably moving
-            //  dist < 320 →  every 50 frames  (~1.2 fps) — distant, slow subtle cycle
-            //  dist ≥ 320 →  never            (0 fps)   — tiny dot, static still
+            //  dist < 140 →  every  8 frames  (~7.5 fps) — medium, noticeably moving
+            //  dist < 350 →  every 30 frames  (~2 fps)   — distant, slow subtle cycle
+            //  dist ≥ 350 →  never            (0 fps)    — below upgrade threshold
             const dist = camera.position.distanceTo(g.position);
             spiro.frameCount++;
             let interval = 0;
             if      (dist < 55)  interval = 3;
-            else if (dist < 140) interval = 10;
-            else if (dist < 320) interval = 50;
+            else if (dist < 140) interval = 8;
+            else if (dist < 350) interval = 30;
 
             if (interval > 0 && spiro.frameCount % interval === 0) {
               spiro.inst.renderStatic(time + spiro.timeOffset);
