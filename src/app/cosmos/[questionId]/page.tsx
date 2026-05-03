@@ -166,23 +166,76 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
 }
 
 
-// ── "Click around to find a star to orbit." prompt ────────────────────────────
-// Uses the same smoke rise+scatter animation as hover ghosts.
-function OrbitPrompt({ onDone }: { onDone: () => void }) {
-  const [phase, setPhase] = useState<'rising' | 'dispersing'>('rising');
+// ── Reusable ghost prompt — DOM-driven so animation state never resets ─────────
+// Renders a centered fixed container; injects bubble via DOM to avoid
+// React re-render fighting with CSS animation state.
+function GhostPrompt({ text, onDone }: { text: string; onDone: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
     ensureSmokeCSSInline();
-    // Scatter after 3 s
-    const t1 = setTimeout(() => setPhase('dispersing'), 3000);
-    // Remove after scatter animation completes
-    const t2 = setTimeout(() => onDone(), 4400);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    // Vertical-only rise (no horizontal translate — container already centers)
+    const STYLE_ID = 'btw-ghost-rise-css';
+    if (!document.getElementById(STYLE_ID)) {
+      const s = document.createElement('style');
+      s.id = STYLE_ID;
+      s.textContent = `
+        @keyframes btwGhostRise {
+          0%   { opacity:0;    transform:translateY(0); }
+          30%  { opacity:0.85; }
+          100% { opacity:0.85; transform:translateY(-24px); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
+    const bubble = document.createElement('div');
+    const props: [string, string][] = [
+      ['font-family', "'Cormorant Garamond','Playfair Display',Georgia,serif"],
+      ['font-style', 'italic'],
+      ['font-weight', '300'],
+      ['font-size', '20px'],
+      ['line-height', '1.65'],
+      ['color', 'rgba(240,232,224,0.85)'],
+      ['text-shadow', '0 0 22px rgba(240,200,150,0.22)'],
+      ['letter-spacing', '0.02em'],
+      ['text-align', 'center'],
+      ['opacity', '0'],
+      ['animation', 'btwGhostRise 2s ease-out forwards'],
+    ];
+    props.forEach(([p, v]) => bubble.style.setProperty(p, v));
+
+    const words = text.split(' ');
+    const spans: HTMLSpanElement[] = [];
+    words.forEach(w => {
+      const span = document.createElement('span');
+      span.textContent = w + ' ';
+      span.style.display = 'inline';
+      bubble.appendChild(span);
+      spans.push(span);
+    });
+    container.appendChild(bubble);
+
+    const t1 = setTimeout(() => {
+      bubble.style.setProperty('animation', 'none');
+      bubble.style.setProperty('opacity', '0.85');
+      bubble.style.setProperty('transform', 'translateY(-24px)');
+      spans.forEach((span, i) => {
+        span.style.setProperty('display', 'inline-block');
+        const ang  = Math.random() * Math.PI * 2;
+        const dist = 45 + Math.random() * 80;
+        span.style.setProperty('--btw-sdx', `${(Math.cos(ang) * dist).toFixed(0)}px`);
+        span.style.setProperty('--btw-sdy', `${(Math.sin(ang) * dist - 40).toFixed(0)}px`);
+        span.style.setProperty('animation', `btwSmokeSplit 1.2s ease-out ${(i * 40).toFixed(0)}ms forwards`);
+      });
+    }, 3000);
+    const t2 = setTimeout(() => { bubble.remove(); onDone(); }, 4400);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); bubble.remove(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const words = 'Click around to find a star to orbit.'.split(' ');
 
   return (
     <div
@@ -194,43 +247,51 @@ function OrbitPrompt({ onDone }: { onDone: () => void }) {
         transform: 'translateX(-50%)',
         zIndex: 12,
         pointerEvents: 'none',
+        width: 360,
         textAlign: 'center',
-        maxWidth: 320,
       }}
-    >
-      <div style={{
-        fontFamily: "'Cormorant Garamond','Playfair Display',Georgia,serif",
-        fontStyle: 'italic',
-        fontWeight: 300,
-        fontSize: 20,
-        lineHeight: 1.65,
-        color: 'rgba(240,232,224,0.85)',
-        textShadow: '0 0 22px rgba(240,200,150,0.22)',
-        letterSpacing: '0.02em',
-        animation: phase === 'rising'
-          ? 'btwSmokeRise 2s ease-out forwards'
-          : undefined,
-      }}>
-        {phase === 'dispersing'
-          ? words.map((word, i) => {
-              const ang  = Math.random() * Math.PI * 2;
-              const dist = 45 + Math.random() * 80;
-              return (
-                <span
-                  key={i}
-                  style={{
-                    display: 'inline-block',
-                    ['--btw-sdx' as string]: `${(Math.cos(ang) * dist).toFixed(0)}px`,
-                    ['--btw-sdy' as string]: `${(Math.sin(ang) * dist - 40).toFixed(0)}px`,
-                    animation: `btwSmokeSplit 1.2s ease-out ${(i * 40).toFixed(0)}ms forwards`,
-                  } as React.CSSProperties}
-                >
-                  {word + ' '}
-                </span>
-              );
-            })
-          : 'Click around to find a star to orbit.'
-        }
+    />
+  );
+}
+
+// ── Pitch calibration slider — bottom-right corner ────────────────────────────
+function PitchSlider({ sceneRef }: { sceneRef: React.RefObject<CosmosSceneHandle | null> }) {
+  const [pitch, setPitchLocal] = useState(0.05);
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: 80,
+      right: 16,
+      zIndex: 20,
+      pointerEvents: 'auto',
+      background: 'rgba(10,6,28,0.75)',
+      border: '1px solid rgba(255,255,255,0.12)',
+      borderRadius: 12,
+      padding: '10px 14px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 6,
+      minWidth: 120,
+    }}>
+      <div style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', fontFamily: SANS }}>
+        pitch
+      </div>
+      <input
+        type="range"
+        min={-0.4}
+        max={0.7}
+        step={0.01}
+        value={pitch}
+        onChange={e => {
+          const v = parseFloat(e.target.value);
+          setPitchLocal(v);
+          sceneRef.current?.setPitch(v);
+        }}
+        style={{ width: 90, accentColor: 'rgba(180,148,230,0.8)', cursor: 'pointer' }}
+      />
+      <div style={{ fontSize: 11, color: 'rgba(180,148,230,0.8)', fontFamily: SANS, letterSpacing: '0.05em' }}>
+        {pitch.toFixed(2)}
       </div>
     </div>
   );
@@ -426,12 +487,12 @@ export default function CosmosPage() {
     }
   }, [initialShortcode, data]);
 
-  // "Click around to find a star to orbit." — shown 5s after loading a shared star link.
-  // Dismissed immediately when user presses WASD.
+  // "Click around to find a star to orbit." — shown 10s after loading a shared star link,
+  // only if the user hasn't navigated. Dismissed immediately when user presses WASD.
   useEffect(() => {
     if (!starParam || !data) return;
     if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current);
-    orbitPromptTimer.current = setTimeout(() => setShowOrbitPrompt(true), 5000);
+    orbitPromptTimer.current = setTimeout(() => setShowOrbitPrompt(true), 10000);
     return () => { if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current); };
   }, [starParam, data]);
 
@@ -698,7 +759,7 @@ export default function CosmosPage() {
           >
             The Between
           </button>
-          {userStarId && byId[userStarId] && !selected && (
+          {userStarId && byId[userStarId] && !selected && !userHasOutgoingBond && (
             <StarMiniInline star={byId[userStarId]} size={80} />
           )}
         </div>
@@ -731,12 +792,26 @@ export default function CosmosPage() {
 
       {/* "Click around to find a star to orbit." — shown 5 s after landing on a shared star */}
       {showOrbitPrompt && (
-        <OrbitPrompt onDone={() => setShowOrbitPrompt(false)} />
+        <GhostPrompt
+          text="Click around to find a star to orbit."
+          onDone={() => setShowOrbitPrompt(false)}
+        />
+      )}
+
+      {connecting && (
+        <GhostPrompt
+          key="connect-mode"
+          text="Find a star to orbit."
+          onDone={() => {/* stays until connecting changes */}}
+        />
       )}
 
       <AddToHomeScreen />
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+
+      {/* ── Pitch calibration slider ── temporarily visible to dial in default ── */}
+      <PitchSlider sceneRef={sceneRef} />
 
     </>
   );

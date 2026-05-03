@@ -25,6 +25,7 @@ export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
   turnLeft: () => void;
   turnRight: () => void;
+  setPitch: (p: number) => void;
 }
 
 interface CosmosSceneProps {
@@ -87,6 +88,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
     const turnRightFnRef = useRef<(() => void) | null>(null);
     const turnLeftFnRef  = useRef<(() => void) | null>(null);
+    const setPitchFnRef  = useRef<((p: number) => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -125,6 +127,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       flyToThought: (id: string) => flyToFnRef.current?.(id),
       turnLeft:  () => turnLeftFnRef.current?.(),
       turnRight: () => turnRightFnRef.current?.(),
+      setPitch:  (p: number) => setPitchFnRef.current?.(p),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -685,6 +688,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
       let strafeVel = 0; // units/s — Q/E lateral slide
       let pitch = 0.05;
+      // Default rest pitch — updated externally via setPitch handle
+      let defaultPitch = 0.05;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
@@ -732,6 +737,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         targetHeading = heading + Math.PI / 6;
         autoRotateTarget = null;
         flyTargetXZ = null;
+      };
+
+      setPitchFnRef.current = (p: number) => {
+        defaultPitch = Math.max(-0.4, Math.min(0.7, p));
+        pitchTarget = defaultPitch;
       };
 
       // ─── INPUT ───
@@ -1250,7 +1260,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
           }
         } else {
-          const restP = pitchTarget !== null ? pitchTarget : 0.05;
+          const restP = pitchTarget !== null ? pitchTarget : defaultPitch;
           pitch += (restP - pitch) * Math.min(dt * 1.5, 1);
           if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
         }

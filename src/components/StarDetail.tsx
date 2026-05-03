@@ -372,7 +372,7 @@ export default function StarDetail({
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {showUserStar && (
-              <StarMini dims={userStar!.dimensions} size={36} text={userStar!.text} animVariant="slideRight" />
+              <StarMini dims={userStar!.dimensions} size={36} />
             )}
             Connect your star →
           </button>
