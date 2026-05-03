@@ -54,11 +54,11 @@ function WelcomeOverlay({ onDismiss }: { onDismiss: () => void }) {
         textAlign: 'center',
         boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
       }}>
-        {/* Title — all-caps, fills ~75% of viewport width */}
+        {/* Title — all-caps, fills ~80% of the card width */}
         <div style={{
           fontFamily: SANS,
-          fontSize: 'clamp(20px, 7.2vw, 88px)',
-          letterSpacing: '0.34em',
+          fontSize: 28,
+          letterSpacing: '0.08em',
           textTransform: 'uppercase',
           color: BTW.textDim,
           marginBottom: 6,
