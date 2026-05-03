@@ -270,11 +270,9 @@ export default function CosmosPage() {
   );
   const [showAbout, setShowAbout] = useState(false);
   const [triggerControlsHint, setTriggerControlsHint] = useState(false);
-  const [showOrbitPrompt, setShowOrbitPrompt] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
   const panelDismissedOnce = useRef(false);
-  const orbitPromptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch all questions so we can cycle to the next one
   useEffect(() => {
@@ -443,28 +441,6 @@ export default function CosmosPage() {
       }
     }
   }, [initialShortcode, data]);
-
-  // "Click around to find a star to orbit." — shown 10s after loading a shared star link,
-  // only if the user hasn't navigated. Dismissed immediately when user presses WASD.
-  useEffect(() => {
-    if (!starParam || !data) return;
-    if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current);
-    orbitPromptTimer.current = setTimeout(() => setShowOrbitPrompt(true), 10000);
-    return () => { if (orbitPromptTimer.current) clearTimeout(orbitPromptTimer.current); };
-  }, [starParam, data]);
-
-  useEffect(() => {
-    if (!showOrbitPrompt) return;
-    const dismiss = (e: KeyboardEvent) => {
-      if (['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
-        setShowOrbitPrompt(false);
-      }
-    };
-    window.addEventListener('keydown', dismiss);
-    // Also auto-dismiss after 6 s
-    const t = setTimeout(() => setShowOrbitPrompt(false), 6000);
-    return () => { window.removeEventListener('keydown', dismiss); clearTimeout(t); };
-  }, [showOrbitPrompt]);
 
   const clearSelection = () => {
     setSelected(null);
@@ -746,14 +722,6 @@ export default function CosmosPage() {
         trigger={triggerControlsHint}
         onDone={() => setTriggerControlsHint(false)}
       />
-
-      {/* "Click around to find a star to orbit." — shown 5 s after landing on a shared star */}
-      {showOrbitPrompt && (
-        <GhostPrompt
-          text="Click around to find a star to orbit."
-          onDone={() => setShowOrbitPrompt(false)}
-        />
-      )}
 
       {connecting && (
         <GhostPrompt
