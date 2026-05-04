@@ -73,7 +73,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 // ─── Shared styles ───────────────────────────────────────────────────────────
 
 const S = {
-  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13, maxWidth: 1400, margin: '0 auto' },
+  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
   topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, position: 'sticky' as const, top: 0, zIndex: 100, flexWrap: 'wrap' as const },
   tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
   btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
@@ -85,7 +85,7 @@ const S = {
   iconBtn: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, padding: '6px 8px', color: '#888' },
   input:   { background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '6px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none' },
   textarea:{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 4, color: '#e0e0e0', padding: '8px 10px', fontFamily: 'system-ui, sans-serif', fontSize: 13, outline: 'none', resize: 'vertical' as const, width: '100%', boxSizing: 'border-box' as const },
-  row:     { borderBottom: '1px solid #1a1a1a', display: 'grid' as const, alignItems: 'center', padding: '6px 8px', gap: 8 },
+  row:     { borderBottom: '1px solid #1a1a1a', display: 'grid' as const, alignItems: 'center', padding: '6px 20px 6px 8px', gap: 8 },
   mono:    { fontFamily: 'monospace', fontSize: 12 },
 };
 
@@ -154,10 +154,10 @@ function SpiroPreview({ dims, size = 200 }: { dims: SpiroDimensions; size?: numb
     instRef.current?.update(dims);
   }, [dims]);
 
-  // Hard-clip container so the canvas never bleeds outside its allocated size
+  // Explicit px strings + canvas HTML attributes ensure correct size before async resolves
   return (
-    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden', borderRadius: 8 }}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+    <div style={{ width: `${size}px`, height: `${size}px`, overflow: 'hidden', borderRadius: 8, flexShrink: 0 }}>
+      <canvas ref={canvasRef} width={size} height={size} style={{ display: 'block', width: `${size}px`, height: `${size}px` }} />
     </div>
   );
 }
@@ -773,7 +773,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div className="btw-admin-filters" style={{ display: 'flex', gap: 8, padding: '10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
+      <div className="btw-admin-filters" style={{ display: 'flex', gap: 8, padding: '10px 20px 10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
         ))}
@@ -975,7 +975,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, padding: '10px 16px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a' }}>
+      <div style={{ display: 'flex', gap: 8, padding: '10px 20px 10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)} style={S.tab(statusFilter === s)}>{s}</button>
         ))}
