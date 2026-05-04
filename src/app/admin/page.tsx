@@ -73,7 +73,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 // ─── Shared styles ───────────────────────────────────────────────────────────
 
 const S = {
-  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13, overflowX: 'hidden' as const },
+  page:    { background: '#0a0a0a', color: '#e0e0e0', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 13 },
   topbar:  { background: '#111', borderBottom: '1px solid #222', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, position: 'sticky' as const, top: 0, zIndex: 100, flexWrap: 'wrap' as const },
   tab:     (active: boolean) => ({ padding: '6px 14px', border: 'none', borderRadius: 4, cursor: 'pointer', fontFamily: 'system-ui, sans-serif', fontSize: 12, background: active ? '#333' : 'transparent', color: active ? '#fff' : '#888' }),
   btn:     (variant: 'primary' | 'ghost' | 'danger' = 'ghost') => ({
@@ -154,7 +154,12 @@ function SpiroPreview({ dims, size = 200 }: { dims: SpiroDimensions; size?: numb
     instRef.current?.update(dims);
   }, [dims]);
 
-  return <canvas ref={canvasRef} style={{ borderRadius: 8, display: 'block' }} />;
+  // Hard-clip container so the canvas never bleeds outside its allocated size
+  return (
+    <div style={{ width: size, height: size, flexShrink: 0, overflow: 'hidden', borderRadius: 8 }}>
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
+    </div>
+  );
 }
 
 // ─── SpiroEditor ──────────────────────────────────────────────────────────────
@@ -1425,6 +1430,7 @@ function SettingsTab() {
 // ─── Mobile CSS injection ────────────────────────────────────────────────────
 // Injected once; targets .btw-admin-* classes used in the star/connection rows.
 const ADMIN_MOBILE_CSS = `
+  html, body { overflow-x: hidden; }
   .btw-admin-desktop { display: grid; }
   .btw-admin-card    { display: none; }
   @media (max-width: 700px) {
