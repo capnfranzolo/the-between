@@ -158,7 +158,7 @@ export async function GET(
           {questionText}
         </div>
 
-        {/* Answer text */}
+        {/* Answer text — single string child so Satori doesn't complain about multiple nodes */}
         <div style={{
           fontSize: 32,
           fontFamily: 'serif',
@@ -169,10 +169,10 @@ export async function GET(
           lineHeight: 1.35,
           marginBottom: byline ? 16 : 28,
         }}>
-          &ldquo;{answerText}&rdquo;
+          {`“${answerText}”`}
         </div>
 
-        {/* Byline */}
+        {/* Byline — single string child */}
         {byline && (
           <div style={{
             fontSize: 17,
@@ -181,7 +181,7 @@ export async function GET(
             textAlign: 'center',
             marginBottom: 28,
           }}>
-            — {byline}
+            {`— ${byline}`}
           </div>
         )}
 
