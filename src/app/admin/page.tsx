@@ -130,18 +130,25 @@ function DimTable({ dims, before }: { dims: DimsShape; before?: DimsShape }) {
 }
 
 // ─── SpiroPreview ─────────────────────────────────────────────────────────────
-// Uses inst.update() so sliders update live without teardown/re-fade.
+// Renders internally at RENDER_SIZE=480 (same pattern as Spirograph.tsx — the
+// renderer's outerRadius=120 needs ~240px canvas radius to avoid clipping).
+// CSS display size is controlled by the `size` prop via style override after init.
 
-function SpiroPreview({ dims, size = 200 }: { dims: SpiroDimensions; size?: number }) {
+const SPIRO_RENDER_SIZE = 480;
+
+function SpiroPreview({ dims, size = 90 }: { dims: SpiroDimensions; size?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const instRef   = useRef<SpirographInstance | null>(null);
 
-  // Create once on mount
+  // Create once on mount at full internal size, then CSS-scale to display size
   useEffect(() => {
     if (typeof window === 'undefined') return;
     import('@/lib/spirograph/renderer').then(({ createSpirograph }) => {
       if (!canvasRef.current) return;
-      const inst = createSpirograph(canvasRef.current, dims, { size, dpr: window.devicePixelRatio ?? 1 });
+      const inst = createSpirograph(canvasRef.current, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+      // Renderer sets canvas.style.width = RENDER_SIZE+'px'; override to display size
+      canvasRef.current.style.width  = size + 'px';
+      canvasRef.current.style.height = size + 'px';
       instRef.current = inst;
       inst.start();
     });
@@ -149,15 +156,14 @@ function SpiroPreview({ dims, size = 200 }: { dims: SpiroDimensions; size?: numb
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update geometry on dim changes (no teardown)
+  // Update geometry on dim changes without teardown
   useEffect(() => {
     instRef.current?.update(dims);
   }, [dims]);
 
-  // Explicit px strings + canvas HTML attributes ensure correct size before async resolves
   return (
     <div style={{ width: `${size}px`, height: `${size}px`, overflow: 'hidden', borderRadius: 8, flexShrink: 0 }}>
-      <canvas ref={canvasRef} width={size} height={size} style={{ display: 'block', width: `${size}px`, height: `${size}px` }} />
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
     </div>
   );
 }
@@ -189,7 +195,7 @@ function SpiroEditor({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Live preview — stacked above sliders so sliders get full column width */}
-      <SpiroPreview dims={dims} size={100} />
+      <SpiroPreview dims={dims} size={90} />
 
       {/* Controls */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
