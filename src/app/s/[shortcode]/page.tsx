@@ -26,20 +26,24 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     if (q?.text) questionText = q.text;
   }
 
-  const description = star?.answer
-    ? star.answer.slice(0, 155)
-    : "Something true that can't be proved.";
+  // "Question?: Answer." — keep description under 155 chars
+  const answerSnippet = star?.answer
+    ? `"${star.answer.slice(0, 120)}${star.answer.length > 120 ? '…' : ''}"`
+    : '"Something true that can\'t be proved."';
+
+  // Short question for the browser tab (drop trailing punctuation, cap length)
+  const shortQ = questionText.replace(/[?.!]+$/, '').slice(0, 60);
+  const pageTitle = `${shortQ}: ${answerSnippet}`;
 
   const ogImageUrl = `https://${SITE_URL}/api/og/${shortcode}`;
-
-  const pageUrl = `https://${SITE_URL}/s/${shortcode}`;
+  const pageUrl    = `https://${SITE_URL}/s/${shortcode}`;
 
   return {
-    title: `The Between — ${questionText}`,
-    description,
+    title: pageTitle,
+    description: `${questionText} — ${answerSnippet}`,
     openGraph: {
-      title: 'The Between',
-      description,
+      title: questionText,
+      description: answerSnippet,
       siteName: 'The Between',
       type: 'website',
       url: pageUrl,
@@ -47,13 +51,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         url: ogImageUrl,
         width: 1200,
         height: 630,
-        alt: 'A spirograph star in The Between',
+        alt: answerSnippet,
       }],
     },
     twitter: {
       card: 'summary_large_image',
-      title: 'The Between',
-      description,
+      title: questionText,
+      description: answerSnippet,
       images: [ogImageUrl],
     },
   };
