@@ -123,25 +123,13 @@ export async function GET(
           gap: 0,
         }}
       >
-        {/* THE BETWEEN eyebrow */}
-        <div style={{
-          fontSize: 16,
-          letterSpacing: '0.32em',
-          textTransform: 'uppercase',
-          color: 'rgba(240,232,224,0.45)',
-          marginBottom: 28,
-          fontFamily: 'sans-serif',
-        }}>
-          The Between
-        </div>
-
         {/* Spirograph */}
         {spiroBg && (
           <img
             src={spiroBg}
-            width={240}
-            height={240}
-            style={{ marginBottom: 28, display: 'block' }}
+            width={320}
+            height={320}
+            style={{ marginBottom: 36, display: 'block' }}
           />
         )}
 
@@ -160,59 +148,29 @@ export async function GET(
 
         {/* Answer text — single string child so Satori doesn't complain about multiple nodes */}
         <div style={{
-          fontSize: 32,
+          fontSize: 42,
           fontFamily: 'serif',
           fontStyle: 'italic',
           color: BTW.textPri,
           textAlign: 'center',
-          maxWidth: 900,
-          lineHeight: 1.35,
-          marginBottom: byline ? 16 : 28,
+          maxWidth: 960,
+          lineHeight: 1.3,
+          marginBottom: byline ? 20 : 0,
         }}>
-          {`“${answerText}”`}
+          {`”${answerText}”`}
         </div>
 
         {/* Byline — single string child */}
         {byline && (
           <div style={{
-            fontSize: 17,
+            fontSize: 22,
             fontFamily: 'sans-serif',
             color: 'rgba(240,232,224,0.55)',
             textAlign: 'center',
-            marginBottom: 28,
           }}>
             {`— ${byline}`}
           </div>
         )}
-
-        {/* CTA pill */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 22px',
-          border: `1px solid ${BTW.horizon[3]}`,
-          borderRadius: 999,
-          color: BTW.horizon[3],
-          fontSize: 14,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          fontFamily: 'sans-serif',
-          marginBottom: 22,
-        }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: BTW.horizon[3] }} />
-          see your thoughts in the cosmos
-        </div>
-
-        {/* URL */}
-        <div style={{
-          fontSize: 14,
-          color: 'rgba(240,232,224,0.35)',
-          fontFamily: 'sans-serif',
-          letterSpacing: '0.08em',
-        }}>
-          {SITE_URL}
-        </div>
       </div>
     ),
     {
