@@ -104,7 +104,7 @@ export async function GET(
     .single();
 
   const questionText = questionRow?.text ?? "What do you know is true but you can't prove?";
-  const answerText = truncate(star.answer ?? '', 200);
+  const answerText = truncate(star.answer ?? '');
   const byline: string | null = star.unique_fact ?? null;
 
   const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
@@ -140,6 +140,7 @@ export async function GET(
 
         {/* Question text */}
         <div style={{
+          width: '100%',
           fontSize: 20,
           fontFamily: 'serif',
           color: BTW.textSec,
@@ -153,6 +154,7 @@ export async function GET(
 
         {/* Answer text — font size scales with length so it always fits */}
         <div style={{
+          width: '100%',
           fontSize: answerFontSize(answerText),
           fontFamily: 'serif',
           fontStyle: 'italic',
@@ -168,6 +170,7 @@ export async function GET(
         {/* Byline — single string child */}
         {byline && (
           <div style={{
+            width: '100%',
             fontSize: 18,
             fontFamily: 'sans-serif',
             color: 'rgba(240,232,224,0.55)',
