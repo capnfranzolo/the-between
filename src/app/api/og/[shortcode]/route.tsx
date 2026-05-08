@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { ImageResponse } from 'next/og';
 import { supabaseServer } from '@/lib/supabase/server';
-import { BTW, withAlpha } from '@/lib/btw';
+import { BTW } from '@/lib/btw';
 import { SITE_URL } from '@/lib/constants';
 import type { SpiroDimensions } from '@/lib/spirograph/renderer';
 
@@ -17,6 +17,11 @@ async function tryRenderSpiro(dims: SpiroDimensions, size: number): Promise<stri
 }
 
 export const runtime = 'nodejs';
+
+// Render at 2× so the image stays sharp on retina / high-DPR screens.
+// All pixel values below are in 2× space (i.e. double the "design" values).
+const W = 2400;
+const H = 1260;
 
 const DIM_DEFAULTS: SpiroDimensions = {
   certainty: 0.5,
@@ -38,12 +43,13 @@ function truncate(text: string, max = 120): string {
   return text.slice(0, max).trimEnd() + '…';
 }
 
-// Scale answer font size so longer text doesn't overflow the image
+// Scale answer font size so longer text doesn't overflow the image.
+// Values are in 2× space.
 function answerFontSize(text: string): number {
-  if (text.length <= 55)  return 38;
-  if (text.length <= 90)  return 30;
-  if (text.length <= 120) return 24;
-  return 22;
+  if (text.length <= 55)  return 76;
+  if (text.length <= 90)  return 60;
+  if (text.length <= 120) return 48;
+  return 44;
 }
 
 // ─── Default / fallback image ─────────────────────────────────────────────────
@@ -51,29 +57,22 @@ function defaultImage() {
   return new ImageResponse(
     (
       <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: BG }}>
-        {/* Eyebrow */}
-        <div style={{ fontSize: 16, letterSpacing: '0.32em', textTransform: 'uppercase', color: 'rgba(240,232,224,0.45)', marginBottom: 32, fontFamily: 'sans-serif' }}>
+        <div style={{ fontSize: 32, letterSpacing: '0.32em', textTransform: 'uppercase', color: 'rgba(240,232,224,0.45)', marginBottom: 64, fontFamily: 'sans-serif' }}>
           The Between
         </div>
-
-        {/* Hero text */}
-        <div style={{ fontSize: 38, fontFamily: 'serif', color: BTW.textPri, textAlign: 'center', maxWidth: 700, lineHeight: 1.25 }}>
+        <div style={{ width: '100%', fontSize: 76, fontFamily: 'serif', color: BTW.textPri, textAlign: 'center', maxWidth: 1400, lineHeight: 1.25 }}>
           What shape are your thoughts?
         </div>
-
-        {/* CTA pill */}
-        <div style={{ marginTop: 48, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 24px', border: `1px solid ${BTW.horizon[3]}`, borderRadius: 999, color: BTW.horizon[3], fontSize: 14, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: BTW.horizon[3] }} />
+        <div style={{ marginTop: 96, display: 'flex', alignItems: 'center', gap: 20, padding: '24px 48px', border: `2px solid ${BTW.horizon[3]}`, borderRadius: 999, color: BTW.horizon[3], fontSize: 28, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>
+          <div style={{ width: 14, height: 14, borderRadius: '50%', background: BTW.horizon[3] }} />
           see your thoughts in the cosmos
         </div>
-
-        {/* URL */}
-        <div style={{ marginTop: 32, fontSize: 15, color: 'rgba(240,232,224,0.35)', fontFamily: 'sans-serif', letterSpacing: '0.06em' }}>
+        <div style={{ marginTop: 64, fontSize: 30, color: 'rgba(240,232,224,0.35)', fontFamily: 'sans-serif', letterSpacing: '0.06em' }}>
           {SITE_URL}
         </div>
       </div>
     ),
-    { width: 1200, height: 630 },
+    { width: W, height: H },
   );
 }
 
@@ -84,7 +83,6 @@ export async function GET(
 ) {
   const { shortcode } = await params;
 
-  // Handle the /api/og/default route
   if (shortcode === 'default') return defaultImage();
 
   // 1. Fetch star
@@ -109,8 +107,8 @@ export async function GET(
 
   const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
 
-  // 3. Render spirograph (400×400 source, displayed at 200×200)
-  const spiroBg = await tryRenderSpiro(dims, 400);
+  // 3. Render spirograph at 800×800 source, displayed at 400×400 (2× sharp)
+  const spiroBg = await tryRenderSpiro(dims, 800);
 
   // ── Card layout ────────────────────────────────────────────────────────────
   return new ImageResponse(
@@ -124,35 +122,32 @@ export async function GET(
           alignItems: 'center',
           justifyContent: 'center',
           background: BG,
-          padding: '40px 80px',
+          padding: '80px 160px',
           gap: 0,
         }}
       >
-        {/* Spirograph — smaller so text has room */}
         {spiroBg && (
           <img
             src={spiroBg}
-            width={200}
-            height={200}
-            style={{ marginBottom: 20, display: 'block' }}
+            width={400}
+            height={400}
+            style={{ marginBottom: 40, display: 'block' }}
           />
         )}
 
-        {/* Question text */}
         <div style={{
           width: '100%',
-          fontSize: 20,
+          fontSize: 40,
           fontFamily: 'serif',
           color: BTW.textSec,
           textAlign: 'center',
-          maxWidth: 860,
+          maxWidth: 1720,
           lineHeight: 1.3,
-          marginBottom: 14,
+          marginBottom: 28,
         }}>
           {questionText}
         </div>
 
-        {/* Answer text — font size scales with length so it always fits */}
         <div style={{
           width: '100%',
           fontSize: answerFontSize(answerText),
@@ -160,18 +155,17 @@ export async function GET(
           fontStyle: 'italic',
           color: BTW.textPri,
           textAlign: 'center',
-          maxWidth: 960,
+          maxWidth: 1920,
           lineHeight: 1.35,
-          marginBottom: byline ? 14 : 0,
+          marginBottom: byline ? 28 : 0,
         }}>
-          {`”${answerText}”`}
+          {`"${answerText}"`}
         </div>
 
-        {/* Byline — single string child */}
         {byline && (
           <div style={{
             width: '100%',
-            fontSize: 18,
+            fontSize: 36,
             fontFamily: 'sans-serif',
             color: 'rgba(240,232,224,0.55)',
             textAlign: 'center',
@@ -181,6 +175,6 @@ export async function GET(
         )}
       </div>
     ),
-    { width: 1200, height: 630 },
+    { width: W, height: H },
   );
 }
