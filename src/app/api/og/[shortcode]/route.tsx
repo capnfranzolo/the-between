@@ -33,9 +33,17 @@ const DIM_DEFAULTS: SpiroDimensions = {
 const BG = `linear-gradient(180deg, #1E1840 0%, #2A1D52 18%, #3D2D65 36%, #5A3D78 54%, #7B5088 72%, #9A6080 90%, #A06880 100%)`;
 
 // Truncate long answers for balanced layout
-function truncate(text: string, max = 200): string {
+function truncate(text: string, max = 120): string {
   if (text.length <= max) return text;
   return text.slice(0, max).trimEnd() + '…';
+}
+
+// Scale answer font size so longer text doesn't overflow the image
+function answerFontSize(text: string): number {
+  if (text.length <= 55)  return 38;
+  if (text.length <= 90)  return 30;
+  if (text.length <= 120) return 24;
+  return 22;
 }
 
 // ─── Default / fallback image ─────────────────────────────────────────────────
@@ -101,8 +109,8 @@ export async function GET(
 
   const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
 
-  // 3. Render spirograph to base64 PNG (480×480, then display at 240×240)
-  const spiroBg = await tryRenderSpiro(dims, 480);
+  // 3. Render spirograph (400×400 source, displayed at 200×200)
+  const spiroBg = await tryRenderSpiro(dims, 400);
 
   // ── Card layout ────────────────────────────────────────────────────────────
   return new ImageResponse(
@@ -120,39 +128,39 @@ export async function GET(
           gap: 0,
         }}
       >
-        {/* Spirograph */}
+        {/* Spirograph — smaller so text has room */}
         {spiroBg && (
           <img
             src={spiroBg}
-            width={320}
-            height={320}
-            style={{ marginBottom: 36, display: 'block' }}
+            width={200}
+            height={200}
+            style={{ marginBottom: 20, display: 'block' }}
           />
         )}
 
         {/* Question text */}
         <div style={{
-          fontSize: 26,
+          fontSize: 20,
           fontFamily: 'serif',
           color: BTW.textSec,
           textAlign: 'center',
-          maxWidth: 800,
+          maxWidth: 860,
           lineHeight: 1.3,
-          marginBottom: 20,
+          marginBottom: 14,
         }}>
           {questionText}
         </div>
 
-        {/* Answer text — single string child so Satori doesn't complain about multiple nodes */}
+        {/* Answer text — font size scales with length so it always fits */}
         <div style={{
-          fontSize: 42,
+          fontSize: answerFontSize(answerText),
           fontFamily: 'serif',
           fontStyle: 'italic',
           color: BTW.textPri,
           textAlign: 'center',
           maxWidth: 960,
-          lineHeight: 1.3,
-          marginBottom: byline ? 20 : 0,
+          lineHeight: 1.35,
+          marginBottom: byline ? 14 : 0,
         }}>
           {`”${answerText}”`}
         </div>
@@ -160,7 +168,7 @@ export async function GET(
         {/* Byline — single string child */}
         {byline && (
           <div style={{
-            fontSize: 22,
+            fontSize: 18,
             fontFamily: 'sans-serif',
             color: 'rgba(240,232,224,0.55)',
             textAlign: 'center',
