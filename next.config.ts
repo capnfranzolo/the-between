@@ -21,12 +21,16 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // OG image endpoint — longer cache, it only changes if content changes.
+        // OG image endpoint — longer cache, CORS open so Facebook CDN can fetch it.
         source: '/api/og/:shortcode',
         headers: [
           {
             key: 'Cache-Control',
             value: 'public, s-maxage=86400, stale-while-revalidate=604800',
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
           },
         ],
       },

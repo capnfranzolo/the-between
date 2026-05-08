@@ -10,7 +10,8 @@ async function tryRenderSpiro(dims: SpiroDimensions, size: number): Promise<stri
   try {
     const { renderSpirographToBase64 } = await import('@/lib/spirograph/server-render');
     return await renderSpirographToBase64(dims, size);
-  } catch {
+  } catch (err) {
+    console.error('[og] spirograph render failed:', err);
     return null;
   }
 }
@@ -64,11 +65,7 @@ function defaultImage() {
         </div>
       </div>
     ),
-    {
-      width: 1200,
-      height: 630,
-      headers: { 'Cache-Control': 'public, max-age=86400, s-maxage=86400' },
-    },
+    { width: 1200, height: 630 },
   );
 }
 
@@ -78,6 +75,19 @@ export async function GET(
   { params }: { params: Promise<{ shortcode: string }> },
 ) {
   const { shortcode } = await params;
+
+  // Debug endpoint — remove after verifying production reachability
+  const url = new URL(_req.url);
+  if (url.searchParams.get('debug') === '1') {
+    return Response.json({
+      ok: true,
+      shortcode,
+      env: {
+        hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasSupabaseKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
+    });
+  }
 
   // Handle the /api/og/default route
   if (shortcode === 'default') return defaultImage();
@@ -173,13 +183,6 @@ export async function GET(
         )}
       </div>
     ),
-    {
-      width: 1200,
-      height: 630,
-      headers: {
-        'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=86400, s-maxage=86400',
-      },
-    },
+    { width: 1200, height: 630 },
   );
 }

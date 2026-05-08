@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import Script from 'next/script';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH, QUESTION_TEXT } from '@/lib/constants';
 import { supabaseClient } from '@/lib/supabase/client';
@@ -36,6 +37,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   useEffect(() => {
     supabaseClient
@@ -85,7 +87,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
       const res = await fetch('/api/submit/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answer: text.trim(), questionId: questions[currentIndex].id }),
+        body: JSON.stringify({ answer: text.trim(), questionId: questions[currentIndex].id, turnstileToken }),
       });
       const data = await res.json();
       if (data.valid) {
@@ -192,6 +194,20 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
             {submitting ? 'Checking…' : 'See your thought →'}
           </button>
 
+          {process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
+            <Script
+              src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+              strategy="lazyOnload"
+              onLoad={() => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (window as any).turnstile?.render('#turnstile-widget', {
+                  sitekey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+                  callback: (token: string) => setTurnstileToken(token),
+                  'expired-callback': () => setTurnstileToken(null),
+                });
+              }}
+            />
+          )}
           <div id="turnstile-widget" style={{ marginTop: 16 }} />
 
           {(inlineError || validationError) && (

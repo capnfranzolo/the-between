@@ -75,7 +75,9 @@ export async function POST(req: NextRequest) {
         ip_hash: ipHash,
         action: 'star_create',
       });
-    } catch { /* table may not exist yet */ }
+    } catch (err) {
+      console.error('[submit] rate_limit insert failed:', err);
+    }
   }
 
   if (error) {
