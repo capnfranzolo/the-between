@@ -197,6 +197,7 @@ export default function StarDetail({
   connections, onConnectionClick, onDismiss, nudge, userStar,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
+  const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, startY: 0, startScrollTop: 0 });
 
@@ -358,7 +359,7 @@ export default function StarDetail({
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
         borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
       }}>
-        <ShareButton url={url} nudge={nudge} />
+        <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />
 
         {showConnect && (
           // Star icon sits to the left; button keeps its natural pill height

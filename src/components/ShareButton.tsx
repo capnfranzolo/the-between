@@ -5,6 +5,7 @@ import { BTW, SERIF, withAlpha } from '@/lib/btw';
 
 interface ShareButtonProps {
   url: string;
+  ogImageUrl?: string;
   style?: React.CSSProperties;
   nudge?: boolean;
 }
@@ -77,7 +78,7 @@ const CheckIcon = () => (
 const TRAY_WIDTH  = 164;
 const TRAY_HEIGHT = 216;
 
-export default function ShareButton({ url, style, nudge }: ShareButtonProps) {
+export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -138,16 +139,27 @@ export default function ShareButton({ url, style, nudge }: ShareButtonProps) {
     }
 
     if (id === 'instagram') {
-      // Instagram has no web share URL — use native share sheet, else copy
-      if (typeof navigator !== 'undefined' && navigator.share) {
-        try { await navigator.share({ url, title: 'A thought on The Between' }); } catch { /* cancelled */ }
-      } else {
+      setOpen(false);
+
+      // Fetch the OG image and share as a file — on iOS Safari this routes
+      // directly into Instagram Stories with the image pre-loaded.
+      if (ogImageUrl && typeof navigator !== 'undefined') {
         try {
-          await navigator.clipboard.writeText(url);
-          setCopied(true);
-          setTimeout(() => { setCopied(false); }, 2000);
-        } catch { /* ignore */ }
+          const res = await fetch(ogImageUrl);
+          const blob = await res.blob();
+          const file = new File([blob], 'my-star.png', { type: 'image/png' });
+          if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file] });
+            return;
+          }
+        } catch { /* fall through */ }
       }
+
+      // Fallback 1: instagram-stories URL scheme (opens Stories on iOS even
+      // without the image; user can pull from camera roll)
+      window.location.href =
+        'instagram-stories://share?backgroundTopColor=%231E1840&backgroundBottomColor=%23A06880';
+      return;
     } else {
       window.open(buildShareUrl(id, url), '_blank', 'noopener,noreferrer,width=600,height=500');
     }
