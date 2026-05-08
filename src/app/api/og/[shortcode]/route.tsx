@@ -76,19 +76,6 @@ export async function GET(
 ) {
   const { shortcode } = await params;
 
-  // Debug endpoint — remove after verifying production reachability
-  const url = new URL(_req.url);
-  if (url.searchParams.get('debug') === '1') {
-    return Response.json({
-      ok: true,
-      shortcode,
-      env: {
-        hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-        hasSupabaseKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      },
-    });
-  }
-
   // Handle the /api/og/default route
   if (shortcode === 'default') return defaultImage();
 
