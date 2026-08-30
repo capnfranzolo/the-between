@@ -30,7 +30,15 @@ export async function extractDimensions(answer: string): Promise<DimensionResult
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    // Identity-linked API keys must name the workspace the request acts in.
+    // Absent the env var this is a no-op, so standard keys are unaffected.
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+    const client = new Anthropic({
+      apiKey,
+      ...(workspaceId
+        ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } }
+        : {}),
+    });
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 300,
