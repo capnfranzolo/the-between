@@ -442,7 +442,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (thoughtGroups.has(t.id)) return;
         const rand = seededRand(hashStr(t.id));
         const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [255, 255, 255];
-        const color = (er << 16) | (eg << 8) | eb;
         const group = new THREE.Group();
         let spiro: StarSpiro | null = null;
 
@@ -1079,7 +1078,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
       };
 
-      const onTouchEnd = (e: TouchEvent) => {
+      const onTouchEnd = () => {
         if (!touch.active) return;
         const moveDist = Math.sqrt(
           (touch.lastX - touch.startX) ** 2 + (touch.lastY - touch.startY) ** 2,

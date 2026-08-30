@@ -23,6 +23,7 @@ interface CosmosStarRaw {
 // ── Welcome overlay — shown once per browser, dismissed via localStorage ──────
 function WelcomeOverlay({ onDismiss, questionId }: { onDismiss: () => void; questionId: string | null }) {
   const [visible, setVisible] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- triggers the mount fade-in transition
   useEffect(() => { setVisible(true); }, []);
 
   function dismiss() {
@@ -163,6 +164,7 @@ function LandingPageInner() {
   // Check localStorage after mount (SSR-safe)
   useEffect(() => {
     if (!localStorage.getItem('btw_welcomed')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is unavailable during SSR, so this must run after hydration
       setShowWelcome(true);
     }
   }, []);

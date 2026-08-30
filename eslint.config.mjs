@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+
+    // Not application code — reference material that is never imported by src/**:
+    // the Claude Design handoff bundle and the original standalone prototypes
+    // that the Next.js implementation was ported from.
+    "src/design/**",
+    "spirograph-renderer.js",
+    "dimension-prompt.js",
   ]),
 ]);
 

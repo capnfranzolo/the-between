@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { SERIF } from '@/lib/btw';
 
 const HINT_KEY  = 'btw_controls_v2';
@@ -68,8 +68,10 @@ function FloatKey({ label, arrow, driftX, driftY, delay, dispersing, opacity }: 
 
 export default function ControlsHint({ trigger, onDone }: { trigger: boolean; onDone: () => void }) {
   const [phase, setPhase] = useState<'hidden' | 'visible' | 'dispersing'>('hidden');
-  // Random drift values, computed once on mount
-  const drifts = useRef<Array<{ x: number; y: number; delay: number }>>([]);
+  // Random drift values, computed once when the hint is triggered. These are
+  // read during render, so they must be state — a ref would not re-render and
+  // the compiler cannot track it.
+  const [drifts, setDrifts] = useState<Array<{ x: number; y: number; delay: number }>>([]);
 
   useEffect(() => {
     if (!trigger) return;
@@ -79,7 +81,8 @@ export default function ControlsHint({ trigger, onDone }: { trigger: boolean; on
     ensureCSS();
 
     // Pre-compute random drift per element (4 keys + 1 text = 5 elements)
-    drifts.current = Array.from({ length: 5 }, (_, i) => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- starts the timed hint animation when triggered
+    setDrifts(Array.from({ length: 5 }, (_, i) => {
       const angle = (Math.random() * Math.PI * 2);
       const dist  = 70 + Math.random() * 80;
       return {
@@ -87,7 +90,7 @@ export default function ControlsHint({ trigger, onDone }: { trigger: boolean; on
         y: Math.round(Math.sin(angle) * dist - 30), // bias upward
         delay: Math.round(i * 90 + Math.random() * 120),
       };
-    });
+    }));
 
     setPhase('visible');
     const disperseTimer = setTimeout(() => setPhase('dispersing'), 6500);
@@ -104,7 +107,7 @@ export default function ControlsHint({ trigger, onDone }: { trigger: boolean; on
   if (phase === 'hidden') return null;
 
   const dispersing = phase === 'dispersing';
-  const d = drifts.current;
+  const d = drifts;
 
   // Text drift
   const textOut: React.CSSProperties = dispersing ? {

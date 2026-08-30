@@ -3,7 +3,7 @@ import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import { MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH } from '@/lib/constants';
+import { MAX_UNIQUE_LENGTH } from '@/lib/constants';
 import type { CurveType } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 

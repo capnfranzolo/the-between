@@ -127,8 +127,12 @@ export async function GET(
         }}
       >
         {spiroBg && (
+          // Satori renders this JSX to a PNG, not to the DOM, so next/image
+          // (a React DOM component) cannot be used here.
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={spiroBg}
+            alt=""
             width={400}
             height={400}
             style={{ marginBottom: 40, display: 'block' }}

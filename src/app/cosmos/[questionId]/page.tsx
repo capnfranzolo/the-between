@@ -149,7 +149,7 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
     smokeBubble.current = bubble;
   }
 
-  useEffect(() => () => clearSmoke(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => clearSmoke(), []);
 
   return (
     <div
@@ -436,6 +436,7 @@ export default function CosmosPage() {
         : null;
       if (initialStarId) {
         autoFocused.current = true;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-focuses a star once cosmos data arrives; ref-guarded to run once
         setSelected(initialStarId);
         setTimeout(() => sceneRef.current?.flyToThought(initialStarId), 80);
       }

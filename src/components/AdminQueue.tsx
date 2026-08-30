@@ -106,7 +106,7 @@ export default function AdminQueue({ pendingStars, pendingConnections, onAction 
               />
             ) : (
               <div style={{ fontFamily: SERIF, fontSize: 17, lineHeight: 1.5, color: BTW.textPri }}>
-                "{star.answer}"
+                &quot;{star.answer}&quot;
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -168,7 +168,7 @@ export default function AdminQueue({ pendingStars, pendingConnections, onAction 
               {conn.from_star_id.slice(0, 8)} ↔ {conn.to_star_id.slice(0, 8)} · {new Date(conn.created_at).toLocaleDateString()}
             </div>
             <div style={{ fontFamily: SERIF, fontSize: 16, lineHeight: 1.5, color: BTW.textPri }}>
-              "{conn.reason}"
+              &quot;{conn.reason}&quot;
             </div>
             <ActionButtons
               onApprove={() => onAction('connection', conn.id, 'approve')}

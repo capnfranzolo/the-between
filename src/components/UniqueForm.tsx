@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import { MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH, QUESTION_ID_MOCK } from '@/lib/constants';
+import { MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH } from '@/lib/constants';
 
 interface UniqueFormProps {
   shortcode: string;

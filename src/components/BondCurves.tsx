@@ -1,6 +1,6 @@
 'use client';
 import { BTW, withAlpha } from '@/lib/btw';
-import { SERIF, SANS } from '@/lib/btw';
+import { SERIF } from '@/lib/btw';
 
 export interface CosmosBond {
   id: string;
@@ -139,7 +139,7 @@ export default function BondCurves({
               bond
             </div>
             <div style={{ fontFamily: SERIF, fontSize: 17, lineHeight: 1.4, color: BTW.textPri }}>
-              "{bo.reason}"
+              &quot;{bo.reason}&quot;
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${withAlpha(BTW.textPri, 0.12)}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[A, B].map(s => (
@@ -150,7 +150,7 @@ export default function BondCurves({
                     transform: 'translateY(-1px)',
                   }} />
                   <div style={{ fontFamily: SERIF, fontSize: 13, lineHeight: 1.45, color: BTW.textSec }}>
-                    "{s.text}"
+                    &quot;{s.text}&quot;
                   </div>
                 </div>
               ))}

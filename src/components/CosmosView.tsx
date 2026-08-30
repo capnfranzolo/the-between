@@ -39,6 +39,7 @@ export default function CosmosView({ stars: initialStars, bonds: initialBonds, q
   const [myShortcode, setMyShortcode] = useState<string | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is unavailable during SSR, so this must run after hydration
     setMyShortcode(localStorage.getItem('my_star'));
   }, []);
 

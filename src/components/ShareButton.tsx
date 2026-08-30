@@ -86,6 +86,7 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
 
   useEffect(() => {
     if (!nudge) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- starts the timed nudge animation when the prop flips
     setNudgePhase('visible');
     const fadeTimer = setTimeout(() => setNudgePhase('fading'), 3200);
     const goneTimer = setTimeout(() => setNudgePhase('gone'), 3900); // 700ms for transition
@@ -157,6 +158,7 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
 
       // Fallback 1: instagram-stories URL scheme (opens Stories on iOS even
       // without the image; user can pull from camera roll)
+      // eslint-disable-next-line react-hooks/immutability -- assigning window.location.href is a navigation, not a state mutation
       window.location.href =
         'instagram-stories://share?backgroundTopColor=%231E1840&backgroundBottomColor=%23A06880';
       return;

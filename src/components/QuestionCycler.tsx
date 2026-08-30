@@ -54,6 +54,7 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
   useEffect(() => {
     if (!initialQuestionId || questions === FALLBACK) return;
     const idx = questions.findIndex(q => q.id === initialQuestionId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- jumps to the requested question once the list loads from the server
     if (idx !== -1 && idx !== currentIndex) setCurrentIndex(idx);
     // Only run once when questions first load
     // eslint-disable-next-line react-hooks/exhaustive-deps
