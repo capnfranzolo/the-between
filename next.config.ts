@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The Coder workspace serves the dev server through a proxy on a different
+  // hostname than localhost, and Next blocks cross-origin requests to dev-only
+  // assets (HMR, etc.) by default. Development only — ignored in production builds.
+  allowedDevOrigins: ['*.coder.portlandlabs.ninja'],
+
   // @napi-rs/canvas is a native Node.js addon (.node binary).
   // It cannot be bundled by Turbopack — require it directly at runtime instead.
   serverExternalPackages: ['@napi-rs/canvas'],
