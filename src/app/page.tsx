@@ -8,9 +8,12 @@ import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycl
 import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
+import LivenessCounter from '@/components/LivenessCounter';
+import ShareButton from '@/components/ShareButton';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
+import { SITE_URL } from '@/lib/constants';
 
 // The landing cosmos is always question 1 unless a specific question is
 // requested (e.g. the "+" affordance on another cosmos page linking back
@@ -28,6 +31,7 @@ interface CosmosData {
   question: { id: string; text: string } | null;
   stars: CosmosStarData[];
   bonds: CosmosBond[];
+  totals?: { thoughts: number; bonds: number };
 }
 
 function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
@@ -75,6 +79,10 @@ function LandingPageInner() {
   // ── "Add yours" composer overlay ────────────────────────────────────────
   const [showComposer, setShowComposer] = useState(cameToContribute);
   const [pending, setPending] = useState<ValidatedPayload | null>(null);
+
+  // Real connection id for the bond just formed, once /api/connect confirms —
+  // lets the confirmation panel offer a real "share this pair" link.
+  const [connectedBondId, setConnectedBondId] = useState<string | null>(null);
 
   const handleDwell = useCallback(() => {
     setDwellCount(c => c + 1);
@@ -156,9 +164,9 @@ function LandingPageInner() {
             const raw = localStorage.getItem(PENDING_BOND_KEY(myStarId));
             if (raw) {
               try {
-                const b = JSON.parse(raw) as { fromStarId: string; toStarId: string; reason: string };
+                const b = JSON.parse(raw) as { id?: string; fromStarId: string; toStarId: string; reason: string };
                 setLocalBonds([{
-                  id: 'pending-' + b.fromStarId,
+                  id: b.id ?? ('pending-' + b.fromStarId),
                   from_id: b.fromStarId,
                   to_id: b.toStarId,
                   reason: b.reason,
@@ -173,10 +181,16 @@ function LandingPageInner() {
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
-  const bonds = useMemo(
-    () => [...(data?.bonds ?? []), ...localBonds],
-    [data, localBonds],
-  );
+  const bonds = useMemo(() => {
+    const serverBonds = data?.bonds ?? [];
+    // Once /api/connect confirms, the same bond exists both server-side (after
+    // a refetch) and in localBonds (the optimistic copy, now carrying the real
+    // id — see handleConnect). Drop the local copy so it isn't listed twice.
+    const serverIds = new Set(serverBonds.map(b => b.id));
+    const serverPairs = new Set(serverBonds.map(b => `${b.from_id}|${b.to_id}`));
+    const extra = localBonds.filter(b => !serverIds.has(b.id) && !serverPairs.has(`${b.from_id}|${b.to_id}`));
+    return [...serverBonds, ...extra];
+  }, [data, localBonds]);
 
   const thoughts = useMemo<ThoughtData[]>(() => {
     if (!allStars.length) return [];
@@ -229,7 +243,10 @@ function LandingPageInner() {
     if (!selected) return [];
     return bonds
       .filter(b => b.from_id === selected || b.to_id === selected)
+      // Local/pending ids ("local-…", "pending-…") aren't real connection
+      // rows yet — the OG endpoint can't render them, so skip the share link.
       .map(b => ({
+        id: b.id.startsWith('local-') || b.id.startsWith('pending-') ? undefined : b.id,
         reason: b.reason,
         relatedStarId: b.from_id === selected ? b.to_id : b.from_id,
       }));
@@ -246,6 +263,7 @@ function LandingPageInner() {
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
+    setConnectedBondId(null);
     setReason('');
     sceneRef.current?.flyToThought(id);
   };
@@ -254,14 +272,16 @@ function LandingPageInner() {
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
+    setConnectedBondId(null);
     setReason('');
   };
 
   const handleConnect = async (targetId: string) => {
     if (!userStarId || reason.trim().length < 4) return;
     const savedReason = reason.trim();
+    const tempId = 'local-' + Date.now();
     const newBond: CosmosBond = {
-      id: 'local-' + Date.now(),
+      id: tempId,
       from_id: userStarId,
       to_id: targetId,
       reason: savedReason,
@@ -271,6 +291,7 @@ function LandingPageInner() {
     setReason('');
     setConnecting(false);
     setConnectConfirmed(true);
+    setConnectedBondId(null);
 
     try {
       const res = await fetch('/api/connect', {
@@ -285,8 +306,11 @@ function LandingPageInner() {
       });
       const payload = await res.json();
       if (payload.ok) {
+        const realId: string = payload.connection?.id ?? tempId;
+        setLocalBonds(b => b.map(bd => bd.id === tempId ? { ...bd, id: realId } : bd));
+        setConnectedBondId(realId);
         localStorage.setItem(PENDING_BOND_KEY(userStarId), JSON.stringify({
-          fromStarId: userStarId, toStarId: targetId, reason: savedReason,
+          id: realId, fromStarId: userStarId, toStarId: targetId, reason: savedReason,
         }));
       }
     } catch { /* bond already shown optimistically */ }
@@ -322,6 +346,10 @@ function LandingPageInner() {
         onModeChange={setSceneMode}
         onDwell={handleDwell}
       />
+
+      {data?.totals && (
+        <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />
+      )}
 
       {/* Sky fades in over the already-gliding drift — first-visit only */}
       {introActive && (
@@ -409,6 +437,7 @@ function LandingPageInner() {
             userStar={userStarId && byId[userStarId] && !selectedStar.mine
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
+            onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
           />
         )}
 
@@ -436,6 +465,18 @@ function LandingPageInner() {
             <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
             </div>
+            {connectedBondId && (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontFamily: SANS, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim }}>
+                  share this pair
+                </span>
+                <ShareButton
+                  url={`https://${SITE_URL}/b/${connectedBondId}`}
+                  ogImageUrl={`https://${SITE_URL}/api/og/bond/${connectedBondId}`}
+                  shareText="Two strangers' thoughts, bound on The Between"
+                />
+              </div>
+            )}
             <button
               onClick={clearSelection}
               style={{

@@ -1,7 +1,6 @@
 'use client';
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MAX_UNIQUE_LENGTH } from '@/lib/constants';
 import type { CurveType } from '@/lib/spirograph/renderer';
@@ -21,7 +20,6 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   const tooLong = text.length > MAX_UNIQUE_LENGTH;
 
@@ -43,7 +41,12 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
       const data = await res.json();
       if (data.shortcode) {
         localStorage.setItem('my_star', data.shortcode);
-        router.push(`/cosmos/${data.questionId}?star=${data.shortcode}`);
+        // Hard navigation (not router.push): this overlay can be opened from
+        // /cosmos/[questionId] itself (Phase 6 "What shape are you?" CTA), where
+        // a client-side push to the same route segment (only `?star=` differs)
+        // would not remount the page or refetch cosmos data — the new star
+        // would never appear. A full navigation guarantees the fresh mount.
+        window.location.assign(`/cosmos/${data.questionId}?star=${data.shortcode}`);
       } else {
         setError(data.error ?? 'Something went wrong. Try again.');
         setSubmitting(false);

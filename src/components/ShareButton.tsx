@@ -8,12 +8,14 @@ interface ShareButtonProps {
   ogImageUrl?: string;
   style?: React.CSSProperties;
   nudge?: boolean;
+  /** Override the default share caption (e.g. for a bond rather than a single star). */
+  shareText?: string;
 }
 
 // Social share URL builders
-function buildShareUrl(platform: string, url: string): string {
+function buildShareUrl(platform: string, url: string, shareText: string): string {
   const encoded = encodeURIComponent(url);
-  const text = encodeURIComponent("A thought on The Between — what do you know is true but can't prove?");
+  const text = encodeURIComponent(shareText);
   switch (platform) {
     case 'facebook':  return `https://www.facebook.com/sharer/sharer.php?u=${encoded}`;
     case 'x':         return `https://twitter.com/intent/tweet?url=${encoded}&text=${text}`;
@@ -78,7 +80,9 @@ const CheckIcon = () => (
 const TRAY_WIDTH  = 164;
 const TRAY_HEIGHT = 216;
 
-export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButtonProps) {
+const DEFAULT_SHARE_TEXT = "A thought on The Between — what do you know is true but can't prove?";
+
+export default function ShareButton({ url, ogImageUrl, style, nudge, shareText = DEFAULT_SHARE_TEXT }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -163,7 +167,7 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
         'instagram-stories://share?backgroundTopColor=%231E1840&backgroundBottomColor=%23A06880';
       return;
     } else {
-      window.open(buildShareUrl(id, url), '_blank', 'noopener,noreferrer,width=600,height=500');
+      window.open(buildShareUrl(id, url, shareText), '_blank', 'noopener,noreferrer,width=600,height=500');
     }
     setOpen(false);
   };

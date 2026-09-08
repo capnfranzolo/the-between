@@ -31,11 +31,13 @@ interface StarDetailProps {
   hasMystar: boolean;
   userHasOutgoingBond?: boolean;
   onConnect: () => void;
-  connections?: Array<{ reason: string; relatedStarId?: string }>;
+  connections?: Array<{ id?: string; reason: string; relatedStarId?: string }>;
   onConnectionClick?: (id: string) => void;
   onDismiss?: () => void;
   nudge?: boolean;
   userStar?: UserStarContext | null;
+  /** Defect #5 — visitor has no star of their own in this cosmos. */
+  onAnswerCTA?: () => void;
 }
 
 // Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas.
@@ -196,7 +198,7 @@ function StarMini({ dims, size, text, animVariant = 'rise' }: {
 
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
-  connections, onConnectionClick, onDismiss, nudge, userStar,
+  connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -321,27 +323,41 @@ export default function StarDetail({
               {connections.map((c, i) => (
                 <div
                   key={i}
-                  onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
                   style={{
-                    paddingLeft: 14,
-                    borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
-                    fontFamily: SANS, fontSize: 13,
-                    lineHeight: 1.45, color: BTW.textSec,
-                    minHeight: 44, display: 'flex', alignItems: 'center',
-                    cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
-                    borderRadius: 4,
-                    transition: 'color .15s, background .15s',
+                    display: 'flex', alignItems: 'center', gap: 8,
                   }}
-                  onMouseEnter={c.relatedStarId && onConnectionClick ? e => {
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                  } : undefined}
-                  onMouseLeave={c.relatedStarId && onConnectionClick ? e => {
-                    e.currentTarget.style.color = '';
-                    e.currentTarget.style.background = '';
-                  } : undefined}
                 >
-                  {c.reason}
+                  <div
+                    onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
+                    style={{
+                      flex: 1,
+                      paddingLeft: 14,
+                      borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
+                      fontFamily: SANS, fontSize: 13,
+                      lineHeight: 1.45, color: BTW.textSec,
+                      minHeight: 44, display: 'flex', alignItems: 'center',
+                      cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
+                      borderRadius: 4,
+                      transition: 'color .15s, background .15s',
+                    }}
+                    onMouseEnter={c.relatedStarId && onConnectionClick ? e => {
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                    } : undefined}
+                    onMouseLeave={c.relatedStarId && onConnectionClick ? e => {
+                      e.currentTarget.style.color = '';
+                      e.currentTarget.style.background = '';
+                    } : undefined}
+                  >
+                    {c.reason}
+                  </div>
+                  {c.id && (
+                    <ShareButton
+                      url={`https://${SITE_URL}/b/${c.id}`}
+                      ogImageUrl={`https://${SITE_URL}/api/og/bond/${c.id}`}
+                      shareText="A bond formed on The Between"
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -395,6 +411,29 @@ export default function StarDetail({
           <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
             your star
           </div>
+        )}
+
+        {/* Defect #5 — shared-link visitor with no star of their own in this
+            cosmos gets a door in, not a dead end. */}
+        {!hasMystar && onAnswerCTA && (
+          <button
+            onClick={onAnswerCTA}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+              color: BTW.horizon[3],
+              padding: '10px 18px',
+              borderRadius: 999,
+              fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+              cursor: 'pointer', fontFamily: SANS,
+              touchAction: 'manipulation',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12)}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            What shape are you? →
+          </button>
         )}
       </div>
     </div>
