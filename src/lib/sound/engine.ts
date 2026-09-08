@@ -93,7 +93,6 @@ export class SoundEngine {
   private world: WorldSoundConfig = DEFAULT_WORLD_SOUND;
   private cameraSpeed = 0;
   private windTarget = 0;
-  private windBand = 300;
   private windAt = 0;
 
   private queue: Queued[] = [];
@@ -410,34 +409,20 @@ export class SoundEngine {
     const ctx = this.ctx;
     if (!ctx || !this.windGain || !this.windFilter) return;
     const now = ctx.currentTime;
-    // This is called every animation frame. Scheduling automation at 60 Hz
-    // destabilises a biquad (Chrome warns about it outright: "state is bad,
-    // probably due to unstable filter caused by fast parameter automation").
-    // 8 Hz alone wasn't a low enough rate to keep the bandpass's coefficient
-    // recompute stable during a drift glide's accel/decel — throttle harder
-    // (~3 Hz) and widen the frequency deadband so the filter's target only
-    // moves in coarser, rarer steps.
+    // This is called every animation frame. Any repeated automation of a
+    // biquad's frequency eventually trips Chrome's stability check ("state is
+    // bad, probably due to unstable filter caused by fast parameter
+    // automation") — throttling only made it rarer. So the bandpass stays at
+    // its mount-time frequency forever, and camera speed drives ONLY the wind
+    // gain: gain automation cannot destabilise anything, and at this level
+    // (≤ WIND_MAX) the lost timbral sweep was imperceptible anyway.
     if (now - this.windAt < 0.3) return;
     const u = Math.max(0, Math.min(1, (unitsPerSec - WIND_FLOOR) / (WIND_CEIL - WIND_FLOOR)));
     const target = Math.pow(u, 1.5) * WIND_MAX;
-    const targetMoved = Math.abs(target - this.windTarget) >= 0.0008;
-    // The band only creeps, and only when it has somewhere to go — a wider
-    // deadband (60 Hz) means far fewer, larger re-targets of a resonant node.
-    const band = 300 + u * 280;
-    const bandMoved = Math.abs(band - this.windBand) > 60;
-    if (!targetMoved && !bandMoved) return;
+    if (Math.abs(target - this.windTarget) < 0.0008) return;
     this.windAt = now;
-    if (targetMoved) {
-      this.windTarget = target;
-      this.windGain.gain.setTargetAtTime(target, now, 0.4);
-    }
-    if (bandMoved) {
-      this.windBand = band;
-      // A slower time constant (was 0.5s) means each re-target creeps rather
-      // than lurches, which is what actually keeps the biquad's coefficients
-      // numerically stable frame to frame.
-      this.windFilter.frequency.setTargetAtTime(band, now, 1.1);
-    }
+    this.windTarget = target;
+    this.windGain.gain.setTargetAtTime(target, now, 0.4);
   }
 
   // ── One-shots ──────────────────────────────────────────────────────────────
