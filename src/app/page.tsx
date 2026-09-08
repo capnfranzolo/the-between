@@ -265,6 +265,13 @@ function LandingPageInner() {
       }));
   }, [selected, bonds]);
 
+  // The star the visitor's own star orbits, if it already orbits one — the
+  // difference between "already orbits another" and "orbits this one" (#9).
+  const myBondTargetId = useMemo(() => {
+    if (!userStarId) return null;
+    return bonds.find(b => b.from_id === userStarId)?.to_id ?? null;
+  }, [userStarId, bonds]);
+
   const userHasOutgoingBond = useMemo(() => {
     if (!userStarId) return false;
     if (bonds.some(b => b.from_id === userStarId)) return true;
@@ -307,6 +314,9 @@ function LandingPageInner() {
     setConnectConfirmed(true);
     setConnectedBondId(null);
     sound.play('bond'); // the finale — fires with the confirmation, not the round trip
+    // …and the sky performs it: both stars bloom, and the reason is written
+    // once along the orbit they now share.
+    sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
 
     try {
       const res = await fetch('/api/connect', {
@@ -455,6 +465,7 @@ function LandingPageInner() {
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
+            isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
           />
         )}
 
@@ -520,6 +531,11 @@ function LandingPageInner() {
             userStar={userStarId && byId[userStarId]
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
+            targetStar={{
+              text: selectedStar.text,
+              shortcode: selectedStar.shortcode,
+              dimensions: selectedStar.dimensions,
+            }}
           />
         )}
 

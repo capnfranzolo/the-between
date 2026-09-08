@@ -4,6 +4,10 @@ import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
 import { sound } from '@/lib/sound';
+import {
+  BloomChoreographer, OrbitInscription, orderRingForReading,
+  NEAR_SIDE, GLYPH_EM, PREFERRED_FONT, type ScreenPoint,
+} from './moments';
 
 export interface ThoughtData {
   id: string;
@@ -47,6 +51,18 @@ export interface CosmosSceneHandle {
    * it explores the new world fresh.
    */
   crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) => void;
+  /**
+   * Phase 8 — star birth. Holds the star at nothing, then blooms it in place
+   * (scale/opacity/glow) once the camera has glided close enough for the
+   * moment to read. The birth sound fires on that same frame, so the bloom is
+   * never heard before it is seen.
+   */
+  bloomStar: (id: string) => void;
+  /**
+   * Phase 8 — the bond finale. Both stars bloom together and the reason is
+   * written once along the orbit they now share, then it is gone.
+   */
+  bondFinale: (fromId: string, toId: string, reason: string) => void;
 }
 
 // Crossfade timing — exported so callers can guard re-entrancy for exactly
@@ -144,6 +160,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
+    const bloomStarFnRef = useRef<((id: string) => void) | null>(null);
+    const bondFinaleFnRef = useRef<((fromId: string, toId: string, reason: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
     const activeBondIds = useRef<Set<string>>(new Set());
 
@@ -187,6 +205,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       setDrifting: (on: boolean) => setDriftingFnRef.current?.(on),
       crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) =>
         crossfadeFnRef.current?.(atmosphere, onMidpoint),
+      bloomStar: (id: string) => bloomStarFnRef.current?.(id),
+      bondFinale: (fromId: string, toId: string, reason: string) =>
+        bondFinaleFnRef.current?.(fromId, toId, reason),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -527,6 +548,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [255, 255, 255];
         const group = new THREE.Group();
         let spiro: StarSpiro | null = null;
+        let glow: THREE.Sprite | null = null;
 
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
@@ -581,6 +603,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }));
           glowSprite.scale.set(SPRITE_SCALE * 2.2, SPRITE_SCALE * 2.2, 1);
           group.add(glowSprite);
+          // Kept on the group so the Phase 8 bloom can flare it without
+          // walking the children every frame.
+          glow = glowSprite;
         }
         // No collider mesh — picking is generous screen-space projection (see pickStar)
 
@@ -595,6 +620,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
           spiro,
+          glow,
           // dotDims: stored when spiro is null (beyond MAX_BAKED cap) so activateLive()
           // can upgrade the dot fallback to a full spirograph on first selection.
           dotDims: spiro ? undefined : t.dimensions,
@@ -771,6 +797,88 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       removeThoughtFnRef.current = destroyThought;
       addBondFnRef.current = createBond;
       removeBondFnRef.current = destroyBond;
+
+      // ─── MOMENTS (Phase 8) ──────────────────────────────────────────────
+      // Star birth and the bond finale. Both are transient: the bloom is an
+      // envelope multiplied into the existing sprite scale/opacity (no new
+      // geometry, ever), and the inscription is one SVG overlay that holds
+      // nothing between moments. See ./moments.ts.
+      const blooms = new BloomChoreographer();
+      const inscription = new OrbitInscription(container);
+      let pendingFinale: { fromId: string; toId: string; reason: string; waited: number } | null = null;
+      let activeFinale: { fromId: string; toId: string; textLen: number } | null = null;
+
+      const ringVec = new THREE.Vector3();
+      const ringCam = new THREE.Vector3();
+
+      // Projects the orbit the two bound stars now share — widened to a legible
+      // ring around the pair, ordered so the reason reads along its near side.
+      // null when the geometry isn't there yet or any of it is behind the camera.
+      function projectOrbitRing(fromId: string, toId: string, textLen: number): ScreenPoint[] | null {
+        if (!container) return null; // hoisted fn — re-narrow for TS
+        const fg = thoughtGroups.get(fromId);
+        const tg = thoughtGroups.get(toId);
+        if (!fg || !tg) return null;
+        const orbit = fg.userData.orbit as { radius: number; tilt: number } | null;
+        if (!orbit) return null;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        const N = 96;
+        const sinT = Math.sin(orbit.tilt);
+        const cosT = Math.cos(orbit.tilt);
+
+        const ring = (radius: number): ScreenPoint[] | null => {
+          const out: ScreenPoint[] = [];
+          for (let i = 0; i < N; i++) {
+            const a = (i / N) * Math.PI * 2;
+            ringVec.set(
+              tg.position.x + Math.cos(a) * radius,
+              tg.position.y + Math.sin(a) * radius * sinT,
+              tg.position.z + Math.sin(a) * radius * cosT,
+            );
+            ringCam.copy(ringVec).applyMatrix4(camera.matrixWorldInverse);
+            if (ringCam.z > -1) return null; // behind (or on) the camera plane
+            ringVec.project(camera);
+            out.push({ x: (ringVec.x + 1) / 2 * w, y: (-ringVec.y + 1) / 2 * h });
+          }
+          return out;
+        };
+
+        const base = ring(orbit.radius);
+        if (!base) return null;
+        let minX = Infinity, maxX = -Infinity;
+        for (const p of base) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
+        const baseW = Math.max(maxX - minX, 1);
+        let basePerim = 0;
+        for (let i = 1; i < base.length; i++) {
+          basePerim += Math.hypot(base[i].x - base[i - 1].x, base[i].y - base[i - 1].y);
+        }
+        // Widen the true orbit only as far as the reason needs to be readable,
+        // and never past what the viewport can hold: a short reason is written
+        // on the orbit itself, a long one on a wider ring around the pair.
+        const wantPerim = (textLen * PREFERRED_FONT * GLYPH_EM) / NEAR_SIDE;
+        const maxK = Math.min(w * 0.86, 560) / baseW;
+        const k = Math.max(1, Math.min(Math.max(maxK, 1), wantPerim / Math.max(basePerim, 1)));
+        const wide = k > 1.02 ? ring(orbit.radius * k) : base;
+        if (!wide) return null;
+        return orderRingForReading(wide);
+      }
+
+      bloomStarFnRef.current = (id: string) => {
+        // 'arrival' — the star stays at nothing until the camera has come to
+        // it, so the bloom and the birth sound land on the same beat.
+        blooms.begin(id, 'arrival', () => sound.play('birth'));
+      };
+
+      bondFinaleFnRef.current = (fromId: string, toId: string, reason: string) => {
+        blooms.begin(fromId, 'now');
+        blooms.begin(toId, 'now');
+        inscription.clear();
+        activeFinale = null;
+        // The orbit is created by the bonds prop sync a beat later; the tick
+        // below waits for it (and for the blooms to lead) before writing.
+        pendingFinale = { fromId, toId, reason, waited: 0 };
+      };
 
       // ─── CAMERA STATE MACHINE ───────────────────────────────────────────
       // Exactly one mode owns the camera each frame (see CamMode docs above).
@@ -1031,6 +1139,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (fadeOutActive || fadeInActive) return;
         hideDwellText();
         clearSmoke();
+        // A moment belongs to the world it happened in.
+        inscription.clear();
+        blooms.clear();
+        pendingFinale = null;
+        activeFinale = null;
         if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
         hoverStarId = null;
 
@@ -1772,6 +1885,43 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           g.position.z = anchorGroup.position.z + Math.sin(angle) * orbit.radius * Math.cos(orbit.tilt);
           g.position.y = anchorGroup.position.y + Math.sin(angle) * orbit.radius * Math.sin(orbit.tilt);
         });
+        // ── MOMENTS TICK (Phase 8) — runs after the orbit pass so the
+        // inscription is aimed at where the stars are this frame, and before
+        // the scale pass, which samples the blooms. ──
+        blooms.update(dt, id => {
+          const g = thoughtGroups.get(id);
+          return g ? camera.position.distanceTo(g.position) : null;
+        });
+        if (pendingFinale) {
+          const fg = thoughtGroups.get(pendingFinale.fromId);
+          pendingFinale.waited += dt;
+          // Let the mutual bloom lead by a beat, then write — once the bond's
+          // orbit actually exists.
+          if (pendingFinale.waited >= 0.55 && fg?.userData.orbit) {
+            const pts = projectOrbitRing(
+              pendingFinale.fromId, pendingFinale.toId, pendingFinale.reason.trim().length,
+            );
+            if (pts && inscription.begin(pts, pendingFinale.reason)) {
+              activeFinale = {
+                fromId: pendingFinale.fromId,
+                toId: pendingFinale.toId,
+                textLen: pendingFinale.reason.trim().length,
+              };
+              pendingFinale = null;
+            }
+          }
+          // The orbit never arrived (or never projected): the blooms stand alone.
+          if (pendingFinale && pendingFinale.waited > 3) pendingFinale = null;
+        }
+        if (inscription.active) {
+          const pts = activeFinale
+            ? projectOrbitRing(activeFinale.fromId, activeFinale.toId, activeFinale.textLen)
+            : null;
+          if (pts) inscription.setPath(pts);
+          inscription.update(dt);
+          if (!inscription.active) activeFinale = null;
+        }
+
         // Pass 3: scale pulse + spiro animation for all stars
         // Throttle dot→spiro upgrades to 2 per frame to avoid mid-frame hitching.
         let dotUpgradesThisFrame = 0;
@@ -1783,7 +1933,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const curMult = g.userData.scaleMult as number;
           const newMult = curMult + (targetMult - curMult) * Math.min(dt * 3.5, 1);
           g.userData.scaleMult = newMult;
-          g.scale.setScalar(baseScale * newMult);
+          // Phase 8 — a birth/finale bloom multiplies into the star's own
+          // scale rather than replacing it, so focus framing keeps working.
+          const bloom = blooms.sample(id);
+          g.scale.setScalar(baseScale * newMult * (bloom ? bloom.scale : 1));
+          if (bloom) {
+            setGroupOpacity(g, bloom.opacity);
+            const glowSprite = g.userData.glow as THREE.Sprite | null;
+            if (glowSprite) {
+              const gs = SPRITE_SCALE * 2.2 * bloom.glow;
+              glowSprite.scale.set(gs, gs, 1);
+            }
+          }
 
           // Proximity upgrade: dot-fallback stars get a real spirograph once they're
           // close enough to be clearly visible (~20+ px on screen ≈ dist < 350).
@@ -1872,6 +2033,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
         crossfadeFnRef.current = null;
+        bloomStarFnRef.current = null;
+        bondFinaleFnRef.current = null;
+        blooms.clear();
+        inscription.dispose();
         skyGradTexB?.dispose();
         (skyMat.uniforms.uSkyGrad.value as THREE.Texture | null)?.dispose();
 
@@ -1951,17 +2116,22 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       const next = new Set(bonds?.map(b => b.id) ?? []);
 
-      for (const b of (bonds ?? [])) {
-        if (!activeBondIds.current.has(b.id)) {
-          add(b);
-          activeBondIds.current.add(b.id);
-        }
-      }
-
+      // Removals FIRST. A bond owns the from-star's single orbit slot, and the
+      // optimistic id ("local-…") is swapped for the real one the moment
+      // /api/connect answers: adding before removing would set the orbit from
+      // the new id and then have the old id's teardown null it again, leaving
+      // the just-bound star frozen off its orbit.
       for (const id of [...activeBondIds.current]) {
         if (!next.has(id)) {
           remove(id);
           activeBondIds.current.delete(id);
+        }
+      }
+
+      for (const b of (bonds ?? [])) {
+        if (!activeBondIds.current.has(b.id)) {
+          add(b);
+          activeBondIds.current.add(b.id);
         }
       }
     }, [bonds]);

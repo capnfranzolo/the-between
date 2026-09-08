@@ -38,6 +38,10 @@ interface StarDetailProps {
   userStar?: UserStarContext | null;
   /** Defect #5 — visitor has no star of their own in this cosmos. */
   onAnswerCTA?: () => void;
+  /** Phase 8 — this panel opened on the star that was just born. */
+  justBorn?: boolean;
+  /** Defect #9 — this is the star the visitor's own star already orbits. */
+  isBondTarget?: boolean;
 }
 
 // Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas.
@@ -199,6 +203,7 @@ function StarMini({ dims, size, text, animVariant = 'rise' }: {
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
   connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
+  justBorn, isBondTarget,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -239,6 +244,11 @@ export default function StarDetail({
 
   const showConnect = hasMystar && !star.mine && !userHasOutgoingBond;
   const showUserStar = userStar && showConnect;
+  // Defect #9 — the one-bond rule is explained where the affordance was, never
+  // silently missing. On the star the visitor actually bound to, the state is
+  // not a refusal but a fact.
+  const spentOnAnother = hasMystar && !star.mine && !!userHasOutgoingBond && !isBondTarget;
+  const spentOnThis    = hasMystar && !star.mine && !!userHasOutgoingBond && !!isBondTarget;
 
   return (
     <div
@@ -407,9 +417,44 @@ export default function StarDetail({
           </button>
         )}
 
+        {spentOnAnother && (
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
+              color: BTW.textDim,
+              padding: '9px 14px',
+              borderRadius: 999,
+              fontSize: 10, fontWeight: 400, letterSpacing: '0.14em',
+              textTransform: 'uppercase', lineHeight: 1.5,
+              textAlign: 'right', maxWidth: 200, whiteSpace: 'normal',
+              cursor: 'default', fontFamily: SANS,
+            }}
+          >
+            your star already orbits another
+          </button>
+        )}
+
+        {spentOnThis && (
+          <div style={{
+            fontSize: 10, color: BTW.horizon[3], opacity: 0.85,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            textAlign: 'right', maxWidth: 200, lineHeight: 1.5,
+          }}>
+            your star orbits this one
+          </div>
+        )}
+
         {star.mine && (
-          <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-            your star
+          <div style={{
+            fontSize: 12, color: BTW.horizon[3],
+            letterSpacing: justBorn ? '0.12em' : '0.18em',
+            textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5,
+          }}>
+            {justBorn ? 'your star lives here.' : 'your star'}
           </div>
         )}
 

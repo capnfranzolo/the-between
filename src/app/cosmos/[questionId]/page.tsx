@@ -410,9 +410,13 @@ export default function CosmosPage() {
   // as a no-op backstop after a rail switch, which already called setWorld).
   useEffect(() => { sound.setWorld(currentQuestionId); }, [currentQuestionId]);
 
-  // Phase 7 — a star was just born: submitting navigates here, so the moment
-  // arrives across a document boundary as a sessionStorage flag.
+  // Phase 7/8 — a star was just born: submitting navigates here, so the moment
+  // arrives across a document boundary as a sessionStorage flag. The camera is
+  // already on its way (the ?star= autofocus below); the scene holds the star
+  // at nothing until it arrives, then blooms it and plays the birth sound on
+  // that same frame.
   const birthConsumed = useRef(false);
+  const [bornShortcode, setBornShortcode] = useState<string | null>(null);
   useEffect(() => {
     if (birthConsumed.current || !data) return;
     let born: string | null = null;
@@ -421,7 +425,11 @@ export default function CosmosPage() {
     birthConsumed.current = true;
     try { sessionStorage.removeItem(BIRTH_FLAG_KEY); } catch { /* private mode */ }
     if (starParam && born !== starParam) return; // stale flag from another star
-    sound.play('birth');
+    const bornStar = data.stars.find(s => s.shortcode === born);
+    if (!bornStar) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes the one-shot birth flag once cosmos data arrives; ref-guarded
+    setBornShortcode(born);
+    sceneRef.current?.bloomStar(bornStar.id);
   }, [data, starParam]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
@@ -498,6 +506,13 @@ export default function CosmosPage() {
       }));
   }, [selected, bonds]);
 
+  // The star the visitor's own star orbits, if it already orbits one — the
+  // difference between "already orbits another" and "orbits this one" (#9).
+  const myBondTargetId = useMemo(() => {
+    if (!userStarId) return null;
+    return bonds.find(b => b.from_id === userStarId)?.to_id ?? null;
+  }, [userStarId, bonds]);
+
   const userHasOutgoingBond = useMemo(() => {
     if (!userStarId) return false;
     if (bonds.some(b => b.from_id === userStarId)) return true;
@@ -532,6 +547,9 @@ export default function CosmosPage() {
     setConnectConfirmed(true);
     setConnectedBondId(null);
     sound.play('bond'); // the finale — fires with the confirmation, not the round trip
+    // …and the sky performs it: both stars bloom, and the reason is written
+    // once along the orbit they now share.
+    sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
 
     try {
       const res = await fetch('/api/connect', {
@@ -668,6 +686,8 @@ export default function CosmosPage() {
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
+            justBorn={!!bornShortcode && selectedStar.shortcode === bornShortcode}
+            isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
           />
         )}
 
@@ -733,6 +753,11 @@ export default function CosmosPage() {
             userStar={userStarId && byId[userStarId]
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
+            targetStar={{
+              text: selectedStar.text,
+              shortcode: selectedStar.shortcode,
+              dimensions: selectedStar.dimensions,
+            }}
           />
         )}
 
