@@ -1,12 +1,17 @@
 'use client';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createSpirograph } from '@/lib/spirograph/renderer';
-import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode } from '@/components/cosmos/CosmosScene';
+import CosmosScene, {
+  type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode,
+  CROSSFADE_IN_MS,
+} from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
+import SkyRail from '@/components/SkyRail';
+import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString } from '@/lib/btw';
 
@@ -27,6 +32,23 @@ function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
 }
 
 const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
+
+// A pending (optimistically-shown, not-yet-confirmed) outgoing bond for the
+// visitor's own star in this world, if any — read on initial load and again
+// on every world switch (each question has its own bond, if any).
+function pendingBondFor(stars: CosmosStarData[], myShortcode: string | null): CosmosBond[] {
+  if (!myShortcode) return [];
+  const myStarId = stars.find(s => s.shortcode === myShortcode)?.id;
+  if (!myStarId) return [];
+  const raw = localStorage.getItem(PENDING_BOND_KEY(myStarId));
+  if (!raw) return [];
+  try {
+    const b = JSON.parse(raw) as { fromStarId: string; toStarId: string; reason: string };
+    return [{ id: 'pending-' + b.fromStarId, from_id: b.fromStarId, to_id: b.toStarId, reason: b.reason }];
+  } catch {
+    return [];
+  }
+}
 
 // ── Shared inline star canvas with circular clip + hover smoke ────────────────
 function ensureSmokeCSSInline() {
@@ -258,7 +280,6 @@ export default function CosmosPage() {
   const searchParams = useSearchParams();
   const starParam = searchParams.get('star');
   const [data, setData] = useState<CosmosData | null>(null);
-  const [allQuestions, setAllQuestions] = useState<{ id: string }[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectConfirmed, setConnectConfirmed] = useState(false);
@@ -273,14 +294,33 @@ export default function CosmosPage() {
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
 
-  // Fetch all questions so we can cycle to the next one
+  // ── Phase 4 — sky rail: the world currently shown (may differ from the
+  // route param after a rail switch; the URL is kept in sync via pushState
+  // without a real navigation). ──
+  const [currentQuestionId, setCurrentQuestionId] = useState(questionId);
+  const [railQuestions, setRailQuestions] = useState<{ id: string; text: string; starCount: number }[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+  const pendingPopRef = useRef<string | null>(null);
+  // Lets the switch-completion timeout drain a queued popstate switch without
+  // performSwitch referencing itself inside its own useCallback.
+  const performSwitchRef = useRef<(newId: string, pushHistory: boolean) => void>(() => {});
+
+  // Fetch all active questions (+ star counts) for the sky rail
   useEffect(() => {
     fetch('/api/questions')
       .then(r => r.json())
-      .then(d => setAllQuestions(d.questions ?? []))
+      .then(d => setRailQuestions(
+        (d.questions ?? []).map((q: { id: string; text: string; starCount?: number }) => ({
+          id: q.id, text: q.text, starCount: q.starCount ?? 0,
+        })),
+      ))
       .catch(() => {});
   }, []);
 
+  // Initial load — keyed on the route param, which never changes without a
+  // real navigation (the rail updates `currentQuestionId` + the URL via
+  // pushState instead, see performSwitch below), so this runs exactly once.
   useEffect(() => {
     fetch(`/api/cosmos/${questionId}`)
       .then(r => r.json())
@@ -290,27 +330,62 @@ export default function CosmosPage() {
           text: (s as unknown as { answer?: string }).answer ?? s.text,
         }));
         setData({ ...d, stars });
-
-        if (myShortcode) {
-          const myStarId = stars.find(s => s.shortcode === myShortcode)?.id;
-          if (myStarId) {
-            const raw = localStorage.getItem(PENDING_BOND_KEY(myStarId));
-            if (raw) {
-              try {
-                const b = JSON.parse(raw) as { fromStarId: string; toStarId: string; reason: string };
-                setLocalBonds([{
-                  id: 'pending-' + b.fromStarId,
-                  from_id: b.fromStarId,
-                  to_id: b.toStarId,
-                  reason: b.reason,
-                }]);
-              } catch { /* ignore corrupt entry */ }
-            }
-          }
-        }
+        setLocalBonds(pendingBondFor(stars, myShortcode));
       })
       .catch(() => {});
   }, [questionId, myShortcode]);
+
+  // ── Phase 4 — crossfade to a different question's world. Camera stays;
+  // drift continues in the new world. Ignores same-world / mid-switch
+  // requests (the rail and popstate both funnel through here). ──
+  const performSwitch = useCallback((newId: string, pushHistory: boolean) => {
+    if (newId === currentQuestionId || switchingRef.current) return;
+    switchingRef.current = true;
+    setSwitching(true);
+    setSelected(null);
+    setConnecting(false);
+    setConnectConfirmed(false);
+    setReason('');
+
+    fetch(`/api/cosmos/${newId}`)
+      .then(r => r.json())
+      .then((d: CosmosData) => {
+        const stars = d.stars.map(s => ({
+          ...s,
+          text: (s as unknown as { answer?: string }).answer ?? s.text,
+        }));
+        const atmosphere = getAtmosphere(newId);
+        sceneRef.current?.crossfadeToWorld(atmosphere, () => {
+          setData({ ...d, stars });
+          setLocalBonds(pendingBondFor(stars, myShortcode));
+          setCurrentQuestionId(newId);
+          if (pushHistory) window.history.pushState(null, '', `/cosmos/${newId}`);
+          setTimeout(() => {
+            switchingRef.current = false;
+            setSwitching(false);
+            const pending = pendingPopRef.current;
+            pendingPopRef.current = null;
+            if (pending) performSwitchRef.current(pending, false);
+          }, CROSSFADE_IN_MS);
+        });
+      })
+      .catch(() => { switchingRef.current = false; setSwitching(false); });
+  }, [currentQuestionId, myShortcode]);
+  useEffect(() => { performSwitchRef.current = performSwitch; }, [performSwitch]);
+
+  // Back/forward: the rail's pushState calls only touch the URL, so browser
+  // navigation between worlds needs its own listener.
+  useEffect(() => {
+    const onPop = () => {
+      const m = window.location.pathname.match(/^\/cosmos\/([^/]+)/);
+      const newId = m?.[1];
+      if (!newId || newId === currentQuestionId) return;
+      if (switchingRef.current) { pendingPopRef.current = newId; return; }
+      performSwitch(newId, false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [currentQuestionId, performSwitch]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
@@ -414,7 +489,7 @@ export default function CosmosPage() {
           fromStarId: userStarId,
           toStarId: targetId,
           reason: savedReason,
-          questionId,
+          questionId: currentQuestionId,
         }),
       });
       const payload = await res.json();
@@ -461,6 +536,14 @@ export default function CosmosPage() {
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
         onModeChange={setSceneMode}
+        initialAtmosphere={getAtmosphere(questionId)}
+      />
+
+      <SkyRail
+        questions={railQuestions}
+        currentId={currentQuestionId}
+        onSelect={id => performSwitch(id, true)}
+        disabled={switching}
       />
 
       <div
@@ -469,7 +552,7 @@ export default function CosmosPage() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Top chrome — question + next-question link */}
+        {/* Top chrome — the question, quiet */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0,
           padding: '22px 30px 18px',
@@ -491,43 +574,6 @@ export default function CosmosPage() {
               {data.question.text}
             </div>
           )}
-
-          {/* Next question — upper-right on desktop, below question on mobile */}
-          {allQuestions.length > 1 && (() => {
-            const idx = allQuestions.findIndex(q => q.id === questionId);
-            const next = allQuestions[(idx + 1) % allQuestions.length];
-            const sharedStyle: React.CSSProperties = {
-              background: 'transparent', border: 'none',
-              color: BTW.textDim, cursor: 'pointer',
-              fontFamily: SANS, letterSpacing: '0.22em',
-              textTransform: 'uppercase', pointerEvents: 'auto',
-              transition: 'opacity .2s',
-            };
-            return (
-              <>
-                {/* Desktop: fixed upper-right */}
-                <button
-                  className="btw-next-q-desktop"
-                  onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
-                  style={{ ...sharedStyle, fontSize: 11, padding: '6px 0', opacity: 0.55 }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = '0.55'; }}
-                >
-                  Next question ›
-                </button>
-                {/* Mobile: inline below question, centered */}
-                <button
-                  className="btw-next-q-mobile"
-                  onClick={() => { window.location.href = `/cosmos/${next.id}`; }}
-                  style={{ ...sharedStyle, fontSize: 10, padding: '4px 0', opacity: 0.28 }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = '0.55'; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = '0.28'; }}
-                >
-                  Next question ›
-                </button>
-              </>
-            );
-          })()}
         </div>
 
         {/* Star detail panel */}

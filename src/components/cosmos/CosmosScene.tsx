@@ -2,6 +2,7 @@
 import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
+import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
 
 export interface ThoughtData {
   id: string;
@@ -35,7 +36,22 @@ export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
   /** Turn drift on (enters drift immediately unless a star is focused) or off. */
   setDrifting: (on: boolean) => void;
+  /**
+   * Phase 4 — sky rail world switch. Fades the current star field out,
+   * lerps the sky/terrain/star/cloud atmosphere to `atmosphere`, then calls
+   * `onMidpoint` (once the fade-out completes) so the caller can swap the
+   * `thoughts`/`bonds` props to the new question's data — newly-appearing
+   * stars fade in automatically. The camera's position/orientation and the
+   * drift/manual/focused mode are untouched; drift's visited-set resets so
+   * it explores the new world fresh.
+   */
+  crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) => void;
 }
+
+// Crossfade timing — exported so callers can guard re-entrancy for exactly
+// this long without duplicating the constant.
+export const CROSSFADE_OUT_MS = 650;
+export const CROSSFADE_IN_MS = 900;
 
 interface CosmosSceneProps {
   thoughts?: ThoughtData[];
@@ -48,6 +64,10 @@ interface CosmosSceneProps {
   onModeChange?: (mode: CamMode) => void;
   /** Fires each time a drift dwell begins on a new star — useful for counting thoughts seen. */
   onDwell?: (thoughtId: string) => void;
+  /** Sky/terrain/star/cloud atmosphere for the world at mount. Defaults to
+   *  DEFAULT_ATMOSPHERE. Subsequent world switches go through the
+   *  `crossfadeToWorld` imperative handle, not this prop. */
+  initialAtmosphere?: AtmosphereConfig;
 }
 
 interface StarSpiro {
@@ -80,6 +100,26 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
+// Builds the sky dome's horizon→zenith gradient as a 256×1 canvas texture —
+// smooth interpolation, no GLSL banding. Shared by the mount-time sky and
+// every Phase 4 world-switch crossfade (see AtmosphereConfig.skyStops).
+function buildSkyGradientTexture(stops: SkyStop[]): THREE.CanvasTexture {
+  const gc = document.createElement('canvas');
+  gc.width = 256; gc.height = 1;
+  const gx = gc.getContext('2d')!;
+  const grd = gx.createLinearGradient(0, 0, 256, 0);
+  for (const s of stops) grd.addColorStop(s.offset, s.color);
+  gx.fillStyle = grd;
+  gx.fillRect(0, 0, 256, 1);
+  const tex = new THREE.CanvasTexture(gc);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (tex as any).encoding = 3001; // THREE.sRGBEncoding
+  return tex;
+}
+
 const MAX_BAKED = 50;
 // Extra slots for on-demand dot→spiro upgrades as the camera approaches.
 // Keeps memory bounded while ensuring nearby stars never stay as blobs.
@@ -92,7 +132,7 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell, initialAtmosphere }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const perfOverlayRef = useRef<HTMLPreElement>(null);
 
@@ -102,6 +142,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const setDriftingFnRef = useRef<((on: boolean) => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
+    const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
     const activeBondIds = useRef<Set<string>>(new Set());
 
@@ -116,15 +157,20 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const TERRAIN_BRIGHT = 1.00;
     const BASE_CAM_Y  = 65;
 
-    // Baked star/terrain tweaks
-    const dbgTerrainGlowRef = useRef(0.46);
-    const dbgStarDensityRef = useRef(0.80);
-    const dbgStarSpeedRef   = useRef(0.50);
-    const dbgStarFloorRef   = useRef(0.65);
+    // The atmosphere this scene mounted with — subsequent world switches go
+    // through crossfadeToWorld(), not this prop (see CosmosSceneProps).
+    const atmo0 = initialAtmosphere ?? DEFAULT_ATMOSPHERE;
 
-    const gradLiftRef  = useRef(0.22);
-    const gradSteepRef = useRef(1.85);
-    const sunShiftRef  = useRef(0.05);
+    // Baked star/terrain tweaks — seeded from the mount-time atmosphere,
+    // then live-tweened by crossfadeToWorld() on every subsequent switch.
+    const dbgTerrainGlowRef = useRef(atmo0.terrainGlow);
+    const dbgStarDensityRef = useRef(atmo0.starDensity);
+    const dbgStarSpeedRef   = useRef(0.50);
+    const dbgStarFloorRef   = useRef(atmo0.starFloor);
+
+    const gradLiftRef  = useRef(atmo0.gradLift);
+    const gradSteepRef = useRef(atmo0.gradSteep);
+    const sunShiftRef  = useRef(atmo0.sunShift);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
@@ -138,6 +184,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
       setDrifting: (on: boolean) => setDriftingFnRef.current?.(on),
+      crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) =>
+        crossfadeFnRef.current?.(atmosphere, onMidpoint),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -177,10 +225,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
           uBrightness:{ value: SKY_BRIGHT },
-          uGradSteep: { value: 1.85 },
-          uGradLift:  { value: 0.22 },
-          uSunShift:  { value: 0.05 },
+          uGradSteep: { value: atmo0.gradSteep },
+          uGradLift:  { value: atmo0.gradLift },
+          uSunShift:  { value: atmo0.sunShift },
           uSkyGrad:   { value: null as THREE.Texture | null },
+          // Phase 4 world-switch crossfade: uSkyGrad is world A (current),
+          // uSkyGradB is world B (incoming); uMix eases 0→1 during the fade,
+          // then CosmosScene commits B → A and resets uMix to 0.
+          uSkyGradB:  { value: null as THREE.Texture | null },
+          uMix:       { value: 0 },
         },
         vertexShader: `
           varying vec3 vWorldDir;
@@ -197,6 +250,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform float     uGradLift;
           uniform float     uSunShift;
           uniform sampler2D uSkyGrad;
+          uniform sampler2D uSkyGradB;
+          uniform float     uMix;
           varying vec3      vWorldDir;
 
           void main() {
@@ -209,8 +264,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
             t = clamp(t - sunInfluence * uSunShift, 0.0, 1.0);
 
-            // Sample baked gradient texture — smooth, no GLSL banding
-            vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
+            // Sample baked gradient textures — smooth, no GLSL banding —
+            // and cross-dissolve between the current and incoming world.
+            vec3 colorA = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
+            vec3 colorB = texture2D(uSkyGradB, vec2(t, 0.5)).rgb;
+            vec3 color = mix(colorA, colorB, uMix);
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color * uBrightness, 1.0);
           }
@@ -219,38 +277,17 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const skyDome = new THREE.Mesh(skyGeo, skyMat);
       scene.add(skyDome);
 
-      // Build gradient texture from canvas so interpolation is smooth (no GLSL banding).
-      // t=0 (x=0) = warm amber at horizon; t=1 (x=255) = space-blue night at zenith.
+      // Build the initial gradient texture from canvas so interpolation is
+      // smooth (no GLSL banding). t=0 (x=0) = warm amber at horizon; t=1
+      // (x=255) = space-blue night at zenith. Parameterized by atmo0.skyStops
+      // so each world's variant (src/lib/atmosphere.ts) reuses this exact
+      // build path — see buildSkyGradientTexture() below.
       {
-        const gc = document.createElement('canvas');
-        gc.width = 256; gc.height = 1;
-        const gx = gc.getContext('2d')!;
-        const grd = gx.createLinearGradient(0, 0, 256, 0);
-        // t=0 is below horizon (blocked by terrain); t=1 is zenith.
-        // Warm colors compressed into the bottom 8% so they appear only right at the horizon.
-        // Dark purple-to-black owns the upper 80%+ of the sky.
-        // Extra stops near black to smooth the banding at the top.
-        grd.addColorStop(0.000, '#d2a480'); // warm peach    (below horizon, hidden by terrain)
-        grd.addColorStop(0.025, '#b27f7e'); // rose-peach
-        grd.addColorStop(0.055, '#93637f'); // mauve-rose
-        grd.addColorStop(0.085, '#7d5784'); // purple-mauve  ← around visible horizon
-        grd.addColorStop(0.140, '#5a4177'); // purple
-        grd.addColorStop(0.230, '#443469'); // deep purple
-        grd.addColorStop(0.360, '#352a5c'); // dark blue-purple
-        grd.addColorStop(0.510, '#2a214e'); // deeper
-        grd.addColorStop(0.680, '#1e1a40'); // near-black blue
-        grd.addColorStop(0.820, '#120e30'); // smooth transition
-        grd.addColorStop(0.920, '#07051e'); // deep space
-        grd.addColorStop(1.000, '#000000'); // black at zenith
-        gx.fillStyle = grd;
-        gx.fillRect(0, 0, 256, 1);
-        const skyGradTex = new THREE.CanvasTexture(gc);
-        skyGradTex.minFilter = THREE.LinearFilter;
-        skyGradTex.magFilter = THREE.LinearFilter;
-        skyGradTex.wrapS = THREE.ClampToEdgeWrapping;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (skyGradTex as any).encoding = 3001; // THREE.sRGBEncoding
+        const skyGradTex = buildSkyGradientTexture(atmo0.skyStops);
         skyMat.uniforms.uSkyGrad.value = skyGradTex;
+        // Seed B with the same texture — irrelevant while uMix=0, and
+        // crossfadeToWorld() always replaces it before ever raising uMix.
+        skyMat.uniforms.uSkyGradB.value = skyGradTex;
       }
 
       // ─── BACKGROUND STARS ───
@@ -385,41 +422,53 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       // ─── CLOUDS ───
       // 8 clouds on desktop (was 30), 0 on mobile. Smaller textures reduce alpha overdraw.
+      // Each cloud's blob layout is stored so a Phase 4 world switch can
+      // re-tint the same shapes (paintCloudCanvas) without regenerating them.
+      interface CloudBlob { x: number; y: number; r: number; a: number }
       const isMobileCloud = /iPhone|iPad|Android/i.test(navigator.userAgent);
       const cloudCount = isMobileCloud ? 0 : 8;
-      const clouds: THREE.Sprite[] = [];
-      for (let i = 0; i < cloudCount; i++) {
-        const cw = 256; const ch = 100; // was 512×200 — same visual, ¼ the memory
-        const c = document.createElement('canvas');
-        c.width = cw; c.height = ch;
-        const ctx = c.getContext('2d')!;
-        const blobs = 10 + Math.floor(Math.random() * 8);
-        for (let j = 0; j < blobs; j++) {
-          const x = 60 + Math.random() * (cw - 120);
-          const y = 30 + Math.random() * (ch - 60);
-          const r = 40 + Math.random() * 80;
-          const a = 0.045 + Math.random() * 0.07;
-          const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-          grad.addColorStop(0, `rgba(140,100,170,${a})`);
-          grad.addColorStop(0.6, `rgba(140,100,170,${a * 0.4})`);
-          grad.addColorStop(1, 'rgba(140,100,170,0)');
+      const CLOUD_W = 256; const CLOUD_H = 100; // was 512×200 — same visual, ¼ the memory
+      function paintCloudCanvas(ctx: CanvasRenderingContext2D, blobs: CloudBlob[], tint: string) {
+        ctx.clearRect(0, 0, CLOUD_W, CLOUD_H);
+        for (const b of blobs) {
+          const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+          grad.addColorStop(0, `rgba(${tint},${b.a})`);
+          grad.addColorStop(0.6, `rgba(${tint},${b.a * 0.4})`);
+          grad.addColorStop(1, `rgba(${tint},0)`);
           ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, cw, ch);
+          ctx.fillRect(0, 0, CLOUD_W, CLOUD_H);
         }
         // Feather all four edges so there's no hard canvas boundary
-        const vigX = ctx.createLinearGradient(0, 0, cw * 0.25, 0);
+        const vigX = ctx.createLinearGradient(0, 0, CLOUD_W * 0.25, 0);
         vigX.addColorStop(0, 'rgba(0,0,0,1)'); vigX.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigX2 = ctx.createLinearGradient(cw, 0, cw * 0.75, 0);
+        const vigX2 = ctx.createLinearGradient(CLOUD_W, 0, CLOUD_W * 0.75, 0);
         vigX2.addColorStop(0, 'rgba(0,0,0,1)'); vigX2.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigY = ctx.createLinearGradient(0, 0, 0, ch * 0.35);
+        const vigY = ctx.createLinearGradient(0, 0, 0, CLOUD_H * 0.35);
         vigY.addColorStop(0, 'rgba(0,0,0,1)'); vigY.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigY2 = ctx.createLinearGradient(0, ch, 0, ch * 0.65);
+        const vigY2 = ctx.createLinearGradient(0, CLOUD_H, 0, CLOUD_H * 0.65);
         vigY2.addColorStop(0, 'rgba(0,0,0,1)'); vigY2.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.globalCompositeOperation = 'destination-out';
         for (const vig of [vigX, vigX2, vigY, vigY2]) {
-          ctx.fillStyle = vig; ctx.fillRect(0, 0, cw, ch);
+          ctx.fillStyle = vig; ctx.fillRect(0, 0, CLOUD_W, CLOUD_H);
         }
         ctx.globalCompositeOperation = 'source-over';
+      }
+      const clouds: THREE.Sprite[] = [];
+      for (let i = 0; i < cloudCount; i++) {
+        const c = document.createElement('canvas');
+        c.width = CLOUD_W; c.height = CLOUD_H;
+        const ctx = c.getContext('2d')!;
+        const blobCount = 10 + Math.floor(Math.random() * 8);
+        const blobs: CloudBlob[] = [];
+        for (let j = 0; j < blobCount; j++) {
+          blobs.push({
+            x: 60 + Math.random() * (CLOUD_W - 120),
+            y: 30 + Math.random() * (CLOUD_H - 60),
+            r: 40 + Math.random() * 80,
+            a: 0.045 + Math.random() * 0.07,
+          });
+        }
+        paintCloudCanvas(ctx, blobs, atmo0.cloudTint);
         const tex = new THREE.CanvasTexture(c);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.3 });
         const sprite = new THREE.Sprite(mat);
@@ -427,9 +476,23 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dist = 20 + Math.random() * 280;
         sprite.position.set(Math.cos(angle) * dist, 25 + Math.random() * 50, Math.sin(angle) * dist);
         sprite.scale.set(30 + Math.random() * 50, 15 + Math.random() * 20, 1);
-        sprite.userData = { dx: (Math.random() - 0.5) * 0.3, dz: (Math.random() - 0.5) * 0.3 };
+        sprite.userData = {
+          dx: (Math.random() - 0.5) * 0.3, dz: (Math.random() - 0.5) * 0.3,
+          canvas: c, ctx, blobs,
+        };
         scene.add(sprite);
         clouds.push(sprite);
+      }
+
+      // Re-tints every cloud's existing blob layout in place — Phase 4 world
+      // switch only, called once per crossfade (not blended; clouds are a
+      // quiet background garnish and the retint is not visually abrupt).
+      function applyCloudTint(tint: string) {
+        for (const cloud of clouds) {
+          const { ctx, blobs } = cloud.userData as { ctx: CanvasRenderingContext2D; blobs: CloudBlob[] };
+          paintCloudCanvas(ctx, blobs, tint);
+          ((cloud.material as THREE.SpriteMaterial).map as THREE.CanvasTexture).needsUpdate = true;
+        }
       }
 
       // ─── THOUGHTS ───
@@ -443,6 +506,19 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // canvas (vs ~94 % at the old 420 px). 16 × 0.71 / 12 × 0.94 ≈ 1.0 — same apparent size.
       const SPIRO_SIZE = SPIRO_SIZE_LIVE;
       const SPRITE_SCALE = 16;
+
+      // Phase 4 world-switch crossfade: while true, newly-created thought
+      // groups start fully transparent and are marked userData.fadingIn so
+      // the fade-in tick in animate() ramps them 0→1 over CROSSFADE_IN_MS.
+      let fadeInPendingStars = false;
+
+      function setGroupOpacity(g: THREE.Group, o: number) {
+        g.children.forEach(child => {
+          if (child instanceof THREE.Sprite) {
+            (child.material as THREE.SpriteMaterial).opacity = o;
+          }
+        });
+      }
 
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
@@ -524,7 +600,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           answer: t.answer ?? '',
           uniqueFact: t.uniqueFact ?? '',
           scaleMult: 1.0,
+          fadingIn: false,
         };
+        if (fadeInPendingStars) {
+          setGroupOpacity(group, 0);
+          group.userData.fadingIn = true;
+        }
         scene.add(group);
         thoughtGroups.set(t.id, group);
       }
@@ -922,6 +1003,67 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (on && camMode === 'manual') setMode('drift');
         if (!on && camMode === 'drift') setMode('manual');
       };
+
+      // ─── WORLD CROSSFADE (Phase 4 — sky rail) ────────────────────────────
+      // Fades the current star field out while lerping the sky/terrain/star
+      // atmosphere toward the incoming world, then hands back to the caller
+      // (onMidpoint) to swap the thoughts/bonds props — newly-created stars
+      // fade in automatically (see createThought's fadeInPendingStars check
+      // and the fade-in tick below). Camera position/heading/pitch and the
+      // drift/manual/focused mode are untouched.
+      let fadeOutActive = false;
+      let fadeOutT = 0;
+      let fadeOutMidCb: (() => void) | null = null;
+      let fadeInActive = false;
+      let fadeInT = 0;
+      const FADE_OUT_DUR = CROSSFADE_OUT_MS / 1000;
+      const FADE_IN_DUR = CROSSFADE_IN_MS / 1000;
+      let atmoFrom: AtmosphereConfig = atmo0;
+      let atmoTo: AtmosphereConfig = atmo0;
+      let skyGradTexB: THREE.CanvasTexture | null = null;
+      const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+      function crossfadeToWorld(atmosphere: AtmosphereConfig, onMidpoint: () => void) {
+        // Defensive: callers already guard re-entrancy (see the pages'
+        // switching state), but never silently drop a caller's callback by
+        // overwriting a fade already in flight.
+        if (fadeOutActive || fadeInActive) return;
+        hideDwellText();
+        clearSmoke();
+        if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+        hoverStarId = null;
+
+        // Drift explores the new world fresh; the camera itself is untouched.
+        driftPhase = 'seek';
+        driftTargetId = null;
+        driftVisited.clear();
+        driftRecentEmotions.length = 0;
+        driftSeekDelay = FADE_OUT_DUR + 0.25;
+
+        atmoFrom = {
+          skyStops: atmoFrom.skyStops, // unused on this side of the mix
+          starDensity: dbgStarDensityRef.current,
+          starFloor: dbgStarFloorRef.current,
+          terrainGlow: dbgTerrainGlowRef.current,
+          cloudTint: atmoTo.cloudTint,
+          gradLift: gradLiftRef.current,
+          gradSteep: gradSteepRef.current,
+          sunShift: sunShiftRef.current,
+        };
+        atmoTo = atmosphere;
+
+        if (skyGradTexB) skyGradTexB.dispose();
+        skyGradTexB = buildSkyGradientTexture(atmosphere.skyStops);
+        skyMat.uniforms.uSkyGradB.value = skyGradTexB;
+        skyMat.uniforms.uMix.value = 0;
+        applyCloudTint(atmosphere.cloudTint);
+
+        fadeInPendingStars = true;
+        fadeOutActive = true;
+        fadeOutT = 0;
+        fadeOutMidCb = onMidpoint;
+      }
+      crossfadeFnRef.current = crossfadeToWorld;
 
       // ─── INPUT ───
       // Any deliberate input (pointer down, wheel, touch, key) pauses drift
@@ -1421,6 +1563,49 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           prevActiveStar = currentActiveStar;
         }
 
+        // ── WORLD CROSSFADE TICK (Phase 4) — additive, doesn't touch camera ──
+        if (fadeOutActive) {
+          fadeOutT += dt;
+          const u = Math.min(fadeOutT / FADE_OUT_DUR, 1);
+          const e = u * u * (3 - 2 * u); // smoothstep
+          thoughtGroups.forEach(g => setGroupOpacity(g, 1 - e));
+          skyMat.uniforms.uMix.value = e;
+          dbgTerrainGlowRef.current = lerp(atmoFrom.terrainGlow, atmoTo.terrainGlow, e);
+          dbgStarDensityRef.current = lerp(atmoFrom.starDensity, atmoTo.starDensity, e);
+          dbgStarFloorRef.current   = lerp(atmoFrom.starFloor, atmoTo.starFloor, e);
+          gradLiftRef.current  = lerp(atmoFrom.gradLift, atmoTo.gradLift, e);
+          gradSteepRef.current = lerp(atmoFrom.gradSteep, atmoTo.gradSteep, e);
+          sunShiftRef.current  = lerp(atmoFrom.sunShift, atmoTo.sunShift, e);
+          if (u >= 1) {
+            fadeOutActive = false;
+            // Commit incoming (B) → current (A); reassign before disposing
+            // the old texture so a live sampler uniform is never left
+            // pointing at a disposed one.
+            const oldTex = skyMat.uniforms.uSkyGrad.value as THREE.Texture | null;
+            skyMat.uniforms.uSkyGrad.value = skyGradTexB;
+            skyMat.uniforms.uMix.value = 0;
+            oldTex?.dispose();
+            skyGradTexB = null;
+            proximityUpgradeCount = 0;
+            fadeInActive = true;
+            fadeInT = 0;
+            const cb = fadeOutMidCb;
+            fadeOutMidCb = null;
+            cb?.(); // caller swaps thoughts/bonds props now — new stars arrive at opacity 0
+          }
+        }
+        if (fadeInActive) {
+          fadeInT += dt;
+          const u = Math.min(fadeInT / FADE_IN_DUR, 1);
+          const e = u * u * (3 - 2 * u);
+          thoughtGroups.forEach(g => { if (g.userData.fadingIn) setGroupOpacity(g, e); });
+          if (u >= 1) {
+            fadeInActive = false;
+            fadeInPendingStars = false;
+            thoughtGroups.forEach(g => { g.userData.fadingIn = false; });
+          }
+        }
+
         // ── CAMERA — exactly one mode owns position/orientation per frame ────
         if (camMode === 'drift') {
           runDrift(dt);
@@ -1671,6 +1856,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         setDriftingFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
+        crossfadeFnRef.current = null;
+        skyGradTexB?.dispose();
+        (skyMat.uniforms.uSkyGrad.value as THREE.Texture | null)?.dispose();
 
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
@@ -1711,6 +1899,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           container.removeChild(renderer.domElement);
         }
       };
+    // initialAtmosphere is intentionally read once at mount only — every
+    // subsequent world change goes through the crossfadeToWorld() handle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ─── THOUGHTS SYNC ────────────────────────────────────────────────────
