@@ -42,11 +42,12 @@ interface CosmosSceneProps {
   bonds?: BondData[];
   activeStar?: string | null;
   userStar?: string | null;
-  mode?: 'passive' | 'active';
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
   /** Fires whenever the camera mode changes. Initial mode is 'drift'. */
   onModeChange?: (mode: CamMode) => void;
+  /** Fires each time a drift dwell begins on a new star — useful for counting thoughts seen. */
+  onDwell?: (thoughtId: string) => void;
 }
 
 interface StarSpiro {
@@ -91,9 +92,8 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, mode, onThoughtClick, onBackgroundClick, onModeChange }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const modeRef = useRef<'passive' | 'active'>('active');
     const perfOverlayRef = useRef<HTMLPreElement>(null);
 
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
@@ -110,7 +110,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const userStarRef = useRef<string | null>(userStar ?? null);
     useEffect(() => { activeStarRef.current = activeStar ?? null; }, [activeStar]);
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
-    useEffect(() => { modeRef.current = mode ?? 'active'; }, [mode]);
 
     // Baked-in sky/terrain values
     const SKY_BRIGHT  = 1.10;
@@ -133,6 +132,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
     const onModeChangeRef = useRef(onModeChange);
     useEffect(() => { onModeChangeRef.current = onModeChange; }, [onModeChange]);
+    const onDwellRef = useRef(onDwell);
+    useEffect(() => { onDwellRef.current = onDwell; }, [onDwell]);
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
@@ -449,30 +450,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [255, 255, 255];
         const group = new THREE.Group();
         let spiro: StarSpiro | null = null;
-
-        if (modeRef.current === 'passive') {
-          // Blurred glow dot — 64×64 soft radial gradient
-          const dc = document.createElement('canvas'); dc.width = 64; dc.height = 64;
-          const dctx = dc.getContext('2d')!;
-          const gr = dctx.createRadialGradient(32, 32, 0, 32, 32, 30);
-          gr.addColorStop(0,   `rgba(${er},${eg},${eb},0.75)`);
-          gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.28)`);
-          gr.addColorStop(0.8, `rgba(${er},${eg},${eb},0.05)`);
-          gr.addColorStop(1,   `rgba(${er},${eg},${eb},0)`);
-          dctx.fillStyle = gr; dctx.fillRect(0, 0, 64, 64);
-          const passiveTex = new THREE.CanvasTexture(dc);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (passiveTex as any).encoding = 3001;
-          const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: passiveTex, transparent: true, depthWrite: false }));
-          dot.scale.set(8, 8, 1);
-          group.add(dot);
-          // No spiro, no clickSphere — passive stars are non-interactive
-          group.position.set(t.x, t.y, t.z);
-          group.userData = { id: t.id, baseY: t.y, bobPhase: rand() * Math.PI * 2, bobSpeed: 0.2 + rand() * 0.3, scaleMult: 1.0, spiro: null, orbit: null, pulsePhase: 0 };
-          scene.add(group);
-          thoughtGroups.set(t.id, group);
-          return;
-        }
 
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
@@ -958,13 +935,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const keys: Record<string, boolean> = {};
       const onKeyDown = (e: KeyboardEvent) => {
         keys[e.code] = true;
-        if (modeRef.current !== 'passive') interruptDriftForInput();
+        interruptDriftForInput();
       };
       const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
-      if (modeRef.current !== 'passive') {
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-      }
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
 
       // ─── SCREEN-SPACE PICKING ─────────────────────────────────────────────
       // Generous: pointer within PICK_RADIUS CSS px of a star's projected
@@ -996,7 +971,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const mouseDrag = { active: false, moved: false, lastX: 0, lastY: 0, startX: 0, startY: 0 };
 
       const onMouseDown = (e: MouseEvent) => {
-        if (modeRef.current === 'passive' || e.button !== 0) return;
+        if (e.button !== 0) return;
         interruptDriftForInput();
         suppressClick = false;
         mouseDrag.active = true;
@@ -1041,7 +1016,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       window.addEventListener('mouseup', onMouseUpWindow);
 
       const onClickCanvas = (e: MouseEvent) => {
-        if (modeRef.current === 'passive') return;
         if (suppressClick) { suppressClick = false; return; }
         const hitId = pickStar(e.clientX, e.clientY);
         if (hitId) {
@@ -1056,7 +1030,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.domElement.addEventListener('click', onClickCanvas);
 
       const onWheel = (e: WheelEvent) => {
-        if (modeRef.current === 'passive') return;
         e.preventDefault();
         interruptDriftForInput();
         if (camMode !== 'manual') return; // ignore while a panel is open
@@ -1162,6 +1135,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         dwellFact.style.display = fact ? 'block' : 'none';
         updateDwellTextPosition(g);
         dwellBox.style.opacity = '1';
+        const dwellId = g.userData.id as string | undefined;
+        if (dwellId) onDwellRef.current?.(dwellId);
       }
       function hideDwellText() {
         dwellBox.style.opacity = '0';
@@ -1263,7 +1238,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }, 2600);
       }
       const onMouseMove = (e: MouseEvent) => {
-        if (modeRef.current === 'passive') return;
         if (mouseDrag.active) {
           renderer.domElement.style.cursor = mouseDrag.moved ? 'grabbing' : '';
           return;
@@ -1308,7 +1282,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       };
 
       const onTouchStart = (e: TouchEvent) => {
-        if (modeRef.current === 'passive') return;
         // Always prevent default — stops pull-to-refresh and page rubber-band
         e.preventDefault();
         interruptDriftForInput();
@@ -1449,13 +1422,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
 
         // ── CAMERA — exactly one mode owns position/orientation per frame ────
-        if (modeRef.current === 'passive') {
-          // Landing-page backdrop: gentle cruise toward the sunset (unchanged)
-          heading += 0.002 * dt;
-          camera.position.x += Math.sin(heading) * 4 * dt;
-          camera.position.z += -Math.cos(heading) * 4 * dt;
-          pitch += (0.30 - pitch) * Math.min(dt * 1.5, 1);
-        } else if (camMode === 'drift') {
+        if (camMode === 'drift') {
           runDrift(dt);
         } else if (camMode === 'focused') {
           // Glide toward the framing point, easing out into the stop
