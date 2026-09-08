@@ -12,11 +12,11 @@ export interface CosmosStarData {
   shortcode: string;
   text: string;
   unique_fact?: string | null;
-  x?: number;
-  y?: number;
-  depth?: number;
   dimensions: DimensionResult & { curveType: CurveType };
   mine?: boolean;
+  /** Only ever populated for the requester's own star (see /api/cosmos's
+   *  `mine` param) — never exposed for anyone else's. */
+  status?: string;
 }
 
 export interface UserStarContext {
@@ -42,6 +42,15 @@ interface StarDetailProps {
   justBorn?: boolean;
   /** Defect #9 — this is the star the visitor's own star already orbits. */
   isBondTarget?: boolean;
+  /** The LLM gate spec: never say "flagged"/"pending"/"moderation" — the
+   *  submitter's own star simply "will rise into the shared sky once it's
+   *  seen" while awaiting the human queue. Only ever true on `star.mine`. */
+  pendingRise?: boolean;
+  /** The visitor's own star (elsewhere in this cosmos, not necessarily
+   *  `star`) hasn't cleared the queue yet — the connect affordance stays
+   *  hidden everywhere until it does, the same as if they had no star at
+   *  all, so a not-yet-public star can never author a public bond. */
+  myStarPending?: boolean;
 }
 
 // Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas.
@@ -203,7 +212,7 @@ function StarMini({ dims, size, text, animVariant = 'rise' }: {
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
   connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
-  justBorn, isBondTarget,
+  justBorn, isBondTarget, pendingRise, myStarPending,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -242,7 +251,7 @@ export default function StarDetail({
     };
   }, [onDismiss]);
 
-  const showConnect = hasMystar && !star.mine && !userHasOutgoingBond;
+  const showConnect = hasMystar && !star.mine && !userHasOutgoingBond && !myStarPending;
   const showUserStar = userStar && showConnect;
   // Defect #9 — the one-bond rule is explained where the affordance was, never
   // silently missing. On the star the visitor actually bound to, the state is
@@ -366,6 +375,7 @@ export default function StarDetail({
                       url={`https://${SITE_URL}/b/${c.id}`}
                       ogImageUrl={`https://${SITE_URL}/api/og/bond/${c.id}`}
                       shareText="A bond formed on The Between"
+                      ariaLabel="Share this pair"
                     />
                   )}
                 </div>
@@ -451,10 +461,16 @@ export default function StarDetail({
         {star.mine && (
           <div style={{
             fontSize: 12, color: BTW.horizon[3],
-            letterSpacing: justBorn ? '0.12em' : '0.18em',
-            textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.5,
+            letterSpacing: pendingRise ? '0.08em' : justBorn ? '0.12em' : '0.18em',
+            textTransform: pendingRise ? 'none' : 'uppercase', textAlign: 'right', lineHeight: 1.5,
+            maxWidth: pendingRise ? 200 : undefined,
+            whiteSpace: pendingRise ? 'normal' : undefined,
+            fontStyle: pendingRise ? 'italic' : undefined,
+            fontFamily: pendingRise ? SERIF : undefined,
           }}>
-            {justBorn ? 'your star lives here.' : 'your star'}
+            {pendingRise
+              ? 'it will rise into the shared sky once it’s seen.'
+              : justBorn ? 'your star lives here.' : 'your star'}
           </div>
         )}
 

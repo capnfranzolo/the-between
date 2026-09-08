@@ -22,12 +22,19 @@ export async function POST(req: NextRequest) {
 
   // Validate both stars exist
   const [fromRes, toRes] = await Promise.all([
-    supabaseServer.from('stars').select('id').eq('id', fromStarId).maybeSingle(),
+    supabaseServer.from('stars').select('id, status').eq('id', fromStarId).maybeSingle(),
     supabaseServer.from('stars').select('id').eq('id', toStarId).maybeSingle(),
   ]);
 
   if (!fromRes.data) return Response.json({ error: 'From-star not found' }, { status: 404 });
   if (!toRes.data) return Response.json({ error: 'To-star not found' }, { status: 404 });
+  // A star still awaiting the human queue can't author a public bond — the
+  // client already hides this affordance while the visitor's own star is
+  // pending, but the server is the real guard (the LLM gate must never be
+  // bypassable just by knowing a star id).
+  if (fromRes.data.status && fromRes.data.status !== 'approved') {
+    return Response.json({ error: 'Star not yet able to connect' }, { status: 403 });
+  }
 
   // Check no existing outgoing connection for fromStar
   const { data: existing } = await supabaseServer

@@ -10,6 +10,8 @@ interface ShareButtonProps {
   nudge?: boolean;
   /** Override the default share caption (e.g. for a bond rather than a single star). */
   shareText?: string;
+  /** Override the trigger's title/aria-label (e.g. "Share this pair" for a bond row). */
+  ariaLabel?: string;
 }
 
 // Social share URL builders
@@ -82,7 +84,7 @@ const TRAY_HEIGHT = 216;
 
 const DEFAULT_SHARE_TEXT = "A thought on The Between — what do you know is true but can't prove?";
 
-export default function ShareButton({ url, ogImageUrl, style, nudge, shareText = DEFAULT_SHARE_TEXT }: ShareButtonProps) {
+export default function ShareButton({ url, ogImageUrl, style, nudge, shareText = DEFAULT_SHARE_TEXT, ariaLabel = 'Share this star' }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -184,8 +186,8 @@ export default function ShareButton({ url, ogImageUrl, style, nudge, shareText =
     <button
       ref={triggerRef}
       onClick={() => open ? setOpen(false) : openTray()}
-      title="Share this star"
-      aria-label="Share this star"
+      title={ariaLabel}
+      aria-label={ariaLabel}
       aria-expanded={open}
       style={{
         display: 'inline-flex',

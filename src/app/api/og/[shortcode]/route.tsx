@@ -85,11 +85,16 @@ export async function GET(
 
   if (shortcode === 'default') return defaultImage();
 
-  // 1. Fetch star
+  // 1. Fetch star — approved only. A star still awaiting the human queue
+  // never gets an unfurl-able image: the submitter's own ShareButton is
+  // active before that clears (the LLM gate never tells them they're
+  // flagged), so this is the guard that keeps a third party from ever
+  // seeing pending content via a link preview.
   const { data: star } = await supabaseServer
     .from('stars')
     .select('id, answer, unique_fact, dimensions, question_id')
     .eq('shortcode', shortcode)
+    .eq('status', 'approved')
     .single();
 
   if (!star || !star.dimensions) return defaultImage();

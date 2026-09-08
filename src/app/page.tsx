@@ -11,7 +11,7 @@ import AddToHomeScreen from '@/components/AddToHomeScreen';
 import LivenessCounter from '@/components/LivenessCounter';
 import SoundControl from '@/components/SoundControl';
 import ShareButton from '@/components/ShareButton';
-import { type CosmosBond } from '@/components/BondCurves';
+import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
 import { sound } from '@/lib/sound';
@@ -159,7 +159,10 @@ function LandingPageInner() {
   }, [dwellCount, introActive, data?.question?.text]);
 
   useEffect(() => {
-    fetch(`/api/cosmos/${questionId}`)
+    // `mine` is proof of ownership (the exact shortcode), not a moderation
+    // bypass — it only ever surfaces the requester's own star to themself.
+    const qs = myShortcode ? `?mine=${encodeURIComponent(myShortcode)}` : '';
+    fetch(`/api/cosmos/${questionId}${qs}`)
       .then(r => r.json())
       .then((d: CosmosData) => {
         const stars = d.stars.map(s => ({
@@ -239,6 +242,17 @@ function LandingPageInner() {
     if (!myShortcode) return null;
     return data?.stars.find(s => s.shortcode === myShortcode)?.id ?? null;
   }, [myShortcode, data]);
+
+  // Only ever set on the merged-in "mine" record (see /api/cosmos's `mine`
+  // param) — an approved star fetched normally never carries a status field.
+  // Until it clears the queue, the connect affordance stays hidden
+  // everywhere, same as having no star at all: a not-yet-public star can
+  // never author a public bond.
+  const myStarPending = useMemo(() => {
+    if (!userStarId) return false;
+    const s = byId[userStarId]?.status;
+    return !!s && s !== 'approved';
+  }, [userStarId, byId]);
 
   const selectedStar = useMemo(() => {
     if (!selected) return null;
@@ -466,6 +480,8 @@ function LandingPageInner() {
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
+            pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
+            myStarPending={myStarPending}
           />
         )}
 
@@ -502,6 +518,7 @@ function LandingPageInner() {
                   url={`https://${SITE_URL}/b/${connectedBondId}`}
                   ogImageUrl={`https://${SITE_URL}/api/og/bond/${connectedBondId}`}
                   shareText="Two strangers' thoughts, bound on The Between"
+                  ariaLabel="Share this pair"
                 />
               </div>
             )}
