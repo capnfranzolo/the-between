@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 
@@ -10,8 +10,10 @@ export interface ThoughtData {
   z: number;
   emotionIndex: number;
   dimensions: SpiroDimensions;
-  /** Answer text — shown as a smoke/ghost effect on hover */
+  /** Answer text — shown during drift dwell and as a smoke/ghost effect on hover */
   answer?: string;
+  /** Unique fact — the byline shown under the answer during drift dwell */
+  uniqueFact?: string;
 }
 
 export interface BondData {
@@ -21,11 +23,18 @@ export interface BondData {
   reason?: string;
 }
 
+/**
+ * Camera mode state machine:
+ *   drift   — autonomous tour: glide star→star, dwell and show the thought
+ *   manual  — the visitor has the stick: drag-look, wheel/pinch move, WASD
+ *   focused — a star is selected (panel open); the camera frames it
+ */
+export type CamMode = 'drift' | 'manual' | 'focused';
+
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
-  turnLeft: () => void;
-  turnRight: () => void;
-  setPitch: (p: number) => void;
+  /** Turn drift on (enters drift immediately unless a star is focused) or off. */
+  setDrifting: (on: boolean) => void;
 }
 
 interface CosmosSceneProps {
@@ -33,10 +42,11 @@ interface CosmosSceneProps {
   bonds?: BondData[];
   activeStar?: string | null;
   userStar?: string | null;
-  paused?: boolean;
   mode?: 'passive' | 'active';
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
+  /** Fires whenever the camera mode changes. Initial mode is 'drift'. */
+  onModeChange?: (mode: CamMode) => void;
 }
 
 interface StarSpiro {
@@ -81,7 +91,7 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, mode, onThoughtClick, onBackgroundClick }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, mode, onThoughtClick, onBackgroundClick, onModeChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const modeRef = useRef<'passive' | 'active'>('active');
     const perfOverlayRef = useRef<HTMLPreElement>(null);
@@ -89,9 +99,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
-    const turnRightFnRef = useRef<(() => void) | null>(null);
-    const turnLeftFnRef  = useRef<(() => void) | null>(null);
-    const setPitchFnRef  = useRef<((p: number) => void) | null>(null);
+    const setDriftingFnRef = useRef<((on: boolean) => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -100,10 +108,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     // Readable by the Three.js animation loop without re-running setup
     const activeStarRef = useRef<string | null>(activeStar ?? null);
     const userStarRef = useRef<string | null>(userStar ?? null);
-    const pausedRef = useRef<boolean>(paused ?? false);
     useEffect(() => { activeStarRef.current = activeStar ?? null; }, [activeStar]);
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
-    useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
     useEffect(() => { modeRef.current = mode ?? 'active'; }, [mode]);
 
     // Baked-in sky/terrain values
@@ -125,12 +131,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
     const onBgClickRef = useRef(onBackgroundClick);
     useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
+    const onModeChangeRef = useRef(onModeChange);
+    useEffect(() => { onModeChangeRef.current = onModeChange; }, [onModeChange]);
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
-      turnLeft:  () => turnLeftFnRef.current?.(),
-      turnRight: () => turnRightFnRef.current?.(),
-      setPitch:  (p: number) => setPitchFnRef.current?.(p),
+      setDrifting: (on: boolean) => setDriftingFnRef.current?.(on),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -427,7 +433,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       // ─── THOUGHTS ───
       const thoughtGroups = new Map<string, THREE.Group>();
-      const thoughtMeshes: THREE.Mesh[] = [];
       interface LiveEntry { canvas: HTMLCanvasElement; inst: SpirographInstance; texture: THREE.CanvasTexture; origTexture: THREE.Texture }
       const liveStars = new Map<string, LiveEntry>();
       let bakedStarCount = 0;
@@ -523,13 +528,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           glowSprite.scale.set(SPRITE_SCALE * 2.2, SPRITE_SCALE * 2.2, 1);
           group.add(glowSprite);
         }
-        const clickSphere = new THREE.Mesh(
-          new THREE.SphereGeometry(5, 8, 8),
-          new THREE.MeshBasicMaterial({ visible: false, colorWrite: false }),
-        );
-        clickSphere.userData = { thoughtId: t.id, thoughtGroup: group };
-        group.add(clickSphere);
-        thoughtMeshes.push(clickSphere);
+        // No collider mesh — picking is generous screen-space projection (see pickStar)
 
         group.position.set(t.x, t.y, t.z);
         group.userData = {
@@ -546,6 +545,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           // can upgrade the dot fallback to a full spirograph on first selection.
           dotDims: spiro ? undefined : t.dimensions,
           answer: t.answer ?? '',
+          uniqueFact: t.uniqueFact ?? '',
           scaleMult: 1.0,
         };
         scene.add(group);
@@ -619,6 +619,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       function destroyThought(id: string) {
         deactivateLive(id);
         if (id === activeStarRef.current) flyTargetXZ = null;
+        if (id === driftTargetId) {
+          driftTargetId = null;
+          driftPhase = 'seek';
+          hideDwellText();
+        }
         const group = thoughtGroups.get(id);
         if (!group) return;
         const spiro = group.userData.spiro as StarSpiro | null;
@@ -640,8 +645,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         });
         thoughtGroups.delete(id);
-        const idx = thoughtMeshes.findIndex(m => m.userData.thoughtId === id);
-        if (idx >= 0) thoughtMeshes.splice(idx, 1);
       }
 
       // Lazy upgrade: swap a dot-fallback star to a real spirograph sprite when the
@@ -710,46 +713,224 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       addBondFnRef.current = createBond;
       removeBondFnRef.current = destroyBond;
 
-      // ─── CAMERA STATE ───
-      // Initial heading toward SUN_DIRECTION (sunset straight ahead)
+      // ─── CAMERA STATE MACHINE ───────────────────────────────────────────
+      // Exactly one mode owns the camera each frame (see CamMode docs above).
+      // Initial heading toward SUN_DIRECTION (sunset straight ahead).
+      let camMode: CamMode = 'drift';
+      let driftEnabled = true;   // user toggle — gates drift entry & idle resume
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
-      let targetHeading: number | null = null;
-      let pitchTarget: number | null = null;
-      let flyTargetXZ: { x: number; z: number } | null = null;
-      let flyStarTargetY = BASE_CAM_Y;
-      let camTargetY = BASE_CAM_Y;
-      let speed = 4;
-      let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
-      let strafeVel = 0; // units/s — Q/E lateral slide
       let pitch = 0.30;
-      // Default rest pitch — updated by setPitch handle and pitch-click navigation
-      let defaultPitch = 0.30;
+      let speed = 0;             // forward u/s — W/boost only, no baseline cruise
+      let turnVel = 0;           // rad/s — keyboard/arrow turn with easing
+      let strafeVel = 0;         // units/s — Q/E lateral slide
+      let wheelVel = 0;          // u/s — scroll-wheel forward/back, decays
+      const lookVel = { x: 0, y: 0 }; // rad/frame — drag/swipe momentum
+      let flyTargetXZ: { x: number; z: number } | null = null; // focused approach
+      let idleSec = 0;           // manual-mode idle accumulator
+      let camTargetY = BASE_CAM_Y;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
 
-      // Auto-rotate toward nearest star when none visible for 10 seconds
-      let noStarVisibleSec = 0;
-      let autoRotateTarget: number | null = null;
-      // Angular speed: ~0.2 rad/s → a 90° turn takes ~4.7 seconds
-      const AUTO_ROTATE_SPEED = 0.07; // rad/s — ~13 s per 90°, very glacial
-      // Only consider stars within ±90° of current heading (cos 90° = 0)
-      const AUTO_ROTATE_MAX_COS = 0.0; // dot product threshold
+      // Focus bookkeeping — was the current focus user-initiated (canvas
+      // click/tap) or automatic (deep link / own-star autofocus)? Dismissing
+      // an auto focus hands over to drift after a short beat instead of the
+      // full idle wait.
+      let lastUserSelectAt = -Infinity;
+      let focusWasAuto = false;
+
+      const IDLE_RESUME_SEC = 10;   // manual → drift after this much idle
+      // Arrival framing: look slightly below the star so it rides the upper
+      // third of the viewport — clear of the bottom panel / dwell text.
+      // (offset in radians of the 60° vertical FOV; viewport-relative at any size)
+      const FOCUS_STOP_DIST = 78;
+      const FOCUS_PITCH_OFFSET = 0.24;
+
+      function wrapAngle(a: number): number {
+        while (a > Math.PI) a -= Math.PI * 2;
+        while (a < -Math.PI) a += Math.PI * 2;
+        return a;
+      }
+      const clampPitch = (p: number) => Math.max(-0.4, Math.min(0.7, p));
+
+      // Ease heading/pitch toward framing a star, with angular-velocity caps
+      // so the turn is always gentle (no motion sickness, no snap).
+      function faceStar(
+        g: THREE.Group, pitchOffset: number, dt: number,
+        rate: number, maxTurn: number, maxPitchRate: number,
+      ) {
+        const dx = g.position.x - camera.position.x;
+        const dz = g.position.z - camera.position.z;
+        const hDist = Math.max(Math.hypot(dx, dz), 0.01);
+        const dy = g.position.y - camera.position.y;
+        const targetH = Math.atan2(dx, -dz);
+        const targetP = clampPitch(Math.atan2(dy, hDist) - pitchOffset);
+        const hStep = wrapAngle(targetH - heading) * Math.min(dt * rate, 1);
+        const maxH = maxTurn * dt;
+        heading += Math.max(-maxH, Math.min(maxH, hStep));
+        const pStep = (targetP - pitch) * Math.min(dt * rate, 1);
+        const maxP = maxPitchRate * dt;
+        pitch = clampPitch(pitch + Math.max(-maxP, Math.min(maxP, pStep)));
+      }
+
+      // ─── DRIFT CONTROLLER ───────────────────────────────────────────────
+      // Lean-back tour: pick a star (nearby + unseen this session + emotion
+      // variety + roughly ahead), glide there on an eased leg, dwell 8-12 s
+      // with the thought readable, continue. The controller always aims at a
+      // star, so the camera never faces empty sky.
+      const DRIFT_CRUISE = 26;          // u/s cap — meditative planetarium pace
+      const DRIFT_LEG_MIN = 4;          // s — minimum glide duration
+      const DRIFT_STOP_DIST = 85;       // horizontal arrival distance from star
+      const DRIFT_PITCH_OFFSET = 0.17;  // star rides upper third during dwell
+      const DRIFT_MAX_TURN = 0.55;      // rad/s heading cap while drifting
+      const DRIFT_MAX_PITCH_RATE = 0.35;
+      let driftPhase: 'seek' | 'glide' | 'dwell' = 'seek';
+      let driftTargetId: string | null = null;
+      const driftVisited = new Set<string>();      // shown this session
+      const driftRecentEmotions: number[] = [];    // last 3 — gentle variety
+      let driftSeekDelay = 1.0; // s before first pick — lets deep-link focus land
+      let glideT = 0;
+      let glideDur = 6;
+      const glideFrom = new THREE.Vector3();
+      const glideTo = new THREE.Vector3();
+      let dwellRemaining = 0;
+
+      function setMode(m: CamMode) {
+        if (camMode === m) return;
+        if (camMode === 'drift') {
+          driftPhase = 'seek';
+          driftTargetId = null;
+          hideDwellText();
+        }
+        camMode = m;
+        if (m === 'manual') {
+          // Fresh hands-over: zero every residual velocity so there's no jump
+          idleSec = 0;
+          speed = 0; turnVel = 0; strafeVel = 0; wheelVel = 0;
+          lookVel.x = 0; lookVel.y = 0;
+          touch.pinchVel = 0;
+        }
+        if (m === 'drift') {
+          driftPhase = 'seek';
+          driftSeekDelay = 0.4;
+        }
+        onModeChangeRef.current?.(m);
+      }
+
+      function pickNextDriftStar(): string | null {
+        // Candidates: the ~12 nearest unseen stars with something to read,
+        // scored by distance + turn away from current heading + emotion repeat.
+        const cx = camera.position.x;
+        const cz = camera.position.z;
+        const all: { id: string; g: THREE.Group; d: number }[] = [];
+        thoughtGroups.forEach((g, id) => {
+          if (id === driftTargetId) return;
+          const answer = (g.userData.answer as string | undefined) ?? '';
+          if (!answer.trim()) return;
+          const d = Math.hypot(g.position.x - cx, g.position.z - cz);
+          if (d < 25) return; // effectively where we already are
+          all.push({ id, g, d });
+        });
+        if (all.length === 0) return null;
+        all.sort((a, b) => a.d - b.d);
+        let pool = all.filter(c => !driftVisited.has(c.id)).slice(0, 12);
+        if (pool.length === 0) {
+          // Everything has been shown — start the tour over
+          driftVisited.clear();
+          pool = all.slice(0, 12);
+        }
+        let bestId: string | null = null;
+        let bestScore = Infinity;
+        for (const c of pool) {
+          const dx = c.g.position.x - cx;
+          const dz = c.g.position.z - cz;
+          const turn = Math.abs(wrapAngle(Math.atan2(dx, -dz) - heading));
+          const em = c.g.userData.emotionIndex as number;
+          let score = c.d + turn * 60; // forward bias: ~60 units per radian of turn
+          if (driftRecentEmotions.includes(em)) score += 120;
+          if (score < bestScore) { bestScore = score; bestId = c.id; }
+        }
+        return bestId;
+      }
+
+      function startGlideTo(id: string) {
+        const g = thoughtGroups.get(id);
+        if (!g) return;
+        driftTargetId = id;
+        // Arrival point: on the line star→camera, DRIFT_STOP_DIST out
+        const dx = camera.position.x - g.position.x;
+        const dz = camera.position.z - g.position.z;
+        const hd = Math.hypot(dx, dz) || 1;
+        glideTo.set(
+          g.position.x + (dx / hd) * DRIFT_STOP_DIST,
+          BASE_CAM_Y,
+          g.position.z + (dz / hd) * DRIFT_STOP_DIST,
+        );
+        glideFrom.copy(camera.position);
+        glideFrom.y = BASE_CAM_Y;
+        const legDist = glideFrom.distanceTo(glideTo);
+        // Cap SPEED, not duration — a rare long leg takes longer rather than
+        // rushing. (smoothstep peak velocity is 1.5× the average, hence 1.5)
+        glideDur = Math.max(DRIFT_LEG_MIN, (legDist * 1.5) / DRIFT_CRUISE);
+        glideT = 0;
+        driftPhase = 'glide';
+      }
+
+      function runDrift(dt: number) {
+        if (driftPhase === 'seek') {
+          driftSeekDelay -= dt;
+          if (driftSeekDelay > 0) return;
+          const next = pickNextDriftStar();
+          if (next) startGlideTo(next);
+          return;
+        }
+        const g = driftTargetId ? thoughtGroups.get(driftTargetId) : null;
+        if (!g) {
+          driftPhase = 'seek';
+          hideDwellText();
+          return;
+        }
+        if (driftPhase === 'glide') {
+          glideT += dt;
+          const u = Math.min(glideT / glideDur, 1);
+          const e = u * u * (3 - 2 * u); // smoothstep — ease-in, ease-out
+          camera.position.x = glideFrom.x + (glideTo.x - glideFrom.x) * e;
+          camera.position.z = glideFrom.z + (glideTo.z - glideFrom.z) * e;
+          faceStar(g, DRIFT_PITCH_OFFSET, dt, 1.6, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
+          if (u >= 1) {
+            driftPhase = 'dwell';
+            dwellRemaining = 8 + Math.random() * 4; // 8-12 s
+            driftVisited.add(driftTargetId!);
+            const em = g.userData.emotionIndex as number;
+            driftRecentEmotions.push(em);
+            if (driftRecentEmotions.length > 3) driftRecentEmotions.shift();
+            showDwellText(g);
+          }
+        } else {
+          // dwell — hold framing (the star bobs), keep the thought readable
+          dwellRemaining -= dt;
+          faceStar(g, DRIFT_PITCH_OFFSET, dt, 2.0, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
+          updateDwellTextPosition(g);
+          if (dwellRemaining <= 0) {
+            hideDwellText();
+            driftPhase = 'seek';
+            driftSeekDelay = 0;
+          }
+        }
+      }
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
         if (!g) return;
-        const starPos = g.position;
-        const dx = starPos.x - camera.position.x;
-        const dz = starPos.z - camera.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        targetHeading = Math.atan2(dx, -dz);
-        autoRotateTarget = null;
-        noStarVisibleSec = 0;
-        const stopDist = 60;
-        if (dist > stopDist + 2) {
-          const t = (dist - stopDist) / dist;
+        // A canvas click/tap within the last 600 ms means this focus is
+        // user-initiated; otherwise it's automatic (deep link / autofocus).
+        focusWasAuto = performance.now() - lastUserSelectAt > 600;
+        const dx = g.position.x - camera.position.x;
+        const dz = g.position.z - camera.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > FOCUS_STOP_DIST + 2) {
+          const t = (dist - FOCUS_STOP_DIST) / dist;
           flyTargetXZ = {
             x: camera.position.x + dx * t,
             z: camera.position.z + dz * t,
@@ -757,91 +938,133 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else {
           flyTargetXZ = null;
         }
-        // Stay at standard altitude — stars are above camera so we look up, not level
-        flyStarTargetY = BASE_CAM_Y;
       };
 
-      turnLeftFnRef.current = () => {
-        targetHeading = heading - Math.PI / 6;
-        autoRotateTarget = null;
-        flyTargetXZ = null;
-      };
-
-      turnRightFnRef.current = () => {
-        targetHeading = heading + Math.PI / 6;
-        autoRotateTarget = null;
-        flyTargetXZ = null;
-      };
-
-      setPitchFnRef.current = (p: number) => {
-        defaultPitch = Math.max(-0.4, Math.min(0.7, p));
-        pitchTarget = defaultPitch;
+      setDriftingFnRef.current = (on: boolean) => {
+        driftEnabled = on;
+        if (on && camMode === 'manual') setMode('drift');
+        if (!on && camMode === 'drift') setMode('manual');
       };
 
       // ─── INPUT ───
+      // Any deliberate input (pointer down, wheel, touch, key) pauses drift
+      // instantly and hands the camera to manual controls mid-flight — the
+      // camera keeps its exact position/orientation, so there is no jump.
+      function interruptDriftForInput() {
+        idleSec = 0;
+        if (camMode === 'drift') setMode('manual');
+      }
+
       const keys: Record<string, boolean> = {};
-      const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; };
+      const onKeyDown = (e: KeyboardEvent) => {
+        keys[e.code] = true;
+        if (modeRef.current !== 'passive') interruptDriftForInput();
+      };
       const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
       if (modeRef.current !== 'passive') {
         window.addEventListener('keydown', onKeyDown);
         window.addEventListener('keyup', onKeyUp);
       }
 
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
-      const onClickCanvas = (e: MouseEvent) => {
-        if (modeRef.current === 'passive') return;
-        const relX = e.clientX / container.clientWidth;
-        const relY = e.clientY / container.clientHeight;
-        mouse.x = relX * 2 - 1;
-        mouse.y = -(relY) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        if (hits.length > 0) {
-          // Stars always win — even with a panel open
-          const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
-          const dx = thoughtGroup.position.x - camera.position.x;
-          const dz = thoughtGroup.position.z - camera.position.z;
-          targetHeading = Math.atan2(dx, -dz);
-          onClickRef.current?.(thoughtId);
-        } else if (activeStarRef.current) {
-          // Panel is open — any background click dismisses it; no navigation
-          onBgClickRef.current?.();
+      // ─── SCREEN-SPACE PICKING ─────────────────────────────────────────────
+      // Generous: pointer within PICK_RADIUS CSS px of a star's projected
+      // center picks the nearest such star. No dependence on tiny colliders,
+      // star bobbing, or camera motion.
+      const PICK_RADIUS = 48;
+      const pickVec = new THREE.Vector3();
+      function pickStar(clientX: number, clientY: number): string | null {
+        if (!container) return null; // hoisted fn — re-narrow for TS
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        let bestId: string | null = null;
+        let bestD = PICK_RADIUS;
+        thoughtGroups.forEach((g, id) => {
+          // Behind-camera guard — project() mirrors points behind the camera
+          pickVec.copy(g.position).applyMatrix4(camera.matrixWorldInverse);
+          if (pickVec.z >= 0) return;
+          pickVec.copy(g.position).project(camera);
+          const sx = (pickVec.x + 1) / 2 * w;
+          const sy = (-pickVec.y + 1) / 2 * h;
+          const d = Math.hypot(sx - clientX, sy - clientY);
+          if (d < bestD) { bestD = d; bestId = id; }
+        });
+        return bestId;
+      }
+
+      // ─── MOUSE — drag to look, click to select, wheel to move ────────────
+      let suppressClick = false; // a drag ends with a synthetic click — swallow it
+      const mouseDrag = { active: false, moved: false, lastX: 0, lastY: 0, startX: 0, startY: 0 };
+
+      const onMouseDown = (e: MouseEvent) => {
+        if (modeRef.current === 'passive' || e.button !== 0) return;
+        interruptDriftForInput();
+        suppressClick = false;
+        mouseDrag.active = true;
+        mouseDrag.moved = false;
+        mouseDrag.lastX = mouseDrag.startX = e.clientX;
+        mouseDrag.lastY = mouseDrag.startY = e.clientY;
+        lookVel.x = 0;
+        lookVel.y = 0;
+      };
+      const onMouseMoveWindow = (e: MouseEvent) => {
+        if (!mouseDrag.active) return;
+        const dx = e.clientX - mouseDrag.lastX;
+        const dy = e.clientY - mouseDrag.lastY;
+        mouseDrag.lastX = e.clientX;
+        mouseDrag.lastY = e.clientY;
+        if (!mouseDrag.moved &&
+            Math.hypot(e.clientX - mouseDrag.startX, e.clientY - mouseDrag.startY) > 5) {
+          mouseDrag.moved = true;
+        }
+        if (!mouseDrag.moved) return;
+        idleSec = 0;
+        if (camMode !== 'manual') return; // focused: camera stays framed on the star
+        const sensX = (Math.PI * 1.4) / container.clientWidth;
+        const sensY = (Math.PI * 0.7) / container.clientHeight;
+        heading += dx * sensX;
+        pitch = clampPitch(pitch - dy * sensY);
+        lookVel.x = dx * sensX;
+        lookVel.y = -dy * sensY;
+      };
+      const onMouseUpWindow = () => {
+        if (!mouseDrag.active) return;
+        mouseDrag.active = false;
+        if (mouseDrag.moved) {
+          suppressClick = true; // momentum (lookVel) coasts in the animate loop
         } else {
-          // Bullseye navigation: center quarter → background click, outer ring → navigate
-          // nx/ny: -1 = left/top, +1 = right/bottom (screen space, y down)
-          const nx = (relX - 0.5) * 2;
-          const ny = (relY - 0.5) * 2;
-          const dist = Math.sqrt(nx * nx + ny * ny);
-
-          if (dist < 0.5) {
-            // Inner circle (≈ center 1/4 of screen area) — treat as background tap
-            onBgClickRef.current?.();
-          } else {
-            // Outer zone — navigate with intensity proportional to dist from center
-            // Scale: 0 at dist=0.5, 1 at dist=1.42 (full corner)
-            const t = Math.min((dist - 0.5) / 0.92, 1.0);
-            const maxPush = Math.PI / 6 + t * (Math.PI / 3 - Math.PI / 6); // π/6 → π/3
-
-            const ux = nx / dist; // unit direction
-            const uy = ny / dist;
-
-            // Heading component (left/right)
-            if (Math.abs(ux) > 0.15) {
-              targetHeading = heading + ux * maxPush;
-              flyTargetXZ = null;
-            }
-            // Pitch component (up/down) — also updates defaultPitch so the
-            // camera holds at the new angle instead of snapping back
-            if (Math.abs(uy) > 0.15) {
-              const newP = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
-              pitchTarget = newP;
-              defaultPitch = newP;
-            }
-          }
+          lookVel.x = 0;
+          lookVel.y = 0;
         }
       };
+      renderer.domElement.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMoveWindow);
+      window.addEventListener('mouseup', onMouseUpWindow);
+
+      const onClickCanvas = (e: MouseEvent) => {
+        if (modeRef.current === 'passive') return;
+        if (suppressClick) { suppressClick = false; return; }
+        const hitId = pickStar(e.clientX, e.clientY);
+        if (hitId) {
+          lastUserSelectAt = performance.now();
+          onClickRef.current?.(hitId);
+        } else if (activeStarRef.current) {
+          // Panel is open — a missed click dismisses it, nothing else
+          onBgClickRef.current?.();
+        }
+        // A missed click with no panel open does nothing — never moves the camera
+      };
       renderer.domElement.addEventListener('click', onClickCanvas);
+
+      const onWheel = (e: WheelEvent) => {
+        if (modeRef.current === 'passive') return;
+        e.preventDefault();
+        interruptDriftForInput();
+        if (camMode !== 'manual') return; // ignore while a panel is open
+        const dy = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY;
+        // Scroll up / pinch-out → glide forward; decays in the animate loop
+        wheelVel = Math.max(-140, Math.min(140, wheelVel - dy * 0.35));
+      };
+      renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
 
       // ─── HOVER SMOKE EFFECT ───────────────────────────────────────────────
       // When the mouse rests on a star for 500 ms, its answer text rises up
@@ -870,6 +1093,79 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const smokeOverlay = document.createElement('div');
       smokeOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1;';
       container.appendChild(smokeOverlay);
+
+      // ─── DRIFT DWELL TEXT ─────────────────────────────────────────────────
+      // During a drift dwell the star's answer + unique fact render as stable,
+      // readable typography (panel type rules) near — never covering — the
+      // star, persisting for the whole dwell. pointer-events:none so clicks
+      // pass through to picking / drift interruption.
+      const dwellOverlay = document.createElement('div');
+      dwellOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2;';
+      container.appendChild(dwellOverlay);
+      const dwellBox = document.createElement('div');
+      dwellBox.style.cssText = [
+        'position:absolute',
+        'transform:translateX(-50%)',
+        'width:min(420px, calc(100vw - 48px))',
+        'text-align:center',
+        'opacity:0',
+        'transition:opacity 0.9s ease',
+        'pointer-events:none',
+      ].join(';');
+      const dwellQuote = document.createElement('div');
+      dwellQuote.style.cssText = [
+        "font-family:'Cormorant Garamond','Playfair Display',Georgia,'Times New Roman',serif",
+        'font-weight:400',
+        'font-size:clamp(18px, 4vw, 22px)',
+        'line-height:1.45',
+        'color:#F0E8E0',
+        'text-shadow:0 1px 24px rgba(10,6,24,0.85), 0 0 8px rgba(10,6,24,0.6)',
+      ].join(';');
+      const dwellFact = document.createElement('div');
+      dwellFact.style.cssText = [
+        'margin-top:10px',
+        "font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+        'font-style:italic',
+        'font-size:13px',
+        'line-height:1.45',
+        'color:#C8B0E0',
+        'text-shadow:0 1px 16px rgba(10,6,24,0.85)',
+      ].join(';');
+      dwellBox.appendChild(dwellQuote);
+      dwellBox.appendChild(dwellFact);
+      dwellOverlay.appendChild(dwellBox);
+
+      const dwellProj = new THREE.Vector3();
+      function updateDwellTextPosition(g: THREE.Group) {
+        if (!container) return; // hoisted fn — re-narrow for TS
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        dwellProj.copy(g.position).project(camera);
+        const sx = (dwellProj.x + 1) / 2 * w;
+        const sy = (-dwellProj.y + 1) / 2 * h;
+        // Star half-height in px (sprite half-extent ≈ 8 world units × scale;
+        // 60° vertical FOV → px = world/dist × h / (2·tan 30°))
+        const dist = camera.position.distanceTo(g.position);
+        const halfPx = (8 * g.scale.x / Math.max(dist, 1)) * (h / (2 * Math.tan(Math.PI / 6)));
+        const boxW = Math.min(420, w - 48);
+        const left = Math.max(24 + boxW / 2, Math.min(w - 24 - boxW / 2, sx));
+        const top = Math.min(sy + halfPx + 22, h * 0.62);
+        dwellBox.style.left = `${left}px`;
+        dwellBox.style.top = `${top}px`;
+      }
+      function showDwellText(g: THREE.Group) {
+        const answer = ((g.userData.answer as string | undefined) ?? '').trim();
+        if (!answer) return;
+        const fact = ((g.userData.uniqueFact as string | undefined) ?? '').trim();
+        dwellQuote.textContent = `“${answer}”`;
+        dwellFact.textContent = fact ? `— ${fact}` : '';
+        dwellFact.style.display = fact ? 'block' : 'none';
+        updateDwellTextPosition(g);
+        dwellBox.style.opacity = '1';
+      }
+      function hideDwellText() {
+        dwellBox.style.opacity = '0';
+      }
 
       let hoverStarId: string | null = null;
       let hoverTimer: ReturnType<typeof setTimeout> | null = null;
@@ -967,24 +1263,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }, 2600);
       }
       const onMouseMove = (e: MouseEvent) => {
-        // Skip smoke when a star detail is open or in passive mode
-        if (activeStarRef.current || modeRef.current === 'passive') return;
-        const relX = e.clientX / container.clientWidth;
-        const relY = e.clientY / container.clientHeight;
-        const hoverMouse = new THREE.Vector2(relX * 2 - 1, -(relY * 2 - 1));
-        raycaster.setFromCamera(hoverMouse, camera);
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        const hitId = hits.length > 0 ? (hits[0].object.userData.thoughtId as string | undefined) ?? null : null;
-        if (hitId !== hoverStarId) {
+        if (modeRef.current === 'passive') return;
+        if (mouseDrag.active) {
+          renderer.domElement.style.cursor = mouseDrag.moved ? 'grabbing' : '';
+          return;
+        }
+        const hitId = pickStar(e.clientX, e.clientY);
+        // Pointer cursor over any pickable star
+        renderer.domElement.style.cursor = hitId ? 'pointer' : '';
+        // Smoke is a hover garnish only — skip while a panel is open, and skip
+        // the current dwell star (its thought is already on screen as text)
+        if (activeStarRef.current) return;
+        const dwellId = camMode === 'drift' && driftPhase === 'dwell' ? driftTargetId : null;
+        const smokeId = hitId && hitId !== dwellId ? hitId : null;
+        if (smokeId !== hoverStarId) {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-          hoverStarId = hitId;
-          if (hitId) {
+          hoverStarId = smokeId;
+          if (smokeId) {
             if (!smokeInFlight) {
               // Nothing playing — start immediately after short delay
-              hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
+              hoverTimer = setTimeout(() => triggerSmoke(smokeId), 80);
             } else {
               // Let current smoke finish, queue this star for after
-              smokeNextStarId = hitId;
+              smokeNextStarId = smokeId;
             }
           } else {
             // Moved to empty space — cancel queued next but let current finish
@@ -995,42 +1296,30 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.domElement.addEventListener('mousemove', onMouseMove);
 
       // ─── TOUCH CONTROLS ─────────────────────────────────────────────────
-      // Swipe → yaw/pitch with momentum, pinch → zoom, tap → select, double-tap → boost
+      // Swipe → yaw/pitch with momentum, pinch → move, tap → select, double-tap → boost
       const touch = {
         active: false,
         startX: 0, startY: 0,
         lastX: 0, lastY: 0,
         startTime: 0,
         lastTapTime: 0,   // for double-tap detection
-        velX: 0,           // heading velocity (rad/frame), decays with friction
-        velY: 0,           // pitch velocity (rad/frame), decays with friction
         pinchDist: 0,
         pinchVel: 0,       // forward/backward velocity (units/frame), decays
-      };
-
-      const raycastAtPoint = (clientX: number, clientY: number) => {
-        const relX = clientX / container.clientWidth;
-        const relY = clientY / container.clientHeight;
-        mouse.x = relX * 2 - 1;
-        mouse.y = -(relY) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        // Expand raycaster sphere threshold for easier finger targeting
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        return hits[0] ?? null;
       };
 
       const onTouchStart = (e: TouchEvent) => {
         if (modeRef.current === 'passive') return;
         // Always prevent default — stops pull-to-refresh and page rubber-band
         e.preventDefault();
+        interruptDriftForInput();
         if (e.touches.length === 1) {
           const t = e.touches[0];
           touch.active = true;
           touch.startX = touch.lastX = t.clientX;
           touch.startY = touch.lastY = t.clientY;
           touch.startTime = Date.now();
-          touch.velX = 0;
-          touch.velY = 0;
+          lookVel.x = 0;
+          lookVel.y = 0;
         } else if (e.touches.length === 2) {
           // Pinch start — record initial distance
           const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -1042,12 +1331,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       const onTouchMove = (e: TouchEvent) => {
         e.preventDefault();
+        idleSec = 0;
         if (e.touches.length === 1 && touch.active) {
           const t = e.touches[0];
           const dx = t.clientX - touch.lastX;
           const dy = t.clientY - touch.lastY;
           touch.lastX = t.clientX;
           touch.lastY = t.clientY;
+          if (camMode !== 'manual') return; // focused: camera stays framed
 
           // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
           const sensX = (Math.PI * 1.4) / container.clientWidth;
@@ -1055,18 +1346,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           // Immediately apply delta (no lag) AND store as velocity for momentum
           heading += dx * sensX;
-          if (!activeStarRef.current) {
-            // Don't override pitch when locked to a selected star
-            pitch = Math.max(-0.4, Math.min(0.7, pitch - dy * sensY));
-          }
-          touch.velX = dx * sensX;
-          touch.velY = -dy * sensY;
-
-          // Clear any keyboard-triggered targetHeading / auto-rotate so swipe takes over
-          targetHeading = null;
-          autoRotateTarget = null;
-          noStarVisibleSec = 0;
-
+          pitch = clampPitch(pitch - dy * sensY);
+          lookVel.x = dx * sensX;
+          lookVel.y = -dy * sensY;
         } else if (e.touches.length === 2) {
           const dx = e.touches[1].clientX - e.touches[0].clientX;
           const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -1074,7 +1356,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const delta = dist - touch.pinchDist;
           touch.pinchDist = dist;
           // Pinch out (dist grows) → move forward; pinch in → pull back
-          touch.pinchVel = delta * 0.22;
+          if (camMode === 'manual') touch.pinchVel = delta * 0.22;
         }
       };
 
@@ -1094,22 +1376,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           if (isDoubleTap) {
             // Double-tap: temporary speed boost (replaces Space bar)
-            speed = 28;
+            if (camMode === 'manual') speed = 28;
           } else {
-            // Single tap: raycast for star selection
-            const hit = raycastAtPoint(touch.lastX, touch.lastY);
-            if (hit) {
-              const { thoughtId, thoughtGroup } = hit.object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
-              const tdx = thoughtGroup.position.x - camera.position.x;
-              const tdz = thoughtGroup.position.z - camera.position.z;
-              targetHeading = Math.atan2(tdx, -tdz);
-              onClickRef.current?.(thoughtId);
-            } else {
+            // Single tap: generous screen-space pick
+            const hitId = pickStar(touch.lastX, touch.lastY);
+            if (hitId) {
+              lastUserSelectAt = performance.now();
+              onClickRef.current?.(hitId);
+            } else if (activeStarRef.current) {
               onBgClickRef.current?.();
             }
+            // Missed tap with no panel open: does nothing (drift already
+            // paused by the touchstart) — never moves the camera
           }
         }
-        // If it was a swipe, velX/velY are already set — momentum decays in animate loop
+        // If it was a swipe, lookVel is already set — momentum decays in animate loop
       };
 
       renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -1126,7 +1407,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
-      let freeTargetY = BASE_CAM_Y;
 
       function animate() {
         if (disposed) return;
@@ -1146,63 +1426,89 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
 
-        const isPaused = pausedRef.current;
-
-        // Activate/deactivate high-res live texture as active star changes
+        // Activate/deactivate high-res live texture as active star changes,
+        // and drive the focused-mode transitions of the state machine.
         const currentActiveStar = activeStarRef.current;
         if (currentActiveStar !== prevActiveStar) {
-          if (prevActiveStar) {
-            deactivateLive(prevActiveStar);
-            if (!currentActiveStar) {
-              // Deselected — float back to standard cruising altitude
-              freeTargetY = BASE_CAM_Y;
-            }
-          }
+          if (prevActiveStar) deactivateLive(prevActiveStar);
           if (currentActiveStar) {
             activateLive(currentActiveStar);
             // Clear any lingering smoke when a star is selected
             clearSmoke();
             if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
             hoverStarId = null;
+            setMode('focused');
+          } else if (camMode === 'focused') {
+            // Panel dismissed — back to manual; the idle timer restarts.
+            flyTargetXZ = null;
+            setMode('manual');
+            // Deep-link / autofocus dismissal: drift begins after a short beat
+            if (focusWasAuto && driftEnabled) idleSec = IDLE_RESUME_SEC - 1.2;
           }
           prevActiveStar = currentActiveStar;
         }
 
-        // ── Touch momentum — coasts after swipe / pinch ends ──────────────────
-        if (Math.abs(touch.velX) > 0.0002) {
-          heading += touch.velX;
-          touch.velX *= 0.87; // friction: ~12 frames to stop from a medium swipe
-        } else { touch.velX = 0; }
-        if (Math.abs(touch.velY) > 0.0002 && !activeStarRef.current) {
-          pitch = Math.max(-0.4, Math.min(0.7, pitch + touch.velY));
-          touch.velY *= 0.87;
-        } else { touch.velY = 0; }
-        if (Math.abs(touch.pinchVel) > 0.05) {
-          // Pinch moves camera forward/backward — clamped so you can't enter terrain
-          const fwdX2 = Math.sin(heading);
-          const fwdZ2 = -Math.cos(heading);
-          camera.position.x += fwdX2 * touch.pinchVel;
-          camera.position.z += fwdZ2 * touch.pinchVel;
-          touch.pinchVel *= 0.82;
-        } else { touch.pinchVel = 0; }
+        // ── CAMERA — exactly one mode owns position/orientation per frame ────
+        if (modeRef.current === 'passive') {
+          // Landing-page backdrop: gentle cruise toward the sunset (unchanged)
+          heading += 0.002 * dt;
+          camera.position.x += Math.sin(heading) * 4 * dt;
+          camera.position.z += -Math.cos(heading) * 4 * dt;
+          pitch += (0.30 - pitch) * Math.min(dt * 1.5, 1);
+        } else if (camMode === 'drift') {
+          runDrift(dt);
+        } else if (camMode === 'focused') {
+          // Glide toward the framing point, easing out into the stop
+          if (flyTargetXZ) {
+            const fdx = flyTargetXZ.x - camera.position.x;
+            const fdz = flyTargetXZ.z - camera.position.z;
+            const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
+            if (fdist < 1.5) {
+              flyTargetXZ = null;
+            } else {
+              const flySpeed = Math.min(90, Math.max(10, fdist * 1.6));
+              const amt = Math.min(fdist, flySpeed * dt);
+              camera.position.x += (fdx / fdist) * amt;
+              camera.position.z += (fdz / fdist) * amt;
+            }
+          }
+          const ag = activeStarRef.current ? thoughtGroups.get(activeStarRef.current) : null;
+          if (ag) faceStar(ag, FOCUS_PITCH_OFFSET, dt, 2.5, 1.2, 0.8);
+        } else {
+          // ── manual — drag momentum, wheel/pinch move, silent WASD layer ────
+          if (Math.abs(lookVel.x) > 0.0002) {
+            heading += lookVel.x;
+            lookVel.x *= 0.87; // friction: ~12 frames to stop from a medium swipe
+          } else { lookVel.x = 0; }
+          if (Math.abs(lookVel.y) > 0.0002) {
+            pitch = clampPitch(pitch + lookVel.y);
+            lookVel.y *= 0.87;
+          } else { lookVel.y = 0; }
+          if (Math.abs(touch.pinchVel) > 0.05) {
+            camera.position.x += Math.sin(heading) * touch.pinchVel;
+            camera.position.z += -Math.cos(heading) * touch.pinchVel;
+            touch.pinchVel *= 0.82;
+          } else { touch.pinchVel = 0; }
+          if (Math.abs(wheelVel) > 0.3) {
+            camera.position.x += Math.sin(heading) * wheelVel * dt;
+            camera.position.z += -Math.cos(heading) * wheelVel * dt;
+            wheelVel *= Math.exp(-2.2 * dt); // ~0.3 s half-life
+          } else { wheelVel = 0; }
 
-        // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
-        // Q/E = lateral strafe (slide perpendicular to heading)
-        const MAX_TURN_VEL  = 1.8;  // max rad/s
-        const TURN_ACCEL    = 5.0;  // rad/s² spin-up
-        const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
-        const MAX_STRAFE    = 22;   // units/s
-        const STRAFE_ACCEL  = 55;
-        const STRAFE_DECEL  = 80;
-        if (!isPaused) {
+          // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
+          // Q/E = lateral strafe (slide perpendicular to heading)
+          const MAX_TURN_VEL  = 1.8;  // max rad/s
+          const TURN_ACCEL    = 5.0;  // rad/s² spin-up
+          const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
+          const MAX_STRAFE    = 22;   // units/s
+          const STRAFE_ACCEL  = 55;
+          const STRAFE_DECEL  = 80;
           const wantLeft  = keys['KeyA'] || keys['ArrowLeft'];
           const wantRight = keys['KeyD'] || keys['ArrowRight'];
           if (wantLeft) {
             turnVel = Math.max(turnVel - TURN_ACCEL * dt, -MAX_TURN_VEL);
-            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
           } else if (wantRight) {
             turnVel = Math.min(turnVel + TURN_ACCEL * dt, MAX_TURN_VEL);
-            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
           } else {
             const decel = TURN_DECEL * dt;
             if (Math.abs(turnVel) <= decel) turnVel = 0;
@@ -1210,41 +1516,43 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
           if (turnVel !== 0) heading += turnVel * dt;
 
-          const wantStrafeLeft  = keys['KeyQ'];
-          const wantStrafeRight = keys['KeyE'];
-          if (wantStrafeLeft) {
+          if (keys['KeyQ']) {
             strafeVel = Math.max(strafeVel - STRAFE_ACCEL * dt, -MAX_STRAFE);
-          } else if (wantStrafeRight) {
+          } else if (keys['KeyE']) {
             strafeVel = Math.min(strafeVel + STRAFE_ACCEL * dt, MAX_STRAFE);
           } else {
             const sd = STRAFE_DECEL * dt;
             if (Math.abs(strafeVel) <= sd) strafeVel = 0;
             else strafeVel -= Math.sign(strafeVel) * sd;
           }
-        } else {
-          // Paused — bleed off any existing velocity
-          if (Math.abs(turnVel)   > 0) turnVel   = 0;
-          if (Math.abs(strafeVel) > 0) strafeVel = 0;
-        }
 
-        // Heading: smooth toward target, auto-rotate when idle, or very slow drift
-        if (targetHeading !== null) {
-          let diff = targetHeading - heading;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          heading += diff * dt * 1.5;
-          if (Math.abs(diff) < 0.05) targetHeading = null;
-        } else if (autoRotateTarget !== null) {
-          // Constant angular velocity: ~0.2 rad/s → 90° takes ~4.7 s
-          let diff = autoRotateTarget - heading;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          const step = Math.sign(diff) * Math.min(Math.abs(diff), AUTO_ROTATE_SPEED * dt);
-          heading += step;
-          if (Math.abs(diff) < 0.04) autoRotateTarget = null;
-        } else if (!isPaused && !flyTargetXZ) {
-          // One rotation every ~50 minutes — sunset slowly sweeps across the view
-          heading += 0.002 * dt;
+          // W/Space/↑ move forward; no baseline auto-cruise — the camera only
+          // moves when asked, so missed clicks and stillness stay still.
+          const wantForward = keys['Space'] || keys['KeyW'] || keys['ArrowUp'];
+          const targetSpeed = wantForward ? 25 : 0;
+          speed += (targetSpeed - speed) * dt * 3;
+          if (Math.abs(speed) > 0.05) {
+            camera.position.x += Math.sin(heading) * speed * dt;
+            camera.position.z += -Math.cos(heading) * speed * dt;
+          }
+          if (strafeVel !== 0) {
+            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
+            const sideZ = Math.sin(heading);  // perpendicular Z
+            camera.position.x += sideX * strafeVel * dt;
+            camera.position.z += sideZ * strafeVel * dt;
+          }
+
+          // Idle → drift resumes from wherever the camera is
+          const inputActive =
+            mouseDrag.active || touch.active || wantLeft || wantRight || wantForward ||
+            keys['KeyS'] || keys['ArrowDown'] || keys['KeyQ'] || keys['KeyE'] ||
+            lookVel.x !== 0 || lookVel.y !== 0 ||
+            wheelVel !== 0 || touch.pinchVel !== 0 || Math.abs(speed) > 0.5;
+          if (inputActive) idleSec = 0;
+          else idleSec += dt;
+          if (idleSec >= IDLE_RESUME_SEC && driftEnabled && !activeStarRef.current) {
+            setMode('drift');
+          }
         }
 
         const fwdX = Math.sin(heading);
@@ -1252,58 +1560,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Sun always in front of camera so warm glow stays ahead
         skyMat.uniforms.uSunDir.value.set(fwdX, -0.15, fwdZ).normalize();
 
-        // Speed for free drift — W/ArrowUp/Space accelerate; S/ArrowDown brakes
-        const targetSpeed = isPaused ? 0 : (
-          (keys['Space'] || keys['KeyW'] || keys['ArrowUp']) ? 25 :
-          (keys['KeyS'] || keys['ArrowDown']) ? 0 : 4
-        );
-        speed += (targetSpeed - speed) * dt * 3;
-
-        // Horizontal position
-        if (flyTargetXZ) {
-          const fdx = flyTargetXZ.x - camera.position.x;
-          const fdz = flyTargetXZ.z - camera.position.z;
-          const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
-          if (fdist < 2) {
-            flyTargetXZ = null;
-          } else {
-            const flyAmt = Math.min(fdist, 90 * dt);
-            camera.position.x += (fdx / fdist) * flyAmt;
-            camera.position.z += (fdz / fdist) * flyAmt;
-          }
-        } else if (!isPaused) {
-          camera.position.x += fwdX * speed * dt;
-          camera.position.z += fwdZ * speed * dt;
-          // Q/E strafe — slide perpendicular to heading
-          if (strafeVel !== 0) {
-            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
-            const sideZ = Math.sin(heading);  // perpendicular Z
-            camera.position.x += sideX * strafeVel * dt;
-            camera.position.z += sideZ * strafeVel * dt;
-          }
-        }
-
-        // Camera Y — always at BASE_CAM_Y; stars (y=80-140) are above so we always look up
+        // Camera Y — cruise altitude, floored by terrain; stars (y=80-140) sit
+        // above so we always look up
         const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 55);
-        camTargetY = Math.max(flyTargetXZ ? flyStarTargetY : freeTargetY, terrainFloor);
+        camTargetY = Math.max(BASE_CAM_Y, terrainFloor);
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
-
-        // Pitch-based smooth lookAt — angles interpolate, no world-space jump on star click
-        const activeId = activeStarRef.current;
-        if (activeId) {
-          const ag = thoughtGroups.get(activeId);
-          if (ag) {
-            const dx = ag.position.x - camera.position.x;
-            const dz = ag.position.z - camera.position.z;
-            const dy = (ag.position.y - 4) - camera.position.y;
-            const hDist = Math.max(Math.sqrt(dx * dx + dz * dz), 0.01);
-            pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
-          }
-        } else {
-          const restP = pitchTarget !== null ? pitchTarget : defaultPitch;
-          pitch += (restP - pitch) * Math.min(dt * 1.5, 1);
-          if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
-        }
 
         const cosP = Math.cos(pitch);
         const sinP = Math.sin(pitch);
@@ -1312,60 +1573,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.y + sinP * 200,
           camera.position.z + fwdZ * cosP * 200,
         ));
-
-        // ── Auto-rotate toward nearest star when none visible for 10 s ──────────
-        // Only run when no star is selected and no manual turn is active.
-        if (!activeStarRef.current && targetHeading === null && autoRotateTarget === null && !isPaused) {
-          // Camera forward direction (horizontal only for dot-product test)
-          const camFwdX = fwdX;
-          const camFwdZ = fwdZ;
-
-          // Check if any thought star is roughly in front of the camera.
-          // Use a ~50° half-angle cone (cos 50° ≈ 0.64).
-          const COS_HALF_FOV = 0.64;
-          let anyVisible = false;
-          thoughtGroups.forEach(g => {
-            if (anyVisible) return;
-            const gx = g.position.x - camera.position.x;
-            const gz = g.position.z - camera.position.z;
-            const hDist = Math.sqrt(gx * gx + gz * gz);
-            if (hDist < 1) return;
-            const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
-            if (dot > COS_HALF_FOV) anyVisible = true;
-          });
-
-          if (anyVisible) {
-            noStarVisibleSec = 0;
-          } else {
-            noStarVisibleSec += dt;
-            if (noStarVisibleSec >= 10) {
-              // Find nearest star within ±90° of current heading
-              // (dot product > 0 means it's in front of us, not behind)
-              let bestDist = Infinity;
-              let bestHeading: number | null = null;
-              thoughtGroups.forEach(g => {
-                const gx = g.position.x - camera.position.x;
-                const gz = g.position.z - camera.position.z;
-                const hDist = Math.sqrt(gx * gx + gz * gz);
-                if (hDist < 1) return;
-                const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
-                // Skip stars more than 90° away (behind us or overhead)
-                if (dot < AUTO_ROTATE_MAX_COS) return;
-                if (hDist < bestDist) {
-                  bestDist = hDist;
-                  bestHeading = Math.atan2(gx, -gz);
-                }
-              });
-              if (bestHeading !== null) {
-                autoRotateTarget = bestHeading;
-                noStarVisibleSec = 0;
-              }
-            }
-          }
-        } else if (activeStarRef.current || targetHeading !== null) {
-          noStarVisibleSec = 0;
-        }
-        // ── end auto-rotate ───────────────────────────────────────────────────
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
@@ -1494,15 +1701,18 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
-        turnLeftFnRef.current  = null;
-        turnRightFnRef.current = null;
+        setDriftingFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
 
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
+        window.removeEventListener('mousemove', onMouseMoveWindow);
+        window.removeEventListener('mouseup', onMouseUpWindow);
+        renderer.domElement.removeEventListener('mousedown', onMouseDown);
         renderer.domElement.removeEventListener('click', onClickCanvas);
+        renderer.domElement.removeEventListener('wheel', onWheel);
         renderer.domElement.removeEventListener('mousemove', onMouseMove);
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
@@ -1511,6 +1721,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
         if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
+        if (container.contains(dwellOverlay)) container.removeChild(dwellOverlay);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();
@@ -1581,7 +1792,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
     }, [bonds]);
 
-    const showPerf = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf');
+    // Read ?perf= after mount only — reading window.location during render
+    // makes the server and client render different HTML (hydration error).
+    const [showPerf, setShowPerf] = useState(false);
+    useEffect(() => {
+      if (new URLSearchParams(window.location.search).has('perf')) {
+        setShowPerf(true);
+      }
+    }, []);
     return (
       <>
         <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />

@@ -35,6 +35,25 @@ function parseFlagReason(v: unknown, publishable: boolean): string | null {
   return typeof v === 'string' && v.trim() ? v : 'flagged';
 }
 
+// The public subset of a dimension result: what may be stored in a star's
+// dimensions JSON and returned to clients. The publish-gate verdict
+// (publishable/flagReason) never leaves the server, and unknown client-supplied
+// fields are dropped.
+export function visualDimensions(
+  r: DimensionResult
+): Omit<DimensionResult, 'publishable' | 'flagReason'> {
+  return {
+    certainty: r.certainty,
+    warmth: r.warmth,
+    tension: r.tension,
+    vulnerability: r.vulnerability,
+    scope: r.scope,
+    rootedness: r.rootedness,
+    emotionIndex: r.emotionIndex,
+    reasoning: r.reasoning,
+  };
+}
+
 export async function extractDimensions(answer: string): Promise<DimensionResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {

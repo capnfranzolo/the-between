@@ -2,10 +2,9 @@
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { createSpirograph } from '@/lib/spirograph/renderer';
-import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
+import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
-import ControlsHint from '@/components/ControlsHint';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import { type CosmosBond } from '@/components/BondCurves';
@@ -269,10 +268,10 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
-  const [triggerControlsHint, setTriggerControlsHint] = useState(false);
+  // Camera mode reported by the scene — drift is the default state
+  const [sceneMode, setSceneMode] = useState<CamMode>('drift');
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
-  const panelDismissedOnce = useRef(false);
 
   // Fetch all questions so we can cycle to the next one
   useEffect(() => {
@@ -339,6 +338,7 @@ export default function CosmosPage() {
         emotionIndex: dims.emotionIndex,
         dimensions: dims,
         answer: star.text ?? '',
+        uniqueFact: star.unique_fact ?? '',
       };
     });
   }, [allStars, myShortcode]);
@@ -448,11 +448,6 @@ export default function CosmosPage() {
     setConnecting(false);
     setConnectConfirmed(false);
     setReason('');
-    // Trigger controls hint the first time a panel is dismissed
-    if (!panelDismissedOnce.current) {
-      panelDismissedOnce.current = true;
-      setTriggerControlsHint(true);
-    }
   };
 
   return (
@@ -463,9 +458,9 @@ export default function CosmosPage() {
         bonds={sceneBonds}
         activeStar={selected}
         userStar={userStarId}
-        paused={!!selected}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
+        onModeChange={setSceneMode}
       />
 
       <div
@@ -533,36 +528,6 @@ export default function CosmosPage() {
               </>
             );
           })()}
-        </div>
-
-        {/* Edge hotspot indicators — pointer-events none; canvas handles actual click */}
-        <div style={{
-          position: 'absolute', left: 0, top: 0, width: '10%', height: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 2,
-        }}>
-          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>‹</span>
-        </div>
-        <div style={{
-          position: 'absolute', right: 0, top: 0, width: '10%', height: '100%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 2,
-        }}>
-          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>›</span>
-        </div>
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: '5%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 2,
-        }}>
-          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>∧</span>
-        </div>
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, height: '5%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none', zIndex: 2,
-        }}>
-          <span style={{ fontSize: 18, color: BTW.textDim, opacity: 0.18, userSelect: 'none' }}>∨</span>
         </div>
 
         {/* Star detail panel */}
@@ -698,6 +663,39 @@ export default function CosmosPage() {
           )}
         </div>
 
+        {/* Drift pause/play — reflects and controls the camera's drift state */}
+        {!selected && (
+          <button
+            onClick={() => sceneRef.current?.setDrifting(sceneMode !== 'drift')}
+            aria-label={sceneMode === 'drift' ? 'Pause drift' : 'Resume drift'}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'transparent',
+              border: '1px solid rgba(240,232,224,0.14)',
+              borderRadius: 999,
+              padding: '8px 16px',
+              minHeight: 36,
+              color: BTW.textDim,
+              fontFamily: SANS, fontSize: 10,
+              letterSpacing: '0.24em', textTransform: 'uppercase',
+              cursor: 'pointer', pointerEvents: 'auto',
+              touchAction: 'manipulation',
+              transition: 'color .2s, border-color .2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.32)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.14)'; }}
+          >
+            <span aria-hidden style={{ fontSize: 9, letterSpacing: 0 }}>
+              {sceneMode === 'drift' ? '❚❚' : '▶'}
+            </span>
+            drift
+          </button>
+        )}
+
         {/* Add star */}
         <button
           onClick={() => { window.location.href = `/?question=${questionId}`; }}
@@ -718,11 +716,6 @@ export default function CosmosPage() {
           +
         </button>
       </div>
-
-      <ControlsHint
-        trigger={triggerControlsHint}
-        onDone={() => setTriggerControlsHint(false)}
-      />
 
       {connecting && (
         <GhostPrompt

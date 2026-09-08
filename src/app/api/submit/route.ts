@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { generateShortcode } from '@/lib/shortcode';
-import { extractDimensions } from '@/lib/dimensions/extract';
+import { extractDimensions, visualDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
 import { supabaseServer } from '@/lib/supabase/server';
@@ -50,13 +50,8 @@ export async function POST(req: NextRequest) {
 
   // The gate verdict is not persisted: `dimensions` is served verbatim by
   // /api/cosmos, and a pending star approved later must not carry its flag.
-  const {
-    publishable: _publishable,
-    flagReason: _flagReason,
-    ...visualDims
-  } = dimensionResult;
   const dimensions = {
-    ...visualDims,
+    ...visualDimensions(dimensionResult),
     curveType,
   };
 
