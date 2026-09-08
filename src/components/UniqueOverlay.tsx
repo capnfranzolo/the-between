@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import { MAX_UNIQUE_LENGTH } from '@/lib/constants';
+import { MAX_UNIQUE_LENGTH, BIRTH_FLAG_KEY } from '@/lib/constants';
 import type { CurveType } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 
@@ -41,6 +41,10 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
       const data = await res.json();
       if (data.shortcode) {
         localStorage.setItem('my_star', data.shortcode);
+        // Phase 7 — the cosmos this navigates to plays the birth bloom for
+        // this star, once. (Phase 8 will hang the visual bloom off the same
+        // flag; the sound already knows when the moment is.)
+        try { sessionStorage.setItem(BIRTH_FLAG_KEY, data.shortcode); } catch { /* private mode */ }
         // Hard navigation (not router.push): this overlay can be opened from
         // /cosmos/[questionId] itself (Phase 6 "What shape are you?" CTA), where
         // a client-side push to the same route segment (only `?star=` differs)

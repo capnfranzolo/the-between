@@ -3,6 +3,7 @@ import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 're
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
+import { sound } from '@/lib/sound';
 
 export interface ThoughtData {
   id: string;
@@ -1277,6 +1278,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         dwellFact.style.display = fact ? 'block' : 'none';
         updateDwellTextPosition(g);
         dwellBox.style.opacity = '1';
+        // Phase 7 — the arrival chime, pitched from the star's emotionIndex.
+        sound.play('chime', { emotionIndex: (g.userData.emotionIndex as number) ?? 3 });
         const dwellId = g.userData.id as string | undefined;
         if (dwellId) onDwellRef.current?.(dwellId);
       }
@@ -1522,6 +1525,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
+      // Phase 7 — camera speed feeds the near-silent wind. Horizontal only:
+      // the altitude lerp shouldn't read as movement.
+      let prevCamX = camera.position.x;
+      let prevCamZ = camera.position.z;
 
       function animate() {
         if (disposed) return;
@@ -1726,6 +1733,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z + fwdZ * cosP * 200,
         ));
 
+        if (dt > 0.0005) {
+          sound.setCameraSpeed(
+            Math.hypot(camera.position.x - prevCamX, camera.position.z - prevCamZ) / dt,
+          );
+        }
+        prevCamX = camera.position.x;
+        prevCamZ = camera.position.z;
+
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
           lastSnapZ = Math.round(camera.position.z / 300) * 300;
@@ -1872,6 +1887,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
         renderer.domElement.removeEventListener('touchend',   onTouchEnd);
+        sound.setCameraSpeed(0); // the wind stops with the scene
         if (hoverTimer) clearTimeout(hoverTimer);
         if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);

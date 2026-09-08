@@ -11,6 +11,7 @@ import ConnectionDrawer from '@/components/ConnectionDrawer';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import SkyRail from '@/components/SkyRail';
+import SoundControl from '@/components/SoundControl';
 import LivenessCounter from '@/components/LivenessCounter';
 import ShareButton from '@/components/ShareButton';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -18,7 +19,8 @@ import UniqueOverlay from '@/components/UniqueOverlay';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
-import { SITE_URL } from '@/lib/constants';
+import { sound } from '@/lib/sound';
+import { SITE_URL, BIRTH_FLAG_KEY } from '@/lib/constants';
 
 const DIM_DEFAULTS = { certainty: 0.5, warmth: 0.5, tension: 0.5, vulnerability: 0.5, scope: 0.5, rootedness: 0.5, emotionIndex: 3, curveType: 'hypotrochoid' as const, reasoning: '' };
 
@@ -356,6 +358,9 @@ export default function CosmosPage() {
     if (newId === currentQuestionId || switchingRef.current) return;
     switchingRef.current = true;
     setSwitching(true);
+    // Phase 7 — the ambient bed travels with the sky: start its crossfade at
+    // the same moment the visual one begins.
+    sound.setWorld(newId);
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -400,6 +405,24 @@ export default function CosmosPage() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [currentQuestionId, performSwitch]);
+
+  // Phase 7 — keep the ambient bed pointed at the world on screen (mount, and
+  // as a no-op backstop after a rail switch, which already called setWorld).
+  useEffect(() => { sound.setWorld(currentQuestionId); }, [currentQuestionId]);
+
+  // Phase 7 — a star was just born: submitting navigates here, so the moment
+  // arrives across a document boundary as a sessionStorage flag.
+  const birthConsumed = useRef(false);
+  useEffect(() => {
+    if (birthConsumed.current || !data) return;
+    let born: string | null = null;
+    try { born = sessionStorage.getItem(BIRTH_FLAG_KEY); } catch { /* private mode */ }
+    if (!born) return;
+    birthConsumed.current = true;
+    try { sessionStorage.removeItem(BIRTH_FLAG_KEY); } catch { /* private mode */ }
+    if (starParam && born !== starParam) return; // stale flag from another star
+    sound.play('birth');
+  }, [data, starParam]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
@@ -483,6 +506,7 @@ export default function CosmosPage() {
   }, [userStarId, bonds]);
 
   const handleThoughtClick = (id: string) => {
+    sound.play('select');
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -507,6 +531,7 @@ export default function CosmosPage() {
     setConnecting(false);
     setConnectConfirmed(true);
     setConnectedBondId(null);
+    sound.play('bond'); // the finale — fires with the confirmation, not the round trip
 
     try {
       const res = await fetch('/api/connect', {
@@ -591,6 +616,8 @@ export default function CosmosPage() {
         onSelect={id => performSwitch(id, true)}
         disabled={switching}
       />
+
+      <SoundControl />
 
       {data?.totals && (
         <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />

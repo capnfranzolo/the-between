@@ -9,10 +9,12 @@ import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import LivenessCounter from '@/components/LivenessCounter';
+import SoundControl from '@/components/SoundControl';
 import ShareButton from '@/components/ShareButton';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
+import { sound } from '@/lib/sound';
 import { SITE_URL } from '@/lib/constants';
 
 // The landing cosmos is always question 1 unless a specific question is
@@ -114,19 +116,27 @@ function LandingPageInner() {
   }, []);
 
   // Any deliberate input skips the intro instantly — never blocks the visitor.
+  // Exception: answering the "sound?" invitation is a choice about the intro,
+  // not an escape from it, so it neither skips nor consumes the listeners.
   useEffect(() => {
     if (!introActive) return;
-    const skip = () => endIntro();
-    window.addEventListener('pointerdown', skip, { capture: true, once: true });
-    window.addEventListener('keydown', skip, { capture: true, once: true });
-    window.addEventListener('wheel', skip, { capture: true, once: true, passive: true });
-    window.addEventListener('touchstart', skip, { capture: true, once: true, passive: true });
-    return () => {
+    const remove = () => {
       window.removeEventListener('pointerdown', skip, true);
       window.removeEventListener('keydown', skip, true);
       window.removeEventListener('wheel', skip, true);
       window.removeEventListener('touchstart', skip, true);
     };
+    function skip(e: Event) {
+      const t = e.target as Element | null;
+      if (t?.closest?.('[data-btw-sound-control]')) return;
+      remove();
+      endIntro();
+    }
+    window.addEventListener('pointerdown', skip, { capture: true });
+    window.addEventListener('keydown', skip, { capture: true });
+    window.addEventListener('wheel', skip, { capture: true, passive: true });
+    window.addEventListener('touchstart', skip, { capture: true, passive: true });
+    return remove;
   }, [introActive, endIntro]);
 
   // Script beats 3 & 5 — layered over the existing drift-dwell presentation.
@@ -178,6 +188,9 @@ function LandingPageInner() {
       })
       .catch(() => {});
   }, [questionId, myShortcode]);
+
+  // Phase 7 — the landing cosmos is a world too; give the bed its voice.
+  useEffect(() => { sound.setWorld(questionId); }, [questionId]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
@@ -260,6 +273,7 @@ function LandingPageInner() {
   }, [userStarId, bonds]);
 
   const handleThoughtClick = (id: string) => {
+    sound.play('select');
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -292,6 +306,7 @@ function LandingPageInner() {
     setConnecting(false);
     setConnectConfirmed(true);
     setConnectedBondId(null);
+    sound.play('bond'); // the finale — fires with the confirmation, not the round trip
 
     try {
       const res = await fetch('/api/connect', {
@@ -346,6 +361,8 @@ function LandingPageInner() {
         onModeChange={setSceneMode}
         onDwell={handleDwell}
       />
+
+      <SoundControl />
 
       {data?.totals && (
         <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />

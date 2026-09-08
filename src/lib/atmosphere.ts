@@ -13,6 +13,37 @@ export interface SkyStop {
   color: string;
 }
 
+/**
+ * Phase 7 — the sound of a world. Purely additive: these fields feed the
+ * procedural ambient bed (src/lib/sound/), never the visuals. A world with no
+ * `sound` block falls back to DEFAULT_WORLD_SOUND.
+ */
+export interface WorldSoundConfig {
+  /** Tonal root of the world in Hz. Also the base every interaction sound is
+   *  tuned from, so a chime is always in key with the sky it rings in. */
+  droneHz: number;
+  /** Semitones above the root for the drone's companion voice. */
+  droneInterval: number;
+  /** Lowpass cutoff (Hz) of the night-air noise — low reads as still and
+   *  far away, higher as open and breezy. */
+  airCutoff: number;
+  /** Relative level of the air (0-1, scaled by the near-silent bed gain). */
+  airLevel: number;
+  /** Relative level of the drone (0-1). */
+  droneLevel: number;
+  /** Speed (Hz) of the slow breathing swell on the air. */
+  breathHz: number;
+}
+
+export const DEFAULT_WORLD_SOUND: WorldSoundConfig = {
+  droneHz: 55,        // A1 — the reference hour
+  droneInterval: 7,   // a fifth
+  airCutoff: 520,
+  airLevel: 0.90,
+  droneLevel: 0.80,
+  breathHz: 0.055,
+};
+
 export interface AtmosphereConfig {
   /** Sky dome gradient stops (horizon → zenith), t = 0..1. */
   skyStops: SkyStop[];
@@ -27,6 +58,9 @@ export interface AtmosphereConfig {
   gradLift: number;
   gradSteep: number;
   sunShift: number;
+  /** Phase 7 — the world's ambient voice. Optional: absent means
+   *  DEFAULT_WORLD_SOUND (see getWorldSound()). */
+  sound?: WorldSoundConfig;
 }
 
 // The sacred base gradient — exactly the stops CosmosScene has always used.
@@ -80,6 +114,7 @@ export const DEFAULT_ATMOSPHERE: AtmosphereConfig = {
   gradLift: 0.22,
   gradSteep: 1.85,
   sunShift: 0.05,
+  sound: DEFAULT_WORLD_SOUND,
 };
 
 // Keyed by the seeded question ids (00000000-0000-4000-8000-00000000000{1..6}).
@@ -93,6 +128,8 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
     terrainGlow: 0.60,
     cloudTint: '190,125,135',
     gradLift: 0.25, gradSteep: 1.76, sunShift: 0.09,
+    // warmer air, a step up the scale (B1), fifth above — closer, breathing
+    sound: { droneHz: 61.74, droneInterval: 7, airCutoff: 620, airLevel: 1.00, droneLevel: 0.85, breathHz: 0.070 },
   },
   '00000000-0000-4000-8000-000000000003': { // "ordinary sacred" — cooler, deeper indigo, quieter stars
     skyStops: tintStops([100, 115, 215], 0.20),
@@ -100,6 +137,8 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
     terrainGlow: 0.30,
     cloudTint: '110,110,195',
     gradLift: 0.19, gradSteep: 1.98, sunShift: 0.02,
+    // deeper, stiller: G1 with an open fourth, air pulled well back
+    sound: { droneHz: 49.00, droneInterval: 5, airCutoff: 380, airLevel: 0.75, droneLevel: 0.90, breathHz: 0.040 },
   },
   '00000000-0000-4000-8000-000000000004': { // "kindest thing witnessed" — golden, later dusk, warm terrain glow
     skyStops: tintStops([245, 172, 80], 0.24),
@@ -107,6 +146,8 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
     terrainGlow: 0.66,
     cloudTint: '200,145,100',
     gradLift: 0.24, gradSteep: 1.72, sunShift: 0.11,
+    // golden and major: C2 with a third above, the most open air of the six
+    sound: { droneHz: 65.41, droneInterval: 4, airCutoff: 700, airLevel: 0.95, droneLevel: 0.75, breathHz: 0.065 },
   },
   '00000000-0000-4000-8000-000000000005': { // "after you're gone" — muted, near-night violet, sparse dim stars
     skyStops: tintStops([80, 60, 130], 0.18),
@@ -114,6 +155,8 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
     terrainGlow: 0.24,
     cloudTint: '100,80,150',
     gradLift: 0.17, gradSteep: 2.08, sunShift: 0.01,
+    // the lowest, slowest world: F1, almost no air, drone carries it alone
+    sound: { droneHz: 43.65, droneInterval: 7, airCutoff: 300, airLevel: 0.60, droneLevel: 1.00, breathHz: 0.030 },
   },
   '00000000-0000-4000-8000-000000000006': { // "younger self surprised" — bright fresh dusk, most stars, airy
     skyStops: tintStops([150, 200, 220], 0.22),
@@ -121,6 +164,8 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
     terrainGlow: 0.50,
     cloudTint: '155,160,190',
     gradLift: 0.27, gradSteep: 1.80, sunShift: 0.06,
+    // brightest and airiest: D2 with a sixth above, quickest breath
+    sound: { droneHz: 73.42, droneInterval: 9, airCutoff: 860, airLevel: 1.00, droneLevel: 0.65, breathHz: 0.080 },
   },
 };
 
@@ -129,4 +174,10 @@ export const ATMOSPHERES: Record<string, AtmosphereConfig> = {
 export function getAtmosphere(questionId: string | null | undefined): AtmosphereConfig {
   if (!questionId) return DEFAULT_ATMOSPHERE;
   return ATMOSPHERES[questionId] ?? DEFAULT_ATMOSPHERE;
+}
+
+/** Phase 7 — the ambient voice for a question id, with the sane default for
+ *  an unrecognized one. */
+export function getWorldSound(questionId: string | null | undefined): WorldSoundConfig {
+  return getAtmosphere(questionId).sound ?? DEFAULT_WORLD_SOUND;
 }
