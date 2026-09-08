@@ -3,7 +3,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
-import { createSpirograph } from '@/lib/spirograph/renderer';
+import { createSpirograph, withSeed } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
 
@@ -21,6 +21,8 @@ export interface CosmosStarData {
 
 export interface UserStarContext {
   text: string;
+  /** Needed as the Phase 5 archetype seed so the mini preview matches the sky. */
+  shortcode: string;
   dimensions: CosmosStarData['dimensions'];
 }
 
@@ -383,7 +385,7 @@ export default function StarDetail({
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {showUserStar && (
-              <StarMini dims={userStar!.dimensions} size={36} />
+              <StarMini dims={withSeed(userStar!.dimensions, userStar!.shortcode)} size={36} />
             )}
             Connect your star →
           </button>

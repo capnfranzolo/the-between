@@ -1,7 +1,7 @@
 'use client';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { createSpirograph } from '@/lib/spirograph/renderer';
+import { createSpirograph, withSeed } from '@/lib/spirograph/renderer';
 import CosmosScene, {
   type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode,
   CROSSFADE_IN_MS,
@@ -140,7 +140,7 @@ function StarMiniInline({ star, size }: { star: CosmosStarData; size: number }) 
   const wrapRef   = useRef<HTMLDivElement>(null);
   const smokeTimers  = useRef<ReturnType<typeof setTimeout>[]>([]);
   const smokeBubble  = useRef<HTMLDivElement | null>(null);
-  const dims = star.dimensions ?? DIM_DEFAULTS;
+  const dims = withSeed(star.dimensions ?? DIM_DEFAULTS, star.shortcode);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -406,7 +406,8 @@ export default function CosmosPage() {
       ? [...allStars].sort((a, b) => (a.id === myId ? -1 : b.id === myId ? 1 : 0))
       : allStars;
     return sorted.map(star => {
-      const dims = star.dimensions ?? DIM_DEFAULTS;
+      // withSeed: the shortcode drives the Phase 5 structural archetype.
+      const dims = withSeed(star.dimensions ?? DIM_DEFAULTS, star.shortcode);
       return {
         id: star.id,
         ...positions.get(star.id)!,
@@ -588,7 +589,7 @@ export default function CosmosPage() {
             onDismiss={clearSelection}
             nudge={hashString(selectedStar.shortcode) % 5 === 0}
             userStar={userStarId && byId[userStarId] && !selectedStar.mine
-              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
           />
         )}
@@ -641,7 +642,7 @@ export default function CosmosPage() {
             onCancel={() => { setConnecting(false); setReason(''); }}
             onSubmit={() => handleConnect(selectedStar.id)}
             userStar={userStarId && byId[userStarId]
-              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
           />
         )}

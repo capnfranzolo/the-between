@@ -10,6 +10,7 @@ import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import { type CosmosBond } from '@/components/BondCurves';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
+import { withSeed } from '@/lib/spirograph/renderer';
 
 // The landing cosmos is always question 1 unless a specific question is
 // requested (e.g. the "+" affordance on another cosmos page linking back
@@ -188,7 +189,8 @@ function LandingPageInner() {
       ? [...allStars].sort((a, b) => (a.id === myId ? -1 : b.id === myId ? 1 : 0))
       : allStars;
     return sorted.map(star => {
-      const dims = star.dimensions ?? DIM_DEFAULTS;
+      // withSeed: the shortcode drives the Phase 5 structural archetype.
+      const dims = withSeed(star.dimensions ?? DIM_DEFAULTS, star.shortcode);
       return {
         id: star.id,
         ...positions.get(star.id)!,
@@ -405,7 +407,7 @@ function LandingPageInner() {
             onDismiss={clearSelection}
             nudge={hashString(selectedStar.shortcode) % 5 === 0}
             userStar={userStarId && byId[userStarId] && !selectedStar.mine
-              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
           />
         )}
@@ -458,7 +460,7 @@ function LandingPageInner() {
             onCancel={() => { setConnecting(false); setReason(''); }}
             onSubmit={() => handleConnect(selectedStar.id)}
             userStar={userStarId && byId[userStarId]
-              ? { text: byId[userStarId].text, dimensions: byId[userStarId].dimensions }
+              ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
           />
         )}

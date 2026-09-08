@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { CurveType, SpiroDimensions, SpirographInstance } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
@@ -136,16 +136,20 @@ function DimTable({ dims, before }: { dims: DimsShape; before?: DimsShape }) {
 
 const SPIRO_RENDER_SIZE = 480;
 
-function SpiroPreview({ dims, size = 90 }: { dims: SpiroDimensions; size?: number }) {
+// `seed` is the star's shortcode — it drives the Phase 5 structural archetype,
+// so the moderation preview shows the same form the public cosmos does. It is
+// deliberately a separate prop: it must never leak into the dims the editor saves.
+function SpiroPreview({ dims, size = 90, seed }: { dims: SpiroDimensions; size?: number; seed?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const instRef   = useRef<SpirographInstance | null>(null);
+  const seededDims = useMemo(() => (seed ? { ...dims, seed } : dims), [dims, seed]);
 
   // Create once on mount at full internal size, then CSS-scale to display size
   useEffect(() => {
     if (typeof window === 'undefined') return;
     import('@/lib/spirograph/renderer').then(({ createSpirograph }) => {
       if (!canvasRef.current) return;
-      const inst = createSpirograph(canvasRef.current, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+      const inst = createSpirograph(canvasRef.current, seededDims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
       // Renderer sets canvas.style.width = RENDER_SIZE+'px'; override to display size
       canvasRef.current.style.width  = size + 'px';
       canvasRef.current.style.height = size + 'px';
@@ -158,8 +162,8 @@ function SpiroPreview({ dims, size = 90 }: { dims: SpiroDimensions; size?: numbe
 
   // Update geometry on dim changes without teardown
   useEffect(() => {
-    instRef.current?.update(dims);
-  }, [dims]);
+    instRef.current?.update(seededDims);
+  }, [seededDims]);
 
   return (
     <div style={{ width: `${size}px`, height: `${size}px`, overflow: 'hidden', borderRadius: 8, flexShrink: 0 }}>
@@ -177,11 +181,13 @@ const EMOTION_COLORS = ['#4488ff', '#aa66ff', '#44cc88', '#cc6666', '#ffcc44', '
 
 function SpiroEditor({
   dims,
+  seed,
   onChange,
   onSave,
   saving,
 }: {
   dims: SpiroDimensions;
+  seed?: string;
   onChange: (d: SpiroDimensions) => void;
   onSave: () => void;
   saving: boolean;
@@ -195,7 +201,7 @@ function SpiroEditor({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Live preview — stacked above sliders so sliders get full column width */}
-      <SpiroPreview dims={dims} size={90} />
+      <SpiroPreview dims={dims} seed={seed} size={90} />
 
       {/* Controls */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -421,6 +427,7 @@ function StarDetailPanel({
           {editedDims
             ? <SpiroEditor
                 dims={editedDims}
+                seed={star.shortcode}
                 onChange={setEditedDims}
                 onSave={saveDims}
                 saving={savingDims}

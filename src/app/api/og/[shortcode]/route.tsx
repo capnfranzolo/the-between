@@ -105,7 +105,13 @@ export async function GET(
   const answerText = truncate(star.answer ?? '');
   const byline: string | null = star.unique_fact ?? null;
 
-  const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
+  // `seed: shortcode` is what makes the shared image show the *same* structural
+  // archetype (Phase 5) the cosmos and the panel mini preview draw for this star.
+  const dims: SpiroDimensions = {
+    ...DIM_DEFAULTS,
+    ...(star.dimensions as Partial<SpiroDimensions>),
+    seed: shortcode,
+  };
 
   // 3. Render spirograph at 800×800 source, displayed at 400×400 (2× sharp)
   const spiroBg = await tryRenderSpiro(dims, 800);

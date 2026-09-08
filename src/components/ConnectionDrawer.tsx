@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { createSpirograph, type SpiroDimensions } from '@/lib/spirograph/renderer';
+import { createSpirograph, withSeed, type SpiroDimensions } from '@/lib/spirograph/renderer';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MAX_REASON_LENGTH, MIN_REASON_LENGTH } from '@/lib/constants';
 
 interface UserStar {
   text: string;
+  /** Needed as the Phase 5 archetype seed so the mini preview matches the sky. */
+  shortcode: string;
   dimensions: SpiroDimensions;
 }
 
@@ -133,7 +135,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
           border: `1px solid ${withAlpha(BTW.textPri, 0.10)}`,
           borderRadius: 12,
         }}>
-          <StarMini dims={userStar.dimensions} size={52} />
+          <StarMini dims={withSeed(userStar.dimensions, userStar.shortcode)} size={52} />
           <div style={{
             flex: 1,
             fontFamily: SERIF,

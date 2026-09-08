@@ -5,6 +5,12 @@
  * Renders animated firefly tracers on a 3D-projected parametric curve.
  */
 
+import {
+  resolveArchetype, drawArchetypeUnder, drawArchetypeOver,
+  CRYSTAL_TIGHTEN, CRYSTAL_SLOW,
+  type ArchetypeSpec, type Projector, type RGB,
+} from './archetypes';
+
 // ═══════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════
@@ -18,6 +24,13 @@ export interface SpiroDimensions {
   rootedness: number;
   emotionIndex: number;
   curveType: CurveType;
+  /**
+   * Phase 5 — the star's shortcode, used as the archetype seed so the cosmos,
+   * the panel mini preview and the OG image resolve the same structure.
+   * Optional: pre-birth previews have no shortcode and fall back to a hash of
+   * the dimension values (see `archetypeSeed`).
+   */
+  seed?: string;
 }
 
 export type CurveType = 'hypotrochoid' | 'epitrochoid' | 'rose' | 'lissajous' | 'rhodonea';
@@ -71,6 +84,8 @@ interface Geometry {
   vulnerability: number;
   curveType: CurveType;
   certainty: number;
+  /** Phase 5 — structural archetype resolved once, alongside the geometry. */
+  arch: ArchetypeSpec;
 }
 
 interface CamState {
@@ -227,7 +242,11 @@ function project(x: number, y: number, z: number, cam: CamState): { sx: number; 
 
 function computeGeometry(dims: SpiroDimensions): Geometry {
   const { certainty, warmth, tension, vulnerability, scope, rootedness, curveType } = dims;
-  const R = CONFIG.outerRadius;
+  const arch = resolveArchetype(dims);
+
+  // Phase 5 — the crystalline knot draws the same curve pulled tighter and
+  // turned slower. Everything else about the form is untouched.
+  const R = CONFIG.outerRadius * (arch.crystal ? CRYSTAL_TIGHTEN : 1);
 
   const petalTarget = CONFIG.petals.min + vulnerability * (CONFIG.petals.max - CONFIG.petals.min);
   const petals = tension < 0.3 ? Math.round(petalTarget) : petalTarget;
@@ -237,7 +256,8 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   const totalTheta = totalRevolutions * 2 * Math.PI * (petals + 1);
 
   const maxTilt = scope * CONFIG.maxTiltFactor;
-  const angularSpeed = CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm);
+  const angularSpeed = (CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm))
+    * (arch.crystal ? CRYSTAL_SLOW : 1);
   const fireflyCount = Math.max(CONFIG.fireflies.min,
     Math.round((1 - rootedness) * (CONFIG.fireflies.max - CONFIG.fireflies.min) + CONFIG.fireflies.min));
 
@@ -248,7 +268,7 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   return {
     R, r, d, petals, totalRevolutions, totalTheta, maxTilt,
     angularSpeed, fireflyCount, tailFraction, fadeExp, strokeBase,
-    scope, tension, vulnerability, curveType, certainty,
+    scope, tension, vulnerability, curveType, certainty, arch,
   };
 }
 
@@ -279,6 +299,13 @@ function renderFrame(
 
   ctx.clearRect(0, 0, logW, logH);
 
+  // Phase 5 — structural archetypes. `archR` is the *untightened* radius so a
+  // crystalline knot's rings and motes keep their normal reach around the
+  // pulled-in curve.
+  const archR = CONFIG.outerRadius;
+  const projector: Projector = (x, y, z) => project(x, y, z, cam);
+  drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
+
   // Ghost trace
   if (geo.certainty > CONFIG.ghostThreshold) {
     const ghostAlpha = (geo.certainty - CONFIG.ghostThreshold) * CONFIG.ghostAlphaFactor;
@@ -296,6 +323,29 @@ function renderFrame(
         ctx.quadraticCurveTo(prevSx, prevSy, (prevSx + proj.sx) / 2, (prevSy + proj.sy) / 2);
       }
       prevSx = proj.sx; prevSy = proj.sy;
+    }
+    ctx.stroke();
+  }
+
+  // Phase 5 — crystalline lattice. Chords struck straight across the curve
+  // between evenly-spaced points on it: the one archetype that has to sample
+  // the curve itself, so it lives here rather than in archetypes.ts.
+  if (geo.arch.crystal) {
+    const n = geo.arch.crystalChords;
+    const skip = geo.arch.crystalSkip;
+    const pts: { sx: number; sy: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const proj = pj(ev((i / n) * geo.totalTheta + time * geo.angularSpeed * 0.15));
+      pts.push({ sx: proj.sx, sy: proj.sy });
+    }
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(${baseRGB[0]},${baseRGB[1]},${baseRGB[2]},0.15)`;
+    ctx.lineWidth = 0.85;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + skip) % n];
+      ctx.moveTo(a.sx, a.sy);
+      ctx.lineTo(b.sx, b.sy);
     }
     ctx.stroke();
   }
@@ -352,12 +402,26 @@ function renderFrame(
     ctx.arc(headProj.sx, headProj.sy, glowR, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // Phase 5 — foreground structures (binary cores, satellite motes) draw last
+  // so they stay legible over the firefly tangle.
+  drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
 }
 
 
 // ═══════════════════════════════════════════════════════
 // PUBLIC API
 // ═══════════════════════════════════════════════════════
+
+/**
+ * Phase 5 — stamps a star's shortcode onto its dimensions as the archetype
+ * seed. Call this wherever dimensions come out of the database and are about to
+ * be drawn, so the cosmos sprite, the panel mini preview and the OG image all
+ * resolve the same structure for the same star.
+ */
+export function withSeed<T extends SpiroDimensions>(dims: T, shortcode: string | null | undefined): T {
+  return shortcode ? { ...dims, seed: shortcode } : dims;
+}
 
 export function randomCurveType(): CurveType {
   return CURVE_TYPES[Math.floor(Math.random() * CURVE_TYPES.length)];
