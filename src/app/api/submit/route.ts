@@ -41,20 +41,37 @@ export async function POST(req: NextRequest) {
   const ipHash = hashString(rawIp).toString(16);
 
   const shortcode = generateShortcode(4);
-  const dimensionResult = providedDimensions ?? await extractDimensions(answer);
+  // The publish gate always runs server-side — client-provided dimensions are
+  // trusted for visuals only (so the star matches its pre-submit preview), never
+  // for the publishability verdict.
+  const gateResult = await extractDimensions(answer);
+  const dimensionResult = providedDimensions ?? gateResult;
   const curveType = providedDimensions?.curveType ?? randomCurveType();
 
+  // The gate verdict is not persisted: `dimensions` is served verbatim by
+  // /api/cosmos, and a pending star approved later must not carry its flag.
+  const {
+    publishable: _publishable,
+    flagReason: _flagReason,
+    ...visualDims
+  } = dimensionResult;
   const dimensions = {
-    ...dimensionResult,
+    ...visualDims,
     curveType,
   };
+
+  // LLM publish gate: flagged stars go to the admin queue instead of auto-approving.
+  // Default (missing/malformed field) is "publishable" — never block a submission on
+  // an LLM hiccup. The flag is never surfaced to the client — the star still shows
+  // locally regardless of status.
+  const status = gateResult.publishable === false ? 'pending' : 'approved';
 
   const baseInsert = {
     shortcode,
     answer,
     question_id: questionId,
-    status: 'approved',
-    approved_at: new Date().toISOString(),
+    status,
+    approved_at: status === 'approved' ? new Date().toISOString() : null,
     ip_hash: ipHash,
     dimensions,
     unique_fact: unique_fact ?? null,
@@ -85,5 +102,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Failed to save' }, { status: 500 });
   }
 
+  // Never reveal the publish gate to the client — the response shape is identical
+  // whether the star was flagged to the pending queue or auto-approved.
+  // (`dimensions` was already stripped of the gate verdict above.)
   return Response.json({ shortcode, questionId, dimensions });
 }

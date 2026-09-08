@@ -126,6 +126,9 @@ export async function POST(req: NextRequest) {
   }
 
   const dimResult = await extractDimensions(answer);
-  const dimensions = { ...dimResult, curveType: randomCurveType() };
+  // The publish-gate verdict never reaches the client (and is re-derived
+  // server-side in /api/submit, since these dimensions round-trip through it).
+  const { publishable: _publishable, flagReason: _flagReason, ...visualDims } = dimResult;
+  const dimensions = { ...visualDims, curveType: randomCurveType() };
   return Response.json({ valid: true, dimensions });
 }

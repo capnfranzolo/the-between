@@ -7,9 +7,11 @@ export interface DimensionResult {
   rootedness: number;
   emotionIndex: number;
   reasoning: string;
+  publishable: boolean;
+  flagReason: string | null;
 }
 
-export const DIMENSION_PROMPT = `You are an emotional dimension analyzer for The Between, a public art installation that transforms written statements into spirograph forms. Given a short statement (20–500 chars), extract six dimensions as floats 0.0–1.0 and identify the dominant emotion.
+export const DIMENSION_PROMPT = `You are an emotional dimension analyzer for The Between, a public art installation that transforms written statements into spirograph forms. Given a short statement (20–500 chars), extract six dimensions as floats 0.0–1.0, identify the dominant emotion, and judge whether the statement is publishable.
 
 DIMENSIONS:
 
@@ -84,6 +86,30 @@ CALIBRATION EXAMPLES (human-approved):
 "I suspect that most of what I call my personality is just coping mechanisms I forgot to put down."
 → {"certainty":0.41,"warmth":0.15,"tension":0.81,"vulnerability":0.93,"scope":0.17,"rootedness":0.79,"emotionIndex":5,"reasoning":"Unsettling self-examination — cold, high tension, extremely vulnerable, personal but rooted in ongoing observation"}
 
+PUBLISHABILITY (return as publishable boolean + flagReason string|null):
+
+This is an anonymous art installation, not a moderated forum. Err strongly toward publishing —
+melancholy, weirdness, darkness, and emotional intensity are exactly the content this piece is
+for. A statement is publishable (true, flagReason: null) if it reads as a sincere human thought,
+even if it is:
+  - odd, absurd, or fragmentary
+  - dark, despairing, angry, or morbid
+  - poetic, abstract, or ambiguous
+  - written in a language other than English
+  - a plain, quiet, unremarkable observation
+
+A statement is NOT publishable (false, with a short flagReason) only if it is:
+  - spam or advertising (URLs, "buy now", promotional content unrelated to the question)
+  - hate speech or harassment (slurs, targeted abuse, threats)
+  - gibberish or keyboard mashing (no discernible meaning in any language)
+  - PII (a full name, phone number, street address, or email address)
+  - obvious test/junk input ("asdf", "test test", "aaaaaa", placeholder text)
+
+When genuinely unsure, choose publishable: true. The bar for flagging is "this is clearly not a
+sincere thought," not "this is unpleasant to read." flagReason should be one short phrase (e.g.
+"spam link", "harassment", "gibberish", "contains phone number") when publishable is false, and
+null when publishable is true.
+
 KEY PATTERNS FROM TRAINING:
 - Certainty rarely exceeds 0.82. Prefer the 0.2–0.8 range. Only use extremes for truly tentative or truly declarative statements.
 - Warmth maps to speed — err toward the extremes. Most statements are clearly warm (0.7+) or cold (0.3-).
@@ -91,6 +117,22 @@ KEY PATTERNS FROM TRAINING:
 - Vulnerability is generally high (0.6+) for any personal statement. Only score low for pure observations.
 - Scope tends to extremes — personal (0.0–0.3) or universal (0.7–1.0).
 - Rootedness: confessions and stories score low (0.0–0.3), principles and observations score high (0.6+).
+- Publishable is true for the overwhelming majority of real answers, including bleak, angry, or
+  strange ones. It is false only for spam, hate/harassment, gibberish, PII, or obvious test junk.
+
+PUBLISHABILITY EXAMPLES:
+
+"I think about ending it some nights but I make coffee instead."
+→ publishable: true, flagReason: null — dark and raw, but a sincere thought.
+
+"les silences de ma mère pèsent plus que ses mots"
+→ publishable: true, flagReason: null — sincere and poetic; language is irrelevant.
+
+"asdfjkl asdfjkl buy pills at www.spam-example.com"
+→ publishable: false, flagReason: "spam link" — advertising/gibberish, not a real answer.
+
+"all you people are subhuman garbage and should disappear"
+→ publishable: false, flagReason: "harassment" — targeted hate speech, not a sincere reflection.
 
 Respond with ONLY a JSON object. No markdown, no backticks, no explanation outside the reasoning field:
-{"certainty":0.XX,"warmth":0.XX,"tension":0.XX,"vulnerability":0.XX,"scope":0.XX,"rootedness":0.XX,"emotionIndex":N,"reasoning":"one sentence"}`;
+{"certainty":0.XX,"warmth":0.XX,"tension":0.XX,"vulnerability":0.XX,"scope":0.XX,"rootedness":0.XX,"emotionIndex":N,"reasoning":"one sentence","publishable":true|false,"flagReason":"short phrase"|null}`;
