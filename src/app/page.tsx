@@ -485,6 +485,29 @@ function LandingPageInner() {
       .catch(() => { switchingRef.current = false; setSwitching(false); });
   }, [currentQuestionId, myShortcode]);
 
+  // The 'next question' lozenge hides until the visitor lingers on the title
+  // for a beat (or taps it, on touch); it then fades in beneath, centered,
+  // and lingers a few seconds after they roll off.
+  const [lozengeVisible, setLozengeVisible] = useState(false);
+  const lozShowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lozHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleEnter = useCallback(() => {
+    if (lozHideTimer.current) { clearTimeout(lozHideTimer.current); lozHideTimer.current = null; }
+    if (!lozShowTimer.current) {
+      lozShowTimer.current = setTimeout(() => { lozShowTimer.current = null; setLozengeVisible(true); }, 600);
+    }
+  }, []);
+  const titleLeave = useCallback(() => {
+    if (lozShowTimer.current) { clearTimeout(lozShowTimer.current); lozShowTimer.current = null; }
+    if (lozHideTimer.current) clearTimeout(lozHideTimer.current);
+    lozHideTimer.current = setTimeout(() => { lozHideTimer.current = null; setLozengeVisible(false); }, 3500);
+  }, []);
+  const titleTap = useCallback(() => {
+    if (lozShowTimer.current) { clearTimeout(lozShowTimer.current); lozShowTimer.current = null; }
+    if (lozHideTimer.current) { clearTimeout(lozHideTimer.current); lozHideTimer.current = null; }
+    setLozengeVisible(true);
+  }, []);
+
   const nextQuestion = useCallback(() => {
     if (!currentQuestionId || railQuestions.length < 2) return;
     const idx = railQuestions.findIndex(q => q.id === currentQuestionId);
@@ -588,53 +611,71 @@ function LandingPageInner() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Top chrome — the question, quiet (the arrival card lands here),
-            with a small lozenge to travel to the next world. */}
+        {/* Top chrome — the question, quiet and centered (the arrival card
+            lands here). Lingering on it reveals a 'next question' lozenge
+            beneath, which stays a few seconds after rolling off. */}
         {arrivalDone && data?.question?.text && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
-            padding: '22px 30px 18px',
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-            flexWrap: 'wrap', columnGap: 16, rowGap: 8,
+            padding: '22px 30px 0',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
             pointerEvents: 'none',
           }}>
-            <div style={{
-              fontFamily: SERIF, fontStyle: 'italic',
-              fontSize: 'clamp(22px, 3.2vw, 36px)',
-              color: BTW.textPri,
-              letterSpacing: '0.01em',
-              textAlign: 'center',
-              maxWidth: 900,
-              lineHeight: 1.2,
-              opacity: 0.35,
-            }}>
+            <div
+              onPointerEnter={titleEnter}
+              onPointerLeave={titleLeave}
+              onPointerDown={titleTap}
+              style={{
+                fontFamily: SERIF, fontStyle: 'italic',
+                fontSize: 'clamp(22px, 3.2vw, 36px)',
+                color: BTW.textPri,
+                letterSpacing: '0.01em',
+                textAlign: 'center',
+                maxWidth: 900,
+                lineHeight: 1.2,
+                opacity: 0.35,
+                pointerEvents: 'auto',
+              }}
+            >
               {data.question.text}
             </div>
             {railQuestions.length > 1 && (
-              <button
-                onClick={nextQuestion}
-                disabled={switching}
-                aria-label="Travel to the next question's sky"
+              <div
+                onPointerEnter={titleEnter}
+                onPointerLeave={titleLeave}
                 style={{
-                  background: 'transparent',
-                  border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
-                  borderRadius: 999,
-                  color: BTW.textDim,
-                  padding: '5px 12px',
-                  fontFamily: SANS, fontSize: 10,
-                  letterSpacing: '0.18em', textTransform: 'uppercase',
-                  whiteSpace: 'nowrap',
-                  cursor: switching ? 'default' : 'pointer',
-                  opacity: switching ? 0.4 : 0.8,
-                  pointerEvents: 'auto',
-                  touchAction: 'manipulation',
-                  transition: 'color .2s, border-color .2s, opacity .2s',
+                  height: 40, display: 'flex', alignItems: 'center',
+                  opacity: lozengeVisible ? 1 : 0,
+                  transition: 'opacity 0.6s ease',
+                  pointerEvents: lozengeVisible ? 'auto' : 'none',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
-                onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
               >
-                next question →
-              </button>
+                <button
+                  onClick={nextQuestion}
+                  disabled={switching}
+                  tabIndex={lozengeVisible ? 0 : -1}
+                  aria-hidden={!lozengeVisible}
+                  aria-label="Travel to the next question's sky"
+                  style={{
+                    background: 'transparent',
+                    border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
+                    borderRadius: 999,
+                    color: BTW.textDim,
+                    padding: '5px 12px',
+                    fontFamily: SANS, fontSize: 10,
+                    letterSpacing: '0.18em', textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                    cursor: switching ? 'default' : 'pointer',
+                    opacity: switching ? 0.4 : 0.8,
+                    touchAction: 'manipulation',
+                    transition: 'color .2s, border-color .2s, opacity .2s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
+                  onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
+                >
+                  next question →
+                </button>
+              </div>
             )}
           </div>
         )}
