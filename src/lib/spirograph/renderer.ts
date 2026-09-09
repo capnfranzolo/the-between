@@ -10,6 +10,7 @@ import {
   CRYSTAL_TIGHTEN, CRYSTAL_SLOW,
   type ArchetypeSpec, type Projector, type RGB,
 } from './archetypes';
+import { drawProposal } from './proposals';
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -31,6 +32,12 @@ export interface SpiroDimensions {
    * the dimension values (see `archetypeSeed`).
    */
   seed?: string;
+  /**
+   * EXPLORATORY — /preview/stars only. Names a proposal form from
+   * `proposals.ts` to draw over this star. Never set on stored dimensions;
+   * the cosmos, panel and OG paths do not pass it.
+   */
+  experiment?: string;
 }
 
 export type CurveType = 'hypotrochoid' | 'epitrochoid' | 'rose' | 'lissajous' | 'rhodonea';
@@ -86,6 +93,8 @@ interface Geometry {
   certainty: number;
   /** Phase 5 — structural archetype resolved once, alongside the geometry. */
   arch: ArchetypeSpec;
+  /** Exploratory proposal form (preview page only) — see SpiroDimensions. */
+  experiment?: string;
 }
 
 interface CamState {
@@ -269,6 +278,7 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
     R, r, d, petals, totalRevolutions, totalTheta, maxTilt,
     angularSpeed, fireflyCount, tailFraction, fadeExp, strokeBase,
     scope, tension, vulnerability, curveType, certainty, arch,
+    experiment: dims.experiment,
   };
 }
 
@@ -406,6 +416,14 @@ function renderFrame(
   // Phase 5 — foreground structures (binary cores, satellite motes) draw last
   // so they stay legible over the firefly tangle.
   drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+
+  // Exploratory proposal forms — /preview/stars only, never set on stored
+  // dimensions. Drawn last so a proposal can restyle or occlude the base form.
+  if (geo.experiment) {
+    drawProposal(geo.experiment, ctx, projector, archR, baseRGB as RGB, time, {
+      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed,
+    });
+  }
 }
 
 

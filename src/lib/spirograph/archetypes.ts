@@ -154,7 +154,7 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
         spin: rand() * Math.PI * 2,
         phase: (i / n) * Math.PI * 2 + rand() * 0.8,
         speed: 0.10 + rand() * 0.08,
-        size: 3.2 + rand() * 1.6,
+        size: 4.5 + rand() * 2.0,
       });
     }
   }
@@ -169,7 +169,8 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
     binary, halo, comet, crystal, rare, count,
     binaryAxis: rand() * Math.PI * 2,
     binaryTilt: (rand() - 0.5) * 1.2,
-    binarySep: 0.20 + (dims.tension - T.binary) * 0.35,
+    // Wide enough apart that two suns read as two suns, not a smeared one.
+    binarySep: 0.32 + (dims.tension - T.binary) * 0.5,
     // The halo has to clear the curve to read as a ring rather than as another
     // winding of it — but 1.18 R is about as far as the canvas allows before
     // the near side of the ellipse clips.
@@ -295,10 +296,15 @@ export function drawArchetypeUnder(
   if (spec.count === 0) return;
   const b = budget(spec);
 
-  // ── Halo: one faint inclined ring, a shade wider than the curve ──────────
+  // ── Halo: a bold inclined band — it has to read from across the sky, not
+  // reward squinting. A bright inner edge, the band body, and a faint outer
+  // feather, all sharing one plane so it stays a single object. ────────────
   if (spec.halo) {
-    strokeRing(ctx, pj, R, spec.haloRadius, spec.haloTilt,
-      spec.haloSpin + time * 0.05, 80, color, 0.26 * b, 1.2);
+    const spin = spec.haloSpin + time * 0.05;
+    strokeRing(ctx, pj, R, spec.haloRadius - 0.035, spec.haloTilt, spin, 90, color, 0.60 * b, 1.6);
+    strokeRing(ctx, pj, R, spec.haloRadius,         spec.haloTilt, spin, 90, color, 0.44 * b, 3.4);
+    strokeRing(ctx, pj, R, spec.haloRadius + 0.045, spec.haloTilt, spin, 90, color, 0.22 * b, 5.0);
+    strokeRing(ctx, pj, R, spec.haloRadius + 0.085, spec.haloTilt, spin, 90, color, 0.10 * b, 6.0);
   }
 
   // ── Armillary (rare): three rings caging the form, counter-turning ───────
@@ -377,50 +383,76 @@ export function drawArchetypeOver(
   if (spec.count === 0) return;
   const b = budget(spec);
 
-  // ── Binary: the form holds two nuclei instead of one ────────────────────
+  // ── Binary: the form holds two nuclei instead of one. They must read as
+  // two suns inside one tangle — big, bright, unmistakably a pair — so the
+  // cores blaze and a faint bridge of light spans them. ───────────────────
   if (spec.binary) {
     const axis = spec.binaryAxis + time * 0.07;
+    const pts: { sx: number; sy: number; scale: number }[] = [];
     for (const sign of [1, -1] as const) {
       const p = ringPoint(spec.binarySep * R * sign, axis, spec.binaryTilt, 0);
       const s = pj(p.x, p.y, p.z);
-      softGlow(ctx, s.sx, s.sy, 18 * s.scale, color, 0.34 * b);
-      // A tight ring around each nucleus — the double core reads as structure,
-      // not just as two brighter smudges.
+      pts.push(s);
+      softGlow(ctx, s.sx, s.sy, 30 * s.scale, color, 0.55 * b);
+      // A hot center inside the glow — the nucleus itself.
+      ctx.beginPath();
+      ctx.fillStyle = rgba(color, 0.95 * b);
+      ctx.arc(s.sx, s.sy, Math.max(1.5, 3.4 * s.scale), 0, Math.PI * 2);
+      ctx.fill();
+      // A ring around each nucleus so the pair reads as structure.
       ctx.save();
       ctx.translate(s.sx, s.sy);
       ctx.beginPath();
-      ctx.strokeStyle = rgba(color, 0.36 * b);
-      ctx.lineWidth = 1.1;
-      ctx.ellipse(0, 0, 9.5 * s.scale, 9.5 * s.scale * Math.abs(Math.cos(spec.binaryTilt)) + 1.5,
+      ctx.strokeStyle = rgba(color, 0.55 * b);
+      ctx.lineWidth = 1.6;
+      ctx.ellipse(0, 0, 13 * s.scale, 13 * s.scale * Math.abs(Math.cos(spec.binaryTilt)) + 2,
         axis, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
+    // The bridge — matter drawn between the two, the mark of a true binary.
+    ctx.beginPath();
+    ctx.strokeStyle = rgba(color, 0.22 * b);
+    ctx.lineWidth = 5.5;
+    ctx.lineCap = 'round';
+    ctx.moveTo(pts[0].sx, pts[0].sy);
+    ctx.lineTo(pts[1].sx, pts[1].sy);
+    ctx.stroke();
   }
 
-  // ── Satellites: loose motes still orbiting a form that can't hold them ──
+  // ── Satellites: loose motes still orbiting a form that can't hold them.
+  // Each mote's whole orbit is faintly drawn — that visible path is what
+  // separates "escaped moons" from binary's two suns at a glance. ─────────
   for (const sat of spec.satellites) {
     const th = sat.phase + time * sat.speed;
-    // Short trailing arc, then the mote itself.
-    const TRAIL = 9;
-    ctx.beginPath();
-    ctx.strokeStyle = rgba(color, 0.16 * b);
-    ctx.lineWidth = 0.9;
+
+    // The orbit itself, whisper-thin but complete.
+    strokeRing(ctx, pj, R, sat.radius, sat.tiltX, sat.spin, 60, color, 0.14 * b, 0.9);
+
+    // A longer trailing arc brightening into the mote.
+    const TRAIL = 12;
     ctx.lineCap = 'round';
-    for (let i = 0; i <= TRAIL; i++) {
-      const p = ringPoint(sat.radius * R, th - (i / TRAIL) * 0.55, sat.tiltX, sat.spin);
+    let prev: Projected | null = null;
+    for (let i = TRAIL; i >= 0; i--) {
+      const p = ringPoint(sat.radius * R, th - (i / TRAIL) * 0.9, sat.tiltX, sat.spin);
       const s = pj(p.x, p.y, p.z);
-      if (i === 0) ctx.moveTo(s.sx, s.sy);
-      else ctx.lineTo(s.sx, s.sy);
+      if (prev) {
+        ctx.beginPath();
+        ctx.strokeStyle = rgba(color, (0.42 * (1 - i / TRAIL)) * b);
+        ctx.lineWidth = 1.0 + (1 - i / TRAIL) * 1.4;
+        ctx.moveTo(prev.sx, prev.sy);
+        ctx.lineTo(s.sx, s.sy);
+        ctx.stroke();
+      }
+      prev = s;
     }
-    ctx.stroke();
 
     const p = ringPoint(sat.radius * R, th, sat.tiltX, sat.spin);
     const s = pj(p.x, p.y, p.z);
-    softGlow(ctx, s.sx, s.sy, sat.size * 2.6 * s.scale, color, 0.34 * b);
+    softGlow(ctx, s.sx, s.sy, sat.size * 4.2 * s.scale, color, 0.5 * b);
     ctx.beginPath();
-    ctx.fillStyle = rgba(color, 0.82 * b);
-    ctx.arc(s.sx, s.sy, Math.max(0.8, sat.size * 0.45 * s.scale), 0, Math.PI * 2);
+    ctx.fillStyle = rgba(color, 0.95 * b);
+    ctx.arc(s.sx, s.sy, Math.max(1.2, sat.size * 0.8 * s.scale), 0, Math.PI * 2);
     ctx.fill();
   }
 }

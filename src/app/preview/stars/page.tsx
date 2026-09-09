@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSpirograph, CURVE_TYPES, type SpiroDimensions, type CurveType } from '@/lib/spirograph/renderer';
 import { resolveArchetype } from '@/lib/spirograph/archetypes';
+import { PROPOSAL_KINDS } from '@/lib/spirograph/proposals';
 import { BTW, SANS, SERIF } from '@/lib/btw';
 
 // ── /preview/stars — unlisted archetype gallery ───────────────────────────────
@@ -42,6 +43,20 @@ const FORMS: FormDef[] = [
   { key: 'crystal-halo',     label: 'crystal + halo',     rule: 'composition', dims: { certainty: 0.92, scope: 0.95 } },
   { key: 'satellites-comet', label: 'satellites + comet', rule: 'composition', dims: { rootedness: 0.06, certainty: 0.2 } },
   { key: 'binary-halo',      label: 'binary + halo',      rule: 'composition', dims: { tension: 0.86, scope: 0.95 } },
+];
+
+// ── Proposal forms — dramatic candidates, drawn by src/lib/spirograph/
+// proposals.ts over a plain base form. Not in the product; the ones the owner
+// picks graduate into archetypes.ts with real dimension triggers. ?exp=<key>
+// renders one large. ──────────────────────────────────────────────────────────
+const PROPOSALS: { key: (typeof PROPOSAL_KINDS)[number]; label: string; pitch: string }[] = [
+  { key: 'shatter',       label: 'shatter',       pitch: 'the crystal taken all the way — the tangle caged in hard facets and shard spikes' },
+  { key: 'saturn',        label: 'saturn',        pitch: 'the halo as a planet’s ring system — broad bright bands with a dark Cassini gap' },
+  { key: 'constellation', label: 'constellation', pitch: 'the thought as a star chart — bright nodes joined by survey lines' },
+  { key: 'pulsar',        label: 'pulsar',        pitch: 'a lighthouse — hot core, two opposed beams sweeping slowly' },
+  { key: 'eclipse',       label: 'eclipse',       pitch: 'negative space — a dark disk swallows the heart, only a burning rim survives' },
+  { key: 'vortex',        label: 'vortex',        pitch: 'the tangle unwound — three spiral arms trailing light to the edge' },
+  { key: 'corona',        label: 'corona',        pitch: 'a sun — long and short spikes radiating from the whole form' },
 ];
 
 function makeDims(def: FormDef, curveType: CurveType, emotionIndex: number, seedHint: string): SpiroDimensions {
@@ -86,7 +101,9 @@ function PreviewInner() {
   const seed = params.get('seed');
   const size = Math.min(800, Math.max(120, Number(params.get('size')) || 560));
 
+  const exp = params.get('exp');
   const single = arch ? FORMS.find(f => f.key === arch) ?? null : null;
+  const singleProposal = exp ? PROPOSALS.find(p => p.key === exp) ?? null : null;
 
   const singleDims = useMemo(() => {
     if (!single) return null;
@@ -98,6 +115,17 @@ function PreviewInner() {
     );
     return seed && !single.wantRare ? { ...d, seed } : d;
   }, [single, curve, emotion, seed]);
+
+  const proposalDims = useMemo(() => {
+    if (!singleProposal) return null;
+    const base = makeDims(
+      { key: singleProposal.key, label: singleProposal.label, rule: '', dims: {} },
+      curve ?? 'hypotrochoid',
+      emotion != null ? Math.max(0, Math.min(6, Number(emotion))) : 2,
+      seed ?? `exp-${singleProposal.key}`,
+    );
+    return { ...base, experiment: singleProposal.key };
+  }, [singleProposal, curve, emotion, seed]);
 
 
   return (
@@ -112,7 +140,14 @@ function PreviewInner() {
         unlisted preview · ?arch=&lt;key&gt;&amp;curve=&amp;emotion=0-6&amp;seed=&amp;size= for one form, large
       </div>
 
-      {single && singleDims ? (
+      {singleProposal && proposalDims ? (
+        <div>
+          <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 12 }}>
+            proposal: {singleProposal.label} — {singleProposal.pitch}
+          </div>
+          <StarCell dims={proposalDims} size={size} animate />
+        </div>
+      ) : single && singleDims ? (
         <div>
           <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 12 }}>
             {single.label} — {single.rule} · curve {singleDims.curveType} · emotion {singleDims.emotionIndex}
@@ -120,27 +155,60 @@ function PreviewInner() {
           <StarCell dims={singleDims} size={size} animate />
         </div>
       ) : (
-        FORMS.map(def => (
-          <div key={def.key} style={{ marginBottom: 44 }}>
-            <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
-              {def.label}
-              <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{def.rule}</span>
-              <a href={`?arch=${def.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
+        <>
+          {FORMS.map(def => (
+            <div key={def.key} style={{ marginBottom: 44 }}>
+              <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
+                {def.label}
+                <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{def.rule}</span>
+                <a href={`?arch=${def.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {([0, 2, 4] as const).map((emo, i) => {
+                  const curveType = CURVE_TYPES[(FORMS.indexOf(def) + i * 2) % CURVE_TYPES.length];
+                  const dims = makeDims(def, curveType, emo, `preview-${def.key}-${i}`);
+                  return (
+                    <div key={i} style={{ textAlign: 'center' }}>
+                      <StarCell dims={dims} size={190} animate={false} />
+                      <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>{curveType}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {([0, 2, 4] as const).map((emo, i) => {
-                const curveType = CURVE_TYPES[(FORMS.indexOf(def) + i * 2) % CURVE_TYPES.length];
-                const dims = makeDims(def, curveType, emo, `preview-${def.key}-${i}`);
-                return (
-                  <div key={i} style={{ textAlign: 'center' }}>
-                    <StarCell dims={dims} size={190} animate={false} />
-                    <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>{curveType}</div>
-                  </div>
-                );
-              })}
-            </div>
+          ))}
+
+          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginTop: 64, marginBottom: 4 }}>
+            proposals
           </div>
-        ))
+          <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
+            dramatic candidates, not in the product — ?exp=&lt;key&gt; for one form, large
+          </div>
+          {PROPOSALS.map(prop => (
+            <div key={prop.key} style={{ marginBottom: 44 }}>
+              <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
+                {prop.label}
+                <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{prop.pitch}</span>
+                <a href={`?exp=${prop.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {([1, 3, 5] as const).map((emo, i) => {
+                  const curveType = CURVE_TYPES[(PROPOSALS.indexOf(prop) + i * 2) % CURVE_TYPES.length];
+                  const dims = {
+                    ...makeDims({ key: prop.key, label: prop.label, rule: '', dims: {} }, curveType, emo, `exp-${prop.key}-${i}`),
+                    experiment: prop.key,
+                  };
+                  return (
+                    <div key={i} style={{ textAlign: 'center' }}>
+                      <StarCell dims={dims} size={190} animate={false} />
+                      <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>{curveType}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );
