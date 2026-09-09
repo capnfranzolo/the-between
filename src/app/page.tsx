@@ -8,7 +8,6 @@ import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycl
 import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
-import LivenessCounter from '@/components/LivenessCounter';
 import ShareButton from '@/components/ShareButton';
 import ArrivalTitle from '@/components/ArrivalTitle';
 import { getAtmosphere } from '@/lib/atmosphere';
@@ -33,7 +32,6 @@ interface CosmosData {
   question: { id: string; text: string } | null;
   stars: CosmosStarData[];
   bonds: CosmosBond[];
-  totals?: { thoughts: number; bonds: number };
 }
 
 function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
@@ -546,10 +544,6 @@ function LandingPageInner() {
           onRelease={() => sceneRef.current?.releaseArrival()}
           onDone={() => setArrivalDone(true)}
         />
-      )}
-
-      {data?.totals && (
-        <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />
       )}
 
       {/* Sky fades in over the already-gliding drift — first-visit only */}

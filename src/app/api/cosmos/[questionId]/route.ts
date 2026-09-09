@@ -18,7 +18,7 @@ export async function GET(
   // it's seen" (never surfaced as "flagged"/"pending"/"moderation").
   const mine = req.nextUrl.searchParams.get('mine');
 
-  const [starsRes, bondsRes, questionRes, totalStarsRes, totalBondsRes, mineRes] = await Promise.all([
+  const [starsRes, bondsRes, questionRes, mineRes] = await Promise.all([
     supabaseServer
       .from('stars')
       .select('id, shortcode, answer, unique_fact, dimensions')
@@ -34,15 +34,6 @@ export async function GET(
       .select('id, text')
       .eq('id', questionId)
       .single(),
-    // Liveness — cosmos-wide totals (all questions), not just this one.
-    supabaseServer
-      .from('stars')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'approved'),
-    supabaseServer
-      .from('connections')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'approved'),
     mine
       ? supabaseServer
           .from('stars')
@@ -74,9 +65,5 @@ export async function GET(
     question: questionRes.data ?? null,
     stars,
     bonds,
-    totals: {
-      thoughts: totalStarsRes.count ?? 0,
-      bonds: totalBondsRes.count ?? 0,
-    },
   });
 }

@@ -12,7 +12,6 @@ import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import SkyRail from '@/components/SkyRail';
 import ArrivalTitle from '@/components/ArrivalTitle';
-import LivenessCounter from '@/components/LivenessCounter';
 import ShareButton from '@/components/ShareButton';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
@@ -27,7 +26,6 @@ interface CosmosData {
   question: { id: string; text: string } | null;
   stars: CosmosStarData[];
   bonds: CosmosBond[];
-  totals?: { thoughts: number; bonds: number };
 }
 
 function starWorldPos(shortcode: string): { x: number; y: number; z: number } {
@@ -715,10 +713,6 @@ export default function CosmosPage() {
         onSelect={id => performSwitch(id, true)}
         disabled={switching}
       />
-
-      {data?.totals && (
-        <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />
-      )}
 
       <div
         style={{

@@ -13,13 +13,16 @@ import type { SpiroDimensions } from './renderer';
  *
  * @param dims   Spirograph dimensions
  * @param size   Canvas logical size in pixels (default 480)
+ * @param dpr    Uniform upscale factor — scales the whole drawing, line
+ *               weights included (physical canvas = size × dpr)
  * @returns      PNG buffer
  */
 export async function renderSpirographToPng(
   dims: SpiroDimensions,
   size = 480,
+  dpr = 1,
 ): Promise<Buffer> {
-  const canvas = createCanvas(size, size);
+  const canvas = createCanvas(size * dpr, size * dpr);
 
   // @napi-rs/canvas Canvas doesn't have a `.style` property,
   // but the renderer assigns canvas.style.width/height — patch it safely.
@@ -29,7 +32,7 @@ export async function renderSpirographToPng(
   // Cast to HTMLCanvasElement — the canvas API surface is compatible for renderStatic().
   const spiro = createSpirograph(canvas as unknown as HTMLCanvasElement, dims, {
     size,
-    dpr: 1,
+    dpr,
   });
 
   // t=3.0 gives enough ghost-trace buildup to show the shape clearly.
@@ -44,7 +47,8 @@ export async function renderSpirographToPng(
 export async function renderSpirographToBase64(
   dims: SpiroDimensions,
   size = 480,
+  dpr = 1,
 ): Promise<string> {
-  const buf = await renderSpirographToPng(dims, size);
+  const buf = await renderSpirographToPng(dims, size, dpr);
   return `data:image/png;base64,${buf.toString('base64')}`;
 }

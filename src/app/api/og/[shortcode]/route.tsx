@@ -6,10 +6,10 @@ import { SITE_URL } from '@/lib/constants';
 import type { SpiroDimensions } from '@/lib/spirograph/renderer';
 
 // Dynamic import so the route still works when @napi-rs/canvas isn't installed.
-async function tryRenderSpiro(dims: SpiroDimensions, size: number): Promise<string | null> {
+async function tryRenderSpiro(dims: SpiroDimensions, size: number, dpr = 1): Promise<string | null> {
   try {
     const { renderSpirographToBase64 } = await import('@/lib/spirograph/server-render');
-    return await renderSpirographToBase64(dims, size);
+    return await renderSpirographToBase64(dims, size, dpr);
   } catch (err) {
     console.error('[og] spirograph render failed:', err);
     return null;
@@ -46,11 +46,21 @@ function truncate(text: string, max = 120): string {
 // Scale answer font size so longer text doesn't overflow the image.
 // Values are in 2× space.
 function answerFontSize(text: string): number {
-  if (text.length <= 55)  return 76;
-  if (text.length <= 90)  return 60;
-  if (text.length <= 120) return 48;
-  return 44;
+  if (text.length <= 55)  return 84;
+  if (text.length <= 90)  return 68;
+  if (text.length <= 120) return 58;
+  return 52;
 }
+
+// Satori quirk: text only truly centers when its container is an explicit
+// flex row with justifyContent AND textAlign (justifyContent centers the
+// single-line case, textAlign centers wrapped lines).
+const CENTER: Record<string, string | number> = {
+  width: '100%',
+  display: 'flex',
+  justifyContent: 'center',
+  textAlign: 'center',
+};
 
 // ─── Default / fallback image ─────────────────────────────────────────────────
 function defaultImage() {
@@ -118,10 +128,14 @@ export async function GET(
     seed: shortcode,
   };
 
-  // 3. Render spirograph at 800×800 source, displayed at 400×400 (2× sharp)
-  const spiroBg = await tryRenderSpiro(dims, 800);
+  // 3. The spirograph's pixel geometry is fixed (zoom × radius), so a bigger
+  // canvas alone just adds padding — dpr scales the whole drawing uniformly,
+  // line weights included. 560 logical (the glow-safe minimum) × dpr 3 gives
+  // a large, sharp star; the box's negative margins trim the glow padding.
+  const STAR_PX = 820;
+  const spiroBg = await tryRenderSpiro(dims, 560, 3);
 
-  // ── Card layout ────────────────────────────────────────────────────────────
+  // ── Card layout: question above the star, star large, everything centered ──
   return new ImageResponse(
     (
       <div
@@ -133,10 +147,21 @@ export async function GET(
           alignItems: 'center',
           justifyContent: 'center',
           background: BG,
-          padding: '80px 160px',
+          padding: '64px 160px',
           gap: 0,
         }}
       >
+        <div style={{
+          ...CENTER,
+          fontSize: 54,
+          fontFamily: 'serif',
+          color: 'rgba(240,232,224,0.75)',
+          maxWidth: 2000,
+          lineHeight: 1.25,
+        }}>
+          {questionText}
+        </div>
+
         {spiroBg && (
           // Satori renders this JSX to a PNG, not to the DOM, so next/image
           // (a React DOM component) cannot be used here.
@@ -144,46 +169,31 @@ export async function GET(
           <img
             src={spiroBg}
             alt=""
-            width={400}
-            height={400}
-            style={{ marginBottom: 40, display: 'block' }}
+            width={STAR_PX}
+            height={STAR_PX}
+            style={{ display: 'block', marginTop: -64, marginBottom: -36 }}
           />
         )}
 
         <div style={{
-          width: '100%',
-          fontSize: 40,
-          fontFamily: 'serif',
-          color: BTW.textSec,
-          textAlign: 'center',
-          maxWidth: 1720,
-          lineHeight: 1.3,
-          marginBottom: 28,
-        }}>
-          {questionText}
-        </div>
-
-        <div style={{
-          width: '100%',
+          ...CENTER,
           fontSize: answerFontSize(answerText),
           fontFamily: 'serif',
           fontStyle: 'italic',
           color: BTW.textPri,
-          textAlign: 'center',
-          maxWidth: 1920,
-          lineHeight: 1.35,
-          marginBottom: byline ? 28 : 0,
+          maxWidth: 2000,
+          lineHeight: 1.3,
         }}>
           {`"${answerText}"`}
         </div>
 
         {byline && (
           <div style={{
-            width: '100%',
-            fontSize: 36,
+            ...CENTER,
+            fontSize: 40,
             fontFamily: 'sans-serif',
-            color: 'rgba(240,232,224,0.55)',
-            textAlign: 'center',
+            color: 'rgba(240,232,224,0.6)',
+            marginTop: 26,
           }}>
             {`— ${byline}`}
           </div>
