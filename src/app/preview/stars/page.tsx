@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSpirograph, CURVE_TYPES, type SpiroDimensions, type CurveType } from '@/lib/spirograph/renderer';
-import { resolveArchetype } from '@/lib/spirograph/archetypes';
 import { BTW, SANS, SERIF } from '@/lib/btw';
 
 // ── /preview/stars — unlisted archetype gallery ───────────────────────────────
@@ -15,8 +14,7 @@ import { BTW, SANS, SERIF } from '@/lib/btw';
 //     &emotion=0..6   &seed=anything   &size=560
 //
 // Archetypes resolve from dimensions + seed exactly as in the cosmos — the
-// dims below sit past each trigger threshold, and rare seeds are searched
-// through the real resolver so this page can never drift out of sync with it.
+// dims below sit past each trigger threshold.
 
 const MID = {
   certainty: 0.5, warmth: 0.55, tension: 0.35, vulnerability: 0.5,
@@ -28,7 +26,6 @@ interface FormDef {
   label: string;
   rule: string;
   dims: Partial<typeof MID>;
-  wantRare?: boolean;
 }
 
 const FORMS: FormDef[] = [
@@ -37,11 +34,7 @@ const FORMS: FormDef[] = [
   { key: 'binary',     label: 'binary',           rule: 'tension > 0.70',                       dims: { tension: 0.86 } },
   { key: 'halo',       label: 'halo',             rule: 'scope > 0.88',                         dims: { scope: 0.95 } },
   { key: 'comet',      label: 'comet',            rule: 'certainty < 0.36',                     dims: { certainty: 0.2 } },
-  { key: 'crystal',    label: 'crystalline knot', rule: 'certainty > 0.80',                     dims: { certainty: 0.92 } },
-  { key: 'armillary',  label: 'armillary (rare)', rule: '1% of shortcodes',                     dims: {}, wantRare: true },
-  { key: 'crystal-halo',     label: 'crystal + halo',     rule: 'composition', dims: { certainty: 0.92, scope: 0.95 } },
-  { key: 'satellites-comet', label: 'satellites + comet', rule: 'composition', dims: { rootedness: 0.06, certainty: 0.2 } },
-  { key: 'binary-halo',      label: 'binary + halo',      rule: 'composition', dims: { tension: 0.86, scope: 0.95 } },
+  { key: 'binary-halo', label: 'binary + halo',    rule: 'composition', dims: { tension: 0.86, scope: 0.95 } },
 ];
 
 // ── Proposal forms — dramatic candidates, drawn by src/lib/spirograph/
@@ -79,16 +72,7 @@ const PROPOSALS: ProposalDef[] = [
 ];
 
 function makeDims(def: FormDef, curveType: CurveType, emotionIndex: number, seedHint: string): SpiroDimensions {
-  const base = { ...MID, ...def.dims, emotionIndex, curveType };
-  // Search for a seed that resolves to exactly the wanted form through the
-  // real resolver — rare needs a 1-in-100 hash hit; every other form needs a
-  // seed that does NOT accidentally hit rare.
-  for (let i = 0; i < 4000; i++) {
-    const seed = `${seedHint}-${i}`;
-    const spec = resolveArchetype({ ...base, seed });
-    if (def.wantRare ? spec.rare : !spec.rare) return { ...base, seed };
-  }
-  return { ...base, seed: seedHint };
+  return { ...MID, ...def.dims, emotionIndex, curveType, seed: seedHint };
 }
 
 function StarCell({ dims, size, animate }: { dims: SpiroDimensions; size: number; animate: boolean }) {
@@ -126,13 +110,12 @@ function PreviewInner() {
 
   const singleDims = useMemo(() => {
     if (!single) return null;
-    const d = makeDims(
+    return makeDims(
       single,
       curve ?? 'hypotrochoid',
       emotion != null ? Math.max(0, Math.min(6, Number(emotion))) : 2,
       seed ?? `preview-${single.key}`,
     );
-    return seed && !single.wantRare ? { ...d, seed } : d;
   }, [single, curve, emotion, seed]);
 
   const proposalDims = useMemo(() => {

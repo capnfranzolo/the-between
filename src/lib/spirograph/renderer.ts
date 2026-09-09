@@ -7,7 +7,6 @@
 
 import {
   resolveArchetype, drawArchetypeUnder, drawArchetypeOver,
-  CRYSTAL_TIGHTEN, CRYSTAL_SLOW,
   type ArchetypeSpec, type Projector, type RGB,
 } from './archetypes';
 import { drawProposal, isStandaloneProposal } from './proposals';
@@ -253,9 +252,7 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   const { certainty, warmth, tension, vulnerability, scope, rootedness, curveType } = dims;
   const arch = resolveArchetype(dims);
 
-  // Phase 5 — the crystalline knot draws the same curve pulled tighter and
-  // turned slower. Everything else about the form is untouched.
-  const R = CONFIG.outerRadius * (arch.crystal ? CRYSTAL_TIGHTEN : 1);
+  const R = CONFIG.outerRadius;
 
   const petalTarget = CONFIG.petals.min + vulnerability * (CONFIG.petals.max - CONFIG.petals.min);
   const petals = tension < 0.3 ? Math.round(petalTarget) : petalTarget;
@@ -265,8 +262,7 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   const totalTheta = totalRevolutions * 2 * Math.PI * (petals + 1);
 
   const maxTilt = scope * CONFIG.maxTiltFactor;
-  const angularSpeed = (CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm))
-    * (arch.crystal ? CRYSTAL_SLOW : 1);
+  const angularSpeed = CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm);
   const fireflyCount = Math.max(CONFIG.fireflies.min,
     Math.round((1 - rootedness) * (CONFIG.fireflies.max - CONFIG.fireflies.min) + CONFIG.fireflies.min));
 
@@ -309,9 +305,7 @@ function renderFrame(
 
   ctx.clearRect(0, 0, logW, logH);
 
-  // Phase 5 — structural archetypes. `archR` is the *untightened* radius so a
-  // crystalline knot's rings and motes keep their normal reach around the
-  // pulled-in curve.
+  // Phase 5 — structural archetypes.
   const archR = CONFIG.outerRadius;
   const projector: Projector = (x, y, z) => project(x, y, z, cam);
 
@@ -344,29 +338,6 @@ function renderFrame(
         ctx.quadraticCurveTo(prevSx, prevSy, (prevSx + proj.sx) / 2, (prevSy + proj.sy) / 2);
       }
       prevSx = proj.sx; prevSy = proj.sy;
-    }
-    ctx.stroke();
-  }
-
-  // Phase 5 — crystalline lattice. Chords struck straight across the curve
-  // between evenly-spaced points on it: the one archetype that has to sample
-  // the curve itself, so it lives here rather than in archetypes.ts.
-  if (geo.arch.crystal) {
-    const n = geo.arch.crystalChords;
-    const skip = geo.arch.crystalSkip;
-    const pts: { sx: number; sy: number }[] = [];
-    for (let i = 0; i < n; i++) {
-      const proj = pj(ev((i / n) * geo.totalTheta + time * geo.angularSpeed * 0.15));
-      pts.push({ sx: proj.sx, sy: proj.sy });
-    }
-    ctx.beginPath();
-    ctx.strokeStyle = `rgba(${baseRGB[0]},${baseRGB[1]},${baseRGB[2]},0.15)`;
-    ctx.lineWidth = 0.85;
-    ctx.lineCap = 'round';
-    for (let i = 0; i < n; i++) {
-      const a = pts[i], b = pts[(i + skip) % n];
-      ctx.moveTo(a.sx, a.sy);
-      ctx.lineTo(b.sx, b.sy);
     }
     ctx.stroke();
   }
