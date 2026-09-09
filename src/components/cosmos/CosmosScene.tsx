@@ -162,7 +162,7 @@ const MAX_PROXIMITY_UPGRADES = 20;
 // Canvas must be large enough that the glow (outerRadius 120 × zoom 1.4 + yOffset 30)
 // never clips. At size=560 the bottom margin is ~82px — safe even with glow overlap.
 const SPIRO_SIZE_LIVE = 560; // used for both baked and live so visual size stays identical
-const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at stop-dist
+const SELECTED_SCALE_MULT = 2.0; // ~⅓ of viewport height when focused at stop-dist
 // Sun sits slightly below horizon, directly in front of initial camera heading
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
@@ -972,9 +972,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // variety + roughly ahead), glide there on an eased leg, dwell 8-12 s
       // with the thought readable, continue. The controller always aims at a
       // star, so the camera never faces empty sky.
-      const DRIFT_CRUISE = 26;          // u/s cap — meditative planetarium pace
-      const DRIFT_LEG_MIN = 4;          // s — minimum glide duration
-      const DRIFT_STOP_DIST = 85;       // horizontal arrival distance from star
+      const DRIFT_CRUISE = 26;          // u/s base — meditative planetarium pace
+      const DRIFT_LEG_MIN = 4.5;        // s — minimum glide duration
+      // The glide lands exactly on the focused framing distance, so arrival IS
+      // the focus — no second flight, no pause, no re-zoom.
+      const DRIFT_STOP_DIST = FOCUS_STOP_DIST;
       const DRIFT_PITCH_OFFSET = 0.17;  // star rides upper third during dwell
       const DRIFT_MAX_TURN = 0.55;      // rad/s heading cap while drifting
       const DRIFT_MAX_PITCH_RATE = 0.35;
@@ -1062,9 +1064,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         glideFrom.copy(camera.position);
         glideFrom.y = BASE_CAM_Y;
         const legDist = glideFrom.distanceTo(glideTo);
-        // Cap SPEED, not duration — a rare long leg takes longer rather than
-        // rushing. (smoothstep peak velocity is 1.5× the average, hence 1.5)
-        glideDur = Math.max(DRIFT_LEG_MIN, (legDist * 1.5) / DRIFT_CRUISE);
+        // Long legs earn a higher cruise so distant stars don't crawl, and the
+        // quintic ease below gives them long, gentle accelerations either end.
+        // (smootherstep peak velocity is 1.875× the average, hence 1.875)
+        const cruise = Math.min(62, DRIFT_CRUISE + legDist * 0.07);
+        glideDur = Math.max(DRIFT_LEG_MIN, (legDist * 1.875) / cruise);
         glideT = 0;
         driftPhase = 'glide';
       }
@@ -1085,10 +1089,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (driftPhase === 'glide') {
           glideT += dt;
           const u = Math.min(glideT / glideDur, 1);
-          const e = u * u * (3 - 2 * u); // smoothstep — ease-in, ease-out
+          // Quintic smootherstep — zero acceleration at both ends, so long
+          // travels breathe into and out of motion instead of lurching.
+          const e = u * u * u * (u * (u * 6 - 15) + 10);
           camera.position.x = glideFrom.x + (glideTo.x - glideFrom.x) * e;
           camera.position.z = glideFrom.z + (glideTo.z - glideFrom.z) * e;
-          faceStar(g, DRIFT_PITCH_OFFSET, dt, 1.6, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
+          // The approach IS the zoom: over the last stretch of the glide the
+          // star grows toward its focused scale and the framing pitch eases to
+          // the focused pitch, so the handoff to the panel is seamless.
+          const app = u > 0.55 ? (v => v * v * (3 - 2 * v))((u - 0.55) / 0.45) : 0;
+          g.userData.preScale = 1 + (SELECTED_SCALE_MULT - 1) * app;
+          faceStar(
+            g,
+            DRIFT_PITCH_OFFSET + (FOCUS_PITCH_OFFSET - DRIFT_PITCH_OFFSET) * app,
+            dt, 1.6, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE,
+          );
           if (u >= 1) {
             // Arrived — hand the star to the page, which opens the real
             // focused view (panel + full live animation). The chime belongs
@@ -1106,7 +1121,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           // the state machine flips to focused. If the page never responds
           // (no handler wired), fall back to seeking so the tour never dies.
           handoffT += dt;
-          faceStar(g, DRIFT_PITCH_OFFSET, dt, 2.0, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
+          faceStar(g, FOCUS_PITCH_OFFSET, dt, 2.0, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
           if (handoffT > 3) {
             driftPhase = 'seek';
             driftSeekDelay = 0.5;
@@ -1895,9 +1910,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const id = g.userData.id as string;
           const isSelected = id === activeStarRef.current;
           const baseScale = 1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05;
-          const targetMult = isSelected ? SELECTED_SCALE_MULT : 1.0;
+          // While a star is the tour's approach target it pre-grows with the
+          // glide (userData.preScale); selection then takes over at the same
+          // value, so focus never snaps.
+          const pre = (camMode === 'drift' && id === driftTargetId)
+            ? ((g.userData.preScale as number | undefined) ?? 1.0)
+            : 1.0;
+          const targetMult = isSelected ? SELECTED_SCALE_MULT : pre;
           const curMult = g.userData.scaleMult as number;
-          const newMult = curMult + (targetMult - curMult) * Math.min(dt * 3.5, 1);
+          const newMult = curMult + (targetMult - curMult) * Math.min(dt * 2.8, 1);
           g.userData.scaleMult = newMult;
           // Phase 8 — a birth/finale bloom multiplies into the star's own
           // scale rather than replacing it, so focus framing keeps working.
