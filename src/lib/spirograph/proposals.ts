@@ -33,7 +33,7 @@ export const PROPOSAL_KINDS = ['pulsar', 'eclipse'] as const;
  * shared projector, so the one slow world-turn animates everything.
  */
 export const STANDALONE_KINDS = [
-  'geode', 'shard',
+  'shard',
   'shatter', 'constellation', 'vortex', 'corona',
   'harmonograph', 'maurer', 'superformula', 'mystery', 'phyllotaxis',
   'clothoid', 'attractor', 'stringart', 'spirolateral', 'knot',
@@ -307,51 +307,6 @@ function eclipse(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB
 // ═══════════════════════════════════════════════════════
 // STANDALONE — CRYSTAL FAMILY
 // ═══════════════════════════════════════════════════════
-
-// ── geode — the crystal rock (unchanged; owner-approved). ────────────────────
-function geode(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
-  const rnd = mulberry(seed ^ 0x9e0de);
-  const NV = 5 + Math.floor(rnd() * 3);
-  const wobble = 0.10 * Math.sin(time * 0.05);
-  const mk = (yFrac: number, rFrac: number): Pt3[] => {
-    const ringPts: Pt3[] = [];
-    const base = rnd() * Math.PI * 2;
-    for (let i = 0; i < NV; i++) {
-      const th = base + (i / NV) * Math.PI * 2 + (rnd() - 0.5) * 0.35;
-      const r = R * rFrac * (0.82 + rnd() * 0.36);
-      ringPts.push({ x: Math.cos(th) * r, y: R * yFrac + (rnd() - 0.5) * R * 0.12, z: Math.sin(th) * r });
-    }
-    return ringPts;
-  };
-  const top = mk(0.34 + wobble * 0.3, 0.58);
-  const bot = mk(-0.34, 0.62);
-  const apexT: Pt3 = { x: (rnd() - 0.5) * R * 0.2, y: R * (0.85 + rnd() * 0.2), z: (rnd() - 0.5) * R * 0.2 };
-  const apexB: Pt3 = { x: (rnd() - 0.5) * R * 0.2, y: -R * (0.8 + rnd() * 0.2), z: (rnd() - 0.5) * R * 0.2 };
-  const face = (pts: Pt3[]) => {
-    const sp = pts.map(p => pj(p.x, p.y, p.z));
-    ctx.beginPath();
-    ctx.fillStyle = rgba(c, 0.05);
-    sp.forEach((s, i) => (i ? ctx.lineTo(s.sx, s.sy) : ctx.moveTo(s.sx, s.sy)));
-    ctx.closePath();
-    ctx.fill();
-  };
-  for (let i = 0; i < NV; i++) {
-    const j = (i + 1) % NV;
-    face([top[i], top[j], bot[j], bot[i]]);
-    face([apexT, top[i], top[j]]);
-    face([apexB, bot[j], bot[i]]);
-  }
-  for (let i = 0; i < 3; i++) litEdge(ctx, pj, top[Math.floor(rnd() * NV)], bot[Math.floor(rnd() * NV)], c, 0.35);
-  for (let i = 0; i < NV; i++) {
-    const j = (i + 1) % NV;
-    litEdge(ctx, pj, top[i], top[j], c);
-    litEdge(ctx, pj, bot[i], bot[j], c);
-    litEdge(ctx, pj, top[i], bot[i], c);
-    litEdge(ctx, pj, apexT, top[i], c);
-    litEdge(ctx, pj, apexB, bot[i], c);
-  }
-  for (const v of [...top, ...bot, apexT, apexB]) vertexSpark(ctx, pj, v, c);
-}
 
 // ── shard — long linear splinters radiating from a bright heart: the most
 // linear of the crystal family. ──────────────────────────────────────────────
@@ -947,7 +902,6 @@ export function drawProposal(
   switch (kind as ProposalKind) {
     case 'pulsar':        return pulsar(ctx, pj, R, color, time);
     case 'eclipse':       return eclipse(ctx, pj, R, color, time);
-    case 'geode':         return geode(ctx, pj, R, color, time, seed);
     case 'shard':         return shard(ctx, pj, R, color, time, seed);
     case 'shatter':       return shatter(ctx, pj, R, color, time, seed);
     case 'constellation': return constellation(ctx, pj, R, color, time, seed);

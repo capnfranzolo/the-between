@@ -54,7 +54,6 @@ const PROPOSALS: ProposalDef[] = [
   { key: 'pulsar',  label: 'pulsar',  pitch: 'a lighthouse — hot core and opposed beams, now with a real heartbeat' },
   { key: 'eclipse', label: 'eclipse', pitch: 'a black hole — fully dark disk, burning rim, and the diamond-ring flare of totality' },
   // Standalone geometries — these replace the spirograph entirely.
-  { key: 'geode',        label: 'geode',          pitch: 'the crystal rock — irregular luminous polyhedron, facets lit by depth (owner-approved)', standalone: true },
   { key: 'shard',        label: 'shard',          pitch: 'blades implied by whisper strokes, drawn by light racing outward with dissolving tails', standalone: true },
   { key: 'shatter',      label: 'shatter',        pitch: 'the folding cage — quiet strokes, energy running the ring, vertices easing between rests', standalone: true },
   { key: 'constellation', label: 'constellation', pitch: 'nodes in 3D, whisper links, pulses with dissolving tails walking the survey chain', standalone: true },
