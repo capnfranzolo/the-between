@@ -32,7 +32,9 @@ const FORMS: FormDef[] = [
   { key: 'plain',      label: 'plain',            rule: 'mid-range everything (~⅓ of the sky)', dims: {} },
   { key: 'satellites', label: 'satellites',       rule: 'rootedness < 0.16',                    dims: { rootedness: 0.06 } },
   { key: 'binary',     label: 'binary',           rule: 'tension > 0.70',                       dims: { tension: 0.86 } },
+  { key: 'saturn',     label: 'saturn',           rule: 'scope > 0.88',                         dims: { scope: 0.95 } },
   { key: 'comet',      label: 'comet',            rule: 'certainty < 0.36',                     dims: { certainty: 0.2 } },
+  { key: 'saturn-comet', label: 'saturn + comet', rule: 'composition', dims: { scope: 0.95, certainty: 0.2 } },
 ];
 
 // ── Proposal forms — dramatic candidates, drawn by src/lib/spirograph/
@@ -48,15 +50,12 @@ interface ProposalDef {
 }
 
 const PROPOSALS: ProposalDef[] = [
-  // Overlays on the spirograph (saturn = the candidate halo upgrade).
-  { key: 'saturn',  label: 'saturn',  pitch: 'the halo as a ring system — bright bands, Cassini gap, and dust racing the rings with long tails' },
+  // Overlays on the spirograph.
   { key: 'pulsar',  label: 'pulsar',  pitch: 'a lighthouse — hot core and opposed beams, now with a real heartbeat' },
   { key: 'eclipse', label: 'eclipse', pitch: 'a black hole — fully dark disk, burning rim, and the diamond-ring flare of totality' },
   // Standalone geometries — these replace the spirograph entirely.
   { key: 'geode',        label: 'geode',          pitch: 'the crystal rock — irregular luminous polyhedron, facets lit by depth (owner-approved)', standalone: true },
-  { key: 'quartz',       label: 'quartz',         pitch: 'a solid bright core with hex prism points growing in every direction, drawn by climbing light', standalone: true },
   { key: 'shard',        label: 'shard',          pitch: 'blades implied by whisper strokes, drawn by light racing outward with dissolving tails', standalone: true },
-  { key: 'facet',        label: 'facet',          pitch: 'a brilliant-cut gem — light laps the girdle and crown, a flash walks the facets, bolts drop to the culet', standalone: true },
   { key: 'shatter',      label: 'shatter',        pitch: 'the folding cage — quiet strokes, energy running the ring, vertices easing between rests', standalone: true },
   { key: 'constellation', label: 'constellation', pitch: 'nodes in 3D, whisper links, pulses with dissolving tails walking the survey chain', standalone: true },
   { key: 'vortex',       label: 'vortex',         pitch: 'five arms in five planes, each twisting out of its plane — a storm, light flowing outward', standalone: true },

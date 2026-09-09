@@ -25,7 +25,7 @@ interface CurveAccess {
 }
 
 /** Overlays — dressings on the familiar spirograph form. */
-export const PROPOSAL_KINDS = ['saturn', 'pulsar', 'eclipse'] as const;
+export const PROPOSAL_KINDS = ['pulsar', 'eclipse'] as const;
 
 /**
  * Standalone geometries: whole different curve families that REPLACE the
@@ -33,7 +33,7 @@ export const PROPOSAL_KINDS = ['saturn', 'pulsar', 'eclipse'] as const;
  * shared projector, so the one slow world-turn animates everything.
  */
 export const STANDALONE_KINDS = [
-  'geode', 'quartz', 'shard', 'facet',
+  'geode', 'shard',
   'shatter', 'constellation', 'vortex', 'corona',
   'harmonograph', 'maurer', 'superformula', 'mystery', 'phyllotaxis',
   'clothoid', 'attractor', 'stringart', 'spirolateral', 'knot',
@@ -243,63 +243,6 @@ function glintTrail(
 // OVERLAYS (on the spirograph)
 // ═══════════════════════════════════════════════════════
 
-// ── saturn — broad bright bands with a Cassini gap, now alive: dust bodies
-// sweep the rings with long tails, the way rings actually are. ───────────────
-function saturn(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
-  const rnd = mulberry(seed ^ 0x5a7);
-  const tiltX = 0.42, spin = time * 0.04;
-  const bands: [number, number, number][] = [
-    [0.98, 0.65, 1.6], [1.03, 0.5, 3.2], [1.09, 0.38, 4.2], [1.15, 0.24, 4.6], [1.20, 0.12, 5.0],
-  ];
-  for (const [rad, a, w] of bands) {
-    ctx.beginPath();
-    ctx.strokeStyle = rgba(c, a);
-    ctx.lineWidth = w;
-    for (let i = 0; i <= 96; i++) {
-      const p = ring(rad * R, (i / 96) * Math.PI * 2, tiltX, spin);
-      const s = pj(p.x, p.y, p.z);
-      if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
-    }
-    ctx.stroke();
-  }
-  // The Cassini gap.
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.beginPath();
-  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-  ctx.lineWidth = 1.8;
-  for (let i = 0; i <= 96; i++) {
-    const p = ring(1.065 * R, (i / 96) * Math.PI * 2, tiltX, spin);
-    const s = pj(p.x, p.y, p.z);
-    if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
-  }
-  ctx.stroke();
-  ctx.restore();
-  // Ring dust: bright grains racing the bands, each with a long trailing arc.
-  const DUST = 9;
-  for (let d = 0; d < DUST; d++) {
-    const rad = (0.99 + rnd() * 0.2) * R;
-    const speed = 0.32 + rnd() * 0.22;
-    const phase = rnd() * Math.PI * 2;
-    const th = phase + time * speed;
-    let prev = ring(rad, th, tiltX, spin);
-    for (let j = 1; j <= 10; j++) {
-      const p = ring(rad, th - (j / 10) * 0.7, tiltX, spin);
-      const sa = pj(prev.x, prev.y, prev.z), sb = pj(p.x, p.y, p.z);
-      ctx.beginPath();
-      ctx.strokeStyle = rgba(c, 0.5 * (1 - j / 10));
-      ctx.lineWidth = 1.5 * (1 - (j / 10) * 0.6);
-      ctx.lineCap = 'round';
-      ctx.moveTo(sa.sx, sa.sy);
-      ctx.lineTo(sb.sx, sb.sy);
-      ctx.stroke();
-      prev = p;
-    }
-    const h = pj(ring(rad, th, tiltX, spin).x, ring(rad, th, tiltX, spin).y, ring(rad, th, tiltX, spin).z);
-    glow(ctx, h.sx, h.sy, 6 * h.scale, c, 0.4);
-  }
-}
-
 // ── pulsar — hot core, opposed beams, now with a real heartbeat. ─────────────
 function pulsar(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number) {
   const pulse = 0.55 + 0.45 * Math.sin(time * 2.1);
@@ -410,58 +353,6 @@ function geode(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, 
   for (const v of [...top, ...bot, apexT, apexB]) vertexSpark(ctx, pj, v, c);
 }
 
-// ── quartz — a cluster of hexagonal prism points with pyramid tips, grown
-// outward from a shared base the way real quartz grows. ──────────────────────
-function quartz(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
-  const rnd = mulberry(seed ^ 0x9142);
-  const N = 5 + Math.floor(rnd() * 3); // 5-7 points in the cluster
-  // The solid center the points grow from: a bright nucleus with a rocky core.
-  const heart0 = pj(0, 0, 0);
-  glow(ctx, heart0.sx, heart0.sy, 30 * heart0.scale, c, 0.55);
-  ctx.beginPath();
-  ctx.fillStyle = rgba(c, 0.95);
-  ctx.arc(heart0.sx, heart0.sy, Math.max(1.8, 3.4 * heart0.scale), 0, Math.PI * 2);
-  ctx.fill();
-  for (let q = 0; q < N; q++) {
-    // Full-sphere orientations — the cluster grows in every direction.
-    const o: Orient = { rx: Math.acos(2 * rnd() - 1), ry: rnd() * Math.PI * 2 };
-    const len = R * (0.5 + rnd() * 0.55);
-    const rad = R * (0.09 + rnd() * 0.07);
-    const base = R * (0.02 + rnd() * 0.12);
-    const twist = rnd() * Math.PI;
-    // Hexagonal cross-sections at base and shoulder, then the tip.
-    const hex = (y: number, r: number): Pt3[] => {
-      const pts: Pt3[] = [];
-      for (let i = 0; i < 6; i++) {
-        const th = twist + (i / 6) * Math.PI * 2;
-        pts.push(orient({ x: Math.cos(th) * r, y, z: Math.sin(th) * r }, o));
-      }
-      return pts;
-    };
-    const b0 = hex(base, rad * 0.9);
-    const b1 = hex(base + len * 0.72, rad);
-    const tip = orient({ x: 0, y: base + len, z: 0 }, o);
-    for (let i = 0; i < 6; i++) {
-      const j = (i + 1) % 6;
-      litEdge(ctx, pj, b0[i], b0[j], c, 0.28, 0.7);
-      litEdge(ctx, pj, b1[i], b1[j], c, 0.38, 0.7);
-      litEdge(ctx, pj, b0[i], b1[i], c, 0.38, 0.7);
-      litEdge(ctx, pj, b1[i], tip, c, 0.45, 0.7);
-    }
-    // A faint internal gleam line and the hot tip.
-    litEdge(ctx, pj, orient({ x: 0, y: base, z: 0 }, o), tip, c, 0.3, 0.8);
-    vertexSpark(ctx, pj, tip, c, 1.1);
-    // The crystal is DRAWN: light travels base→tip with a dissolving tail.
-    const gu = ((time * 0.22 + q / N) % 1 + 1) % 1;
-    const gi = Math.floor(rnd() * 6);
-    const root = orient({ x: 0, y: 0, z: 0 }, o);
-    glintTrail(ctx, pj, root, tip, c, gu, { span: 0.45, width: 1.8 });
-    // And a second, quieter one climbing a prism edge out of phase.
-    glintTrail(ctx, pj, b0[gi], b1[gi], c, ((gu + 0.5) % 1), { span: 0.4, width: 1.1, alpha: 0.45, glowR: 4 });
-    if (gu > 0.9) vertexSpark(ctx, pj, tip, c, 1.2);
-  }
-}
-
 // ── shard — long linear splinters radiating from a bright heart: the most
 // linear of the crystal family. ──────────────────────────────────────────────
 function shard(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
@@ -490,52 +381,6 @@ function shard(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, 
   ctx.fillStyle = rgba(c, 0.95);
   ctx.arc(heart.sx, heart.sy, Math.max(1.4, 2.4 * heart.scale), 0, Math.PI * 2);
   ctx.fill();
-}
-
-// ── facet — a brilliant-cut gem: table, crown kites, girdle, pavilion — the
-// most-faceted of the family, with a flash walking its crown. ────────────────
-function facet(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
-  const rnd = mulberry(seed ^ 0xface7);
-  const N = 8 + Math.floor(rnd() * 3) * 2; // 8/10/12 girdle facets
-  const girdleR = R * 0.72, tableR = R * 0.42;
-  const girdleY = R * 0.08, tableY = R * 0.42;
-  const culet: Pt3 = { x: 0, y: -R * 0.78, z: 0 };
-  const phase = rnd() * Math.PI * 2;
-  const girdle: Pt3[] = [], table: Pt3[] = [];
-  for (let i = 0; i < N; i++) {
-    const th = phase + (i / N) * Math.PI * 2;
-    girdle.push({ x: Math.cos(th) * girdleR, y: girdleY + (rnd() - 0.5) * R * 0.03, z: Math.sin(th) * girdleR });
-    const th2 = th + Math.PI / N; // crown kites offset half a step
-    table.push({ x: Math.cos(th2) * tableR, y: tableY, z: Math.sin(th2) * tableR });
-  }
-  // A facet flash walks the crown — one kite at a time catches the light.
-  const flashI = Math.floor(((time * 0.5) % N + N) % N);
-  for (let i = 0; i < N; i++) {
-    const j = (i + 1) % N;
-    if (i === flashI) {
-      const sp = [girdle[i], table[i], girdle[j]].map(p => pj(p.x, p.y, p.z));
-      ctx.beginPath();
-      ctx.fillStyle = rgba(c, 0.16 + 0.1 * Math.sin(time * 3));
-      sp.forEach((s, k) => (k ? ctx.lineTo(s.sx, s.sy) : ctx.moveTo(s.sx, s.sy)));
-      ctx.closePath();
-      ctx.fill();
-    }
-    litEdge(ctx, pj, girdle[i], girdle[j], c, 0.5, 0.7);    // girdle
-    litEdge(ctx, pj, table[i], table[j], c, 0.4, 0.7);      // table rim
-    litEdge(ctx, pj, girdle[i], table[i], c, 0.32, 0.6);    // crown kites
-    litEdge(ctx, pj, girdle[j], table[i], c, 0.32, 0.6);
-    litEdge(ctx, pj, girdle[i], culet, c, 0.25, 0.6);       // pavilion
-  }
-  for (const v of girdle) vertexSpark(ctx, pj, v, c, 0.7);
-  vertexSpark(ctx, pj, culet, c, 1.1);
-  // The energy: light laps the girdle, and a second runner takes the crown
-  // rim the other way — the gem is being continuously drawn.
-  tracedPath(ctx, pj, girdle, c, time, { pathAlpha: 0, tracers: 2, speed: 0.05, tailFrac: 0.3, headGlow: 9 });
-  tracedPath(ctx, pj, [...table].reverse(), c, time, { pathAlpha: 0, tracers: 1, speed: 0.06, tailFrac: 0.3, headGlow: 8 });
-  // And now and then a bolt drops girdle→culet.
-  const bu = ((time * 0.3) % 1 + 1) % 1;
-  const bi = Math.floor(((time * 0.3) % N + N)) % N;
-  glintTrail(ctx, pj, girdle[bi], culet, c, bu, { span: 0.4, width: 1.4, alpha: 0.6, glowR: 5 });
 }
 
 // ── shatter — a caged burst in true 3D; every vertex eases to a new resting
@@ -1100,13 +945,10 @@ export function drawProposal(
 ): void {
   const seed = curve.seed ?? 1;
   switch (kind as ProposalKind) {
-    case 'saturn':        return saturn(ctx, pj, R, color, time, seed);
     case 'pulsar':        return pulsar(ctx, pj, R, color, time);
     case 'eclipse':       return eclipse(ctx, pj, R, color, time);
     case 'geode':         return geode(ctx, pj, R, color, time, seed);
-    case 'quartz':        return quartz(ctx, pj, R, color, time, seed);
     case 'shard':         return shard(ctx, pj, R, color, time, seed);
-    case 'facet':         return facet(ctx, pj, R, color, time, seed);
     case 'shatter':       return shatter(ctx, pj, R, color, time, seed);
     case 'constellation': return constellation(ctx, pj, R, color, time, seed);
     case 'vortex':        return vortex(ctx, pj, R, color, time, seed);

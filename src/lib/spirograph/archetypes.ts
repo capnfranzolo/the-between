@@ -11,6 +11,8 @@
  *
  *   low rootedness  → satellites   1–3 motes on slow orbits around the form
  *   high tension    → binary       a double core, two nuclei instead of one
+ *   high scope      → saturn       a ring system: bright bands, a Cassini gap,
+ *                                  dust grains racing the rings with long tails
  *   low certainty   → comet        a bright head in eccentric orbit, tail streaming
  *
  * Everything drawn here stays inside the line-drawn luminous language: thin
@@ -45,12 +47,18 @@ export interface ArchetypeSpec {
   seed: number;
   satellites: SatelliteSpec[];
   binary: boolean;
+  saturn: boolean;
   comet: boolean;
   /** How many archetypes are active — used to quieten busy combinations. */
   count: number;
   binaryAxis: number;
   binaryTilt: number;
   binarySep: number;      // fraction of R
+  /** Saturn — a ring system around the form: banded rings sharing one plane,
+   *  a dark Cassini gap, and dust grains racing the bands with long tails. */
+  saturnTilt: number;
+  saturnSpin: number;
+  saturnDust: { radius: number; speed: number; phase: number }[];
   /** The comet is a body in orbit: a bright head sweeping the form on an
    *  inclined ellipse, its tail streaming behind along the path. */
   cometTilt: number;      // orbital plane inclination
@@ -87,12 +95,13 @@ export interface ArchetypeSource {
 export const ARCHETYPE_THRESHOLDS = {
   satellites: 0.16,   // rootedness below this
   binary:     0.70,   // tension above this
+  saturn:     0.88,   // scope above this (the slot the halo used to hold)
   comet:      0.36,   // certainty below this
 } as const;
-// Retired by owner review (2026-09) — crystalline knot ("a denser tangle"),
-// armillary rare ("a lesser halo"), and the halo band itself (the saturn
-// proposal does that idea better). Their trigger slots (high certainty,
-// high scope, 1%-rare) are open for graduating /preview/stars proposals.
+// Retired by owner review (2026-09): crystalline knot ("a denser tangle"),
+// armillary rare ("a lesser halo"), and the halo band — replaced by saturn,
+// the graduated /preview/stars proposal. The high-certainty and 1%-rare
+// trigger slots remain open for future graduates.
 
 // ═══════════════════════════════════════════════════════
 // SEED
@@ -122,6 +131,7 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
 
   const wantsSat = dims.rootedness < T.satellites;
   const binary   = dims.tension    > T.binary;
+  const saturn   = dims.scope      > T.saturn;
   const comet    = dims.certainty  < T.comet;
 
   const satellites: SatelliteSpec[] = [];
@@ -142,17 +152,33 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
     }
   }
 
+  const saturnDust: { radius: number; speed: number; phase: number }[] = [];
+  if (saturn) {
+    const n = 8 + Math.floor(rand() * 3);
+    for (let i = 0; i < n; i++) {
+      saturnDust.push({
+        radius: 0.99 + rand() * 0.2,
+        speed: 0.32 + rand() * 0.22,
+        phase: rand() * Math.PI * 2,
+      });
+    }
+  }
+
   const count =
-    (satellites.length ? 1 : 0) + (binary ? 1 : 0) + (comet ? 1 : 0);
+    (satellites.length ? 1 : 0) + (binary ? 1 : 0) + (saturn ? 1 : 0) + (comet ? 1 : 0);
 
   return {
     seed,
     satellites,
-    binary, comet, count,
+    binary, saturn, comet, count,
     binaryAxis: rand() * Math.PI * 2,
     binaryTilt: (rand() - 0.5) * 1.2,
     // Wide enough apart that two suns read as two suns, not a smeared one.
     binarySep: 0.32 + (dims.tension - T.binary) * 0.5,
+    // Kept away from edge-on so the rings always read as rings.
+    saturnTilt: 0.36 + rand() * 0.16,
+    saturnSpin: rand() * Math.PI * 2,
+    saturnDust,
     // Comet orbit — inclined so the sweep stays visible as the form turns,
     // eccentric so each lap swells toward a perihelion and falls away.
     cometTilt: 0.35 + rand() * 0.6,
@@ -173,6 +199,7 @@ export function archetypeLabel(spec: ArchetypeSpec): string {
   const parts: string[] = [];
   if (spec.satellites.length) parts.push(`satellites×${spec.satellites.length}`);
   if (spec.binary) parts.push('binary');
+  if (spec.saturn) parts.push('saturn');
   if (spec.comet) parts.push('comet');
   return parts.length ? parts.join(' + ') : 'plain';
 }
@@ -395,5 +422,56 @@ export function drawArchetypeOver(
     ctx.fillStyle = rgba(color, 0.95 * b);
     ctx.arc(s.sx, s.sy, Math.max(1.2, sat.size * 0.8 * s.scale), 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // ── Saturn: the ring system, drawn over the form the way the approved
+  // /preview/stars proposal was — bright banded rings, a dark Cassini gap,
+  // and dust grains racing the bands with long trailing tails. ─────────────
+  if (spec.saturn) {
+    const tiltX = spec.saturnTilt;
+    const spin = spec.saturnSpin + time * 0.04;
+    const bands: [number, number, number][] = [
+      [0.98, 0.65, 1.6], [1.03, 0.5, 3.2], [1.09, 0.38, 4.2], [1.15, 0.24, 4.6], [1.20, 0.12, 5.0],
+    ];
+    for (const [rad, a, w] of bands) {
+      strokeRing(ctx, pj, R, rad, tiltX, spin, 96, color, a * b, w);
+    }
+    // The Cassini gap — a dark lane that makes it read as a ring system.
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i <= 96; i++) {
+      const p2 = ringPoint(1.065 * R, (i / 96) * Math.PI * 2, tiltX, spin);
+      const s2 = pj(p2.x, p2.y, p2.z);
+      if (i === 0) ctx.moveTo(s2.sx, s2.sy); else ctx.lineTo(s2.sx, s2.sy);
+    }
+    ctx.stroke();
+    ctx.restore();
+    // Ring dust: bright grains racing the bands, each with a long trailing arc.
+    for (const d of spec.saturnDust) {
+      const th = d.phase + time * d.speed;
+      let prev = pj(
+        ringPoint(d.radius * R, th, tiltX, spin).x,
+        ringPoint(d.radius * R, th, tiltX, spin).y,
+        ringPoint(d.radius * R, th, tiltX, spin).z,
+      );
+      for (let j = 1; j <= 10; j++) {
+        const p2 = ringPoint(d.radius * R, th - (j / 10) * 0.7, tiltX, spin);
+        const s2 = pj(p2.x, p2.y, p2.z);
+        ctx.beginPath();
+        ctx.strokeStyle = rgba(color, 0.5 * (1 - j / 10) * b);
+        ctx.lineWidth = 1.5 * (1 - (j / 10) * 0.6);
+        ctx.lineCap = 'round';
+        ctx.moveTo(prev.sx, prev.sy);
+        ctx.lineTo(s2.sx, s2.sy);
+        ctx.stroke();
+        prev = s2;
+      }
+      const hp = ringPoint(d.radius * R, th, tiltX, spin);
+      const hs = pj(hp.x, hp.y, hp.z);
+      softGlow(ctx, hs.sx, hs.sy, 6 * hs.scale, color, 0.4 * b);
+    }
   }
 }
