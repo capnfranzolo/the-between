@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
+import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, CROSSFADE_IN_MS } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -12,6 +12,7 @@ import LivenessCounter from '@/components/LivenessCounter';
 import SoundControl from '@/components/SoundControl';
 import ShareButton from '@/components/ShareButton';
 import ArrivalTitle from '@/components/ArrivalTitle';
+import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
@@ -52,7 +53,10 @@ const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 function LandingPageInner() {
   const searchParams = useSearchParams();
   const requestedQuestionId = searchParams.get('question');
-  const questionId = requestedQuestionId || LANDING_QUESTION_ID;
+  // The landing world: an explicit ?question= wins; otherwise a RANDOM active
+  // question is drawn once the list arrives, so the first question doesn't
+  // absorb all the traffic and returning visitors land somewhere new.
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(requestedQuestionId);
   // Arriving via another cosmos page's "+" is an explicit intent to
   // contribute, not a fresh arrival — skip the scripted intro and go
   // straight to the composer overlay.
@@ -106,6 +110,25 @@ function LandingPageInner() {
   // next star. Waiting is drifting; clicking the ring pauses on this star. ──
   const TOUR_MS = 10000;
   const [tourPaused, setTourPaused] = useState(false);
+
+  // ── Sky rail — the landing is a full member of the multiverse too ──
+  const [railQuestions, setRailQuestions] = useState<{ id: string; text: string; starCount: number }[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+
+  useEffect(() => {
+    fetch('/api/questions')
+      .then(r => r.json())
+      .then(d => {
+        const qs = (d.questions ?? []).map((q: { id: string; text: string; starCount?: number }) => ({
+          id: q.id, text: q.text, starCount: q.starCount ?? 0,
+        }));
+        setRailQuestions(qs);
+        setCurrentQuestionId(prev =>
+          prev ?? (qs.length ? qs[Math.floor(Math.random() * qs.length)].id : LANDING_QUESTION_ID));
+      })
+      .catch(() => setCurrentQuestionId(prev => prev ?? LANDING_QUESTION_ID));
+  }, []);
 
   const handleDriftArrive = useCallback((id: string) => {
     setDwellCount(c => c + 1);
@@ -187,8 +210,9 @@ function LandingPageInner() {
   useEffect(() => {
     // `mine` is proof of ownership (the exact shortcode), not a moderation
     // bypass — it only ever surfaces the requester's own star to themself.
+    if (!currentQuestionId) return;
     const qs = myShortcode ? `?mine=${encodeURIComponent(myShortcode)}` : '';
-    fetch(`/api/cosmos/${questionId}${qs}`)
+    fetch(`/api/cosmos/${currentQuestionId}${qs}`)
       .then(r => r.json())
       .then((d: CosmosData) => {
         const stars = d.stars.map(s => ({
@@ -216,10 +240,10 @@ function LandingPageInner() {
         }
       })
       .catch(() => {});
-  }, [questionId, myShortcode]);
+  }, [currentQuestionId, myShortcode]);
 
   // Phase 7 — the landing cosmos is a world too; give the bed its voice.
-  useEffect(() => { sound.setWorld(questionId); }, [questionId]);
+  useEffect(() => { if (currentQuestionId) sound.setWorld(currentQuestionId); }, [currentQuestionId]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
@@ -337,8 +361,8 @@ function LandingPageInner() {
 
   // The countdown: one timer, restarted whenever the stop or a gating overlay
   // changes; the ring animates in CSS keyed the same way, so they stay in step.
-  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout;
-  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}`;
+  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}`;
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
@@ -394,7 +418,7 @@ function LandingPageInner() {
           fromStarId: userStarId,
           toStarId: targetId,
           reason: savedReason,
-          questionId,
+          questionId: currentQuestionId,
         }),
       });
       const payload = await res.json();
@@ -408,6 +432,64 @@ function LandingPageInner() {
       }
     } catch { /* bond already shown optimistically */ }
   };
+
+  // ── Crossfade to a different question's world (sky rail). Camera stays;
+  // the tour sails to the new world's first star when the fade completes.
+  // The URL keeps `/` and mirrors the world via ?question= (replaceState —
+  // no history spam on the landing). ──
+  const performSwitch = useCallback((newId: string) => {
+    if (!currentQuestionId || newId === currentQuestionId || switchingRef.current) return;
+    switchingRef.current = true;
+    setSwitching(true);
+    sound.setWorld(newId);
+    setSelected(null);
+    setConnecting(false);
+    setConnectConfirmed(false);
+    setConnectedBondId(null);
+    setReason('');
+
+    const qs = myShortcode ? `?mine=${encodeURIComponent(myShortcode)}` : '';
+    fetch(`/api/cosmos/${newId}${qs}`)
+      .then(r => r.json())
+      .then((d: CosmosData) => {
+        const stars = d.stars.map(st => ({
+          ...st,
+          text: (st as unknown as { answer?: string }).answer ?? st.text,
+        }));
+        const atmosphere = getAtmosphere(newId);
+        sceneRef.current?.crossfadeToWorld(atmosphere, () => {
+          setData({ ...d, stars });
+          setLocalBonds([]);
+          if (myShortcode) {
+            const myStarId = stars.find(st => st.shortcode === myShortcode)?.id;
+            if (myStarId) {
+              const raw = localStorage.getItem(PENDING_BOND_KEY(myStarId));
+              if (raw) {
+                try {
+                  const b = JSON.parse(raw) as { id?: string; fromStarId: string; toStarId: string; reason: string };
+                  setLocalBonds([{ id: b.id ?? ('pending-' + b.fromStarId), from_id: b.fromStarId, to_id: b.toStarId, reason: b.reason }]);
+                } catch { /* ignore corrupt entry */ }
+              }
+            }
+          }
+          setCurrentQuestionId(newId);
+          window.history.replaceState(null, '', `/?question=${newId}`);
+          setTimeout(() => {
+            switchingRef.current = false;
+            setSwitching(false);
+            // New world — the tour sails to its first star right away.
+            sceneRef.current?.tourNext();
+          }, CROSSFADE_IN_MS);
+        });
+      })
+      .catch(() => { switchingRef.current = false; setSwitching(false); });
+  }, [currentQuestionId, myShortcode]);
+
+  const nextQuestion = useCallback(() => {
+    if (!currentQuestionId || railQuestions.length < 2) return;
+    const idx = railQuestions.findIndex(q => q.id === currentQuestionId);
+    performSwitch(railQuestions[(idx + 1) % railQuestions.length].id);
+  }, [currentQuestionId, railQuestions, performSwitch]);
 
   // "Add yours" — small "+" always available; grows into a labeled
   // invitation once the visitor has seen ~3 thoughts (or the scripted
@@ -428,17 +510,20 @@ function LandingPageInner() {
 
   return (
     <>
-      <CosmosScene
-        ref={sceneRef}
-        thoughts={thoughts}
-        bonds={sceneBonds}
-        activeStar={selected}
-        userStar={userStarId}
-        onThoughtClick={handleThoughtClick}
-        onBackgroundClick={clearSelection}
-        onDriftArrive={handleDriftArrive}
-        arrivalHold={!cameToContribute}
-      />
+      {currentQuestionId && (
+        <CosmosScene
+          ref={sceneRef}
+          thoughts={thoughts}
+          bonds={sceneBonds}
+          activeStar={selected}
+          userStar={userStarId}
+          onThoughtClick={handleThoughtClick}
+          onBackgroundClick={clearSelection}
+          onDriftArrive={handleDriftArrive}
+          initialAtmosphere={getAtmosphere(currentQuestionId)}
+          arrivalHold={!cameToContribute}
+        />
+      )}
 
       {!arrivalDone && data?.question?.text && (
         <ArrivalTitle
@@ -503,12 +588,14 @@ function LandingPageInner() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Top chrome — the question, quiet (the arrival card lands here) */}
+        {/* Top chrome — the question, quiet (the arrival card lands here),
+            with a small lozenge to travel to the next world. */}
         {arrivalDone && data?.question?.text && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
             padding: '22px 30px 18px',
-            display: 'flex', justifyContent: 'center',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            flexWrap: 'wrap', columnGap: 16, rowGap: 8,
             pointerEvents: 'none',
           }}>
             <div style={{
@@ -523,6 +610,32 @@ function LandingPageInner() {
             }}>
               {data.question.text}
             </div>
+            {railQuestions.length > 1 && (
+              <button
+                onClick={nextQuestion}
+                disabled={switching}
+                aria-label="Travel to the next question's sky"
+                style={{
+                  background: 'transparent',
+                  border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
+                  borderRadius: 999,
+                  color: BTW.textDim,
+                  padding: '5px 12px',
+                  fontFamily: SANS, fontSize: 10,
+                  letterSpacing: '0.18em', textTransform: 'uppercase',
+                  whiteSpace: 'nowrap',
+                  cursor: switching ? 'default' : 'pointer',
+                  opacity: switching ? 0.4 : 0.8,
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation',
+                  transition: 'color .2s, border-color .2s, opacity .2s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
+                onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
+              >
+                next question →
+              </button>
+            )}
           </div>
         )}
 
@@ -729,7 +842,7 @@ function LandingPageInner() {
             </button>
             <QuestionCycler
               onValidated={setPending}
-              initialQuestionId={questionId}
+              initialQuestionId={currentQuestionId ?? LANDING_QUESTION_ID}
             />
           </div>
           <style>{`@keyframes btwComposerFade { from { opacity: 0; } to { opacity: 1; } }`}</style>
