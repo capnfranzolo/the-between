@@ -147,7 +147,7 @@ function tracedPath(
 
   // Continuous point along the polyline at float index fi ∈ [0, n).
   const at = (fi: number) => {
-    let i = closed ? ((fi % n) + n) % n : Math.max(0, Math.min(n - 1.0001, fi));
+    const i = closed ? ((fi % n) + n) % n : Math.max(0, Math.min(n - 1.0001, fi));
     const i0 = Math.floor(i), f = i - i0;
     const a = proj[i0], b = proj[(i0 + 1) % n];
     return { sx: a.sx + (b.sx - a.sx) * f, sy: a.sy + (b.sy - a.sy) * f, scale: a.scale + (b.scale - a.scale) * f };

@@ -31,7 +31,7 @@ export interface BondData {
 
 /**
  * Camera mode state machine:
- *   drift   — autonomous tour: glide star→star, dwell and show the thought
+ *   drift   — the tour's sail: glide star→star; arrival hands off to focused
  *   manual  — the visitor has the stick: drag-look, wheel/pinch move, WASD
  *   focused — a star is selected (panel open); the camera frames it
  */
@@ -39,8 +39,14 @@ export type CamMode = 'drift' | 'manual' | 'focused';
 
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
-  /** Turn drift on (enters drift immediately unless a star is focused) or off. */
-  setDrifting: (on: boolean) => void;
+  /**
+   * The tour — advance to the next star: the camera sails (drift glide) to a
+   * nearby unvisited star and fires onDriftArrive when it gets there, at
+   * which point the page opens the panel (focused view). Idempotent: a no-op
+   * mid-glide, a clean re-seek otherwise. The star being departed is marked
+   * visited so the tour never re-picks it.
+   */
+  tourNext: () => void;
   /**
    * Phase 4 — sky rail world switch. Fades the current star field out,
    * lerps the sky/terrain/star/cloud atmosphere to `atmosphere`, then calls
@@ -86,8 +92,10 @@ interface CosmosSceneProps {
   onBackgroundClick?: () => void;
   /** Fires whenever the camera mode changes. Initial mode is 'drift'. */
   onModeChange?: (mode: CamMode) => void;
-  /** Fires each time a drift dwell begins on a new star — useful for counting thoughts seen. */
-  onDwell?: (thoughtId: string) => void;
+  /** Fires when a tour glide arrives at a star: the page should open that
+   *  star's panel (setSelected + flyToThought). Also the counter for
+   *  intro beats / the "Add yours" unlock. */
+  onDriftArrive?: (thoughtId: string) => void;
   /** Sky/terrain/star/cloud atmosphere for the world at mount. Defaults to
    *  DEFAULT_ATMOSPHERE. Subsequent world switches go through the
    *  `crossfadeToWorld` imperative handle, not this prop. */
@@ -160,7 +168,7 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell, initialAtmosphere, arrivalHold }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDriftArrive, initialAtmosphere, arrivalHold }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     // Mount-time only, like initialAtmosphere — the hold ends via the handle.
     const arrivalHoldRef = useRef(arrivalHold ?? false);
@@ -169,7 +177,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
-    const setDriftingFnRef = useRef<((on: boolean) => void) | null>(null);
+    const tourNextFnRef = useRef<(() => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
@@ -211,12 +219,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
     const onModeChangeRef = useRef(onModeChange);
     useEffect(() => { onModeChangeRef.current = onModeChange; }, [onModeChange]);
-    const onDwellRef = useRef(onDwell);
-    useEffect(() => { onDwellRef.current = onDwell; }, [onDwell]);
+    const onDriftArriveRef = useRef(onDriftArrive);
+    useEffect(() => { onDriftArriveRef.current = onDriftArrive; }, [onDriftArrive]);
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
-      setDrifting: (on: boolean) => setDriftingFnRef.current?.(on),
+      tourNext: () => tourNextFnRef.current?.(),
       crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) =>
         crossfadeFnRef.current?.(atmosphere, onMidpoint),
       bloomStar: (id: string) => bloomStarFnRef.current?.(id),
@@ -728,7 +736,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (id === driftTargetId) {
           driftTargetId = null;
           driftPhase = 'seek';
-          hideDwellText();
         }
         const group = thoughtGroups.get(id);
         if (!group) return;
@@ -905,7 +912,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // Exactly one mode owns the camera each frame (see CamMode docs above).
       // Initial heading toward SUN_DIRECTION (sunset straight ahead).
       let camMode: CamMode = 'drift';
-      let driftEnabled = true;   // user toggle — gates drift entry & idle resume
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
       let pitch = 0.30;
       let speed = 0;             // forward u/s — W/boost only, no baseline cruise
@@ -973,7 +979,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const DRIFT_PITCH_OFFSET = 0.17;  // star rides upper third during dwell
       const DRIFT_MAX_TURN = 0.55;      // rad/s heading cap while drifting
       const DRIFT_MAX_PITCH_RATE = 0.35;
-      let driftPhase: 'seek' | 'glide' | 'dwell' = 'seek';
+      let driftPhase: 'seek' | 'glide' | 'handoff' = 'seek';
+      let handoffT = 0; // s waiting for the page to open the panel
       let driftTargetId: string | null = null;
       const driftVisited = new Set<string>();      // shown this session
       const driftRecentEmotions: number[] = [];    // last 3 — gentle variety
@@ -982,14 +989,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let glideDur = 6;
       const glideFrom = new THREE.Vector3();
       const glideTo = new THREE.Vector3();
-      let dwellRemaining = 0;
 
       function setMode(m: CamMode) {
         if (camMode === m) return;
         if (camMode === 'drift') {
           driftPhase = 'seek';
           driftTargetId = null;
-          hideDwellText();
         }
         camMode = m;
         if (m === 'manual') {
@@ -1013,7 +1018,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const cz = camera.position.z;
         const all: { id: string; g: THREE.Group; d: number }[] = [];
         thoughtGroups.forEach((g, id) => {
-          if (id === driftTargetId) return;
+          if (id === driftTargetId || id === activeStarRef.current) return;
           const answer = (g.userData.answer as string | undefined) ?? '';
           if (!answer.trim()) return;
           const d = Math.hypot(g.position.x - cx, g.position.z - cz);
@@ -1076,7 +1081,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const g = driftTargetId ? thoughtGroups.get(driftTargetId) : null;
         if (!g) {
           driftPhase = 'seek';
-          hideDwellText();
           return;
         }
         if (driftPhase === 'glide') {
@@ -1087,23 +1091,27 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z = glideFrom.z + (glideTo.z - glideFrom.z) * e;
           faceStar(g, DRIFT_PITCH_OFFSET, dt, 1.6, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
           if (u >= 1) {
-            driftPhase = 'dwell';
-            dwellRemaining = 8 + Math.random() * 4; // 8-12 s
+            // Arrived — hand the star to the page, which opens the real
+            // focused view (panel + full live animation). The chime belongs
+            // to this moment; the page must NOT also play 'select'.
             driftVisited.add(driftTargetId!);
             const em = g.userData.emotionIndex as number;
             driftRecentEmotions.push(em);
             if (driftRecentEmotions.length > 3) driftRecentEmotions.shift();
-            showDwellText(g);
+            sound.play('chime', { emotionIndex: em });
+            driftPhase = 'handoff';
+            handoffT = 0;
+            onDriftArriveRef.current?.(driftTargetId!);
           }
         } else {
-          // dwell — hold framing (the star bobs), keep the thought readable
-          dwellRemaining -= dt;
+          // handoff — keep the framing until the activeStar prop lands and
+          // the state machine flips to focused. If the page never responds
+          // (no handler wired), fall back to seeking so the tour never dies.
+          handoffT += dt;
           faceStar(g, DRIFT_PITCH_OFFSET, dt, 2.0, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
-          updateDwellTextPosition(g);
-          if (dwellRemaining <= 0) {
-            hideDwellText();
+          if (handoffT > 3) {
             driftPhase = 'seek';
-            driftSeekDelay = 0;
+            driftSeekDelay = 0.5;
           }
         }
       }
@@ -1128,10 +1136,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }
       };
 
-      setDriftingFnRef.current = (on: boolean) => {
-        driftEnabled = on;
-        if (on && camMode === 'manual') setMode('drift');
-        if (!on && camMode === 'drift') setMode('manual');
+      tourNextFnRef.current = () => {
+        // The star being departed (imperatively, before the prop round-trip
+        // clears it) is marked visited so the seek never re-picks the star
+        // the visitor is looking at.
+        if (activeStarRef.current) driftVisited.add(activeStarRef.current);
+        if (camMode === 'drift' && driftPhase === 'glide') return; // already sailing
+        driftPhase = 'seek';
+        driftTargetId = null;
+        driftSeekDelay = 0;
+        if (camMode !== 'drift') setMode('drift');
       };
 
       // ─── WORLD CROSSFADE (Phase 4 — sky rail) ────────────────────────────
@@ -1158,7 +1172,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // switching state), but never silently drop a caller's callback by
         // overwriting a fade already in flight.
         if (fadeOutActive || fadeInActive) return;
-        hideDwellText();
         clearSmoke();
         // A moment belongs to the world it happened in.
         inscription.clear();
@@ -1207,6 +1220,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         arrivalHoldActive = false;
         fadeInActive = true;
         fadeInT = 0;
+        // First load sails straight to the nearest star (forward-biased pick).
+        driftSeekDelay = 0;
       }
       releaseArrivalFnRef.current = releaseArrival;
 
@@ -1354,83 +1369,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       smokeOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:1;';
       container.appendChild(smokeOverlay);
 
-      // ─── DRIFT DWELL TEXT ─────────────────────────────────────────────────
-      // During a drift dwell the star's answer + unique fact render as stable,
-      // readable typography (panel type rules) near — never covering — the
-      // star, persisting for the whole dwell. pointer-events:none so clicks
-      // pass through to picking / drift interruption.
-      const dwellOverlay = document.createElement('div');
-      dwellOverlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2;';
-      container.appendChild(dwellOverlay);
-      const dwellBox = document.createElement('div');
-      dwellBox.style.cssText = [
-        'position:absolute',
-        'transform:translateX(-50%)',
-        'width:min(420px, calc(100vw - 48px))',
-        'text-align:center',
-        'opacity:0',
-        'transition:opacity 0.9s ease',
-        'pointer-events:none',
-      ].join(';');
-      const dwellQuote = document.createElement('div');
-      dwellQuote.style.cssText = [
-        "font-family:'Cormorant Garamond','Playfair Display',Georgia,'Times New Roman',serif",
-        'font-weight:400',
-        'font-size:clamp(18px, 4vw, 22px)',
-        'line-height:1.45',
-        'color:#F0E8E0',
-        'text-shadow:0 1px 24px rgba(10,6,24,0.85), 0 0 8px rgba(10,6,24,0.6)',
-      ].join(';');
-      const dwellFact = document.createElement('div');
-      dwellFact.style.cssText = [
-        'margin-top:10px',
-        "font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
-        'font-style:italic',
-        'font-size:13px',
-        'line-height:1.45',
-        'color:#C8B0E0',
-        'text-shadow:0 1px 16px rgba(10,6,24,0.85)',
-      ].join(';');
-      dwellBox.appendChild(dwellQuote);
-      dwellBox.appendChild(dwellFact);
-      dwellOverlay.appendChild(dwellBox);
-
-      const dwellProj = new THREE.Vector3();
-      function updateDwellTextPosition(g: THREE.Group) {
-        if (!container) return; // hoisted fn — re-narrow for TS
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        dwellProj.copy(g.position).project(camera);
-        const sx = (dwellProj.x + 1) / 2 * w;
-        const sy = (-dwellProj.y + 1) / 2 * h;
-        // Star half-height in px (sprite half-extent ≈ 8 world units × scale;
-        // 60° vertical FOV → px = world/dist × h / (2·tan 30°))
-        const dist = camera.position.distanceTo(g.position);
-        const halfPx = (8 * g.scale.x / Math.max(dist, 1)) * (h / (2 * Math.tan(Math.PI / 6)));
-        const boxW = Math.min(420, w - 48);
-        const left = Math.max(24 + boxW / 2, Math.min(w - 24 - boxW / 2, sx));
-        const top = Math.min(sy + halfPx + 22, h * 0.62);
-        dwellBox.style.left = `${left}px`;
-        dwellBox.style.top = `${top}px`;
-      }
-      function showDwellText(g: THREE.Group) {
-        const answer = ((g.userData.answer as string | undefined) ?? '').trim();
-        if (!answer) return;
-        const fact = ((g.userData.uniqueFact as string | undefined) ?? '').trim();
-        dwellQuote.textContent = `“${answer}”`;
-        dwellFact.textContent = fact ? `— ${fact}` : '';
-        dwellFact.style.display = fact ? 'block' : 'none';
-        updateDwellTextPosition(g);
-        dwellBox.style.opacity = '1';
-        // Phase 7 — the arrival chime, pitched from the star's emotionIndex.
-        sound.play('chime', { emotionIndex: (g.userData.emotionIndex as number) ?? 3 });
-        const dwellId = g.userData.id as string | undefined;
-        if (dwellId) onDwellRef.current?.(dwellId);
-      }
-      function hideDwellText() {
-        dwellBox.style.opacity = '0';
-      }
-
       let hoverStarId: string | null = null;
       let hoverTimer: ReturnType<typeof setTimeout> | null = null;
       let smokeDisperseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1534,11 +1472,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const hitId = pickStar(e.clientX, e.clientY);
         // Pointer cursor over any pickable star
         renderer.domElement.style.cursor = hitId ? 'pointer' : '';
-        // Smoke is a hover garnish only — skip while a panel is open, and skip
-        // the current dwell star (its thought is already on screen as text)
+        // Smoke is a hover garnish only — skip while a panel is open.
         if (activeStarRef.current) return;
-        const dwellId = camMode === 'drift' && driftPhase === 'dwell' ? driftTargetId : null;
-        const smokeId = hitId && hitId !== dwellId ? hitId : null;
+        const smokeId = hitId;
         if (smokeId !== hoverStarId) {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
           hoverStarId = smokeId;
@@ -1707,9 +1643,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           } else if (camMode === 'focused') {
             // Panel dismissed — back to manual; the idle timer restarts.
             flyTargetXZ = null;
+            if (prevActiveStar) driftVisited.add(prevActiveStar); // tour moves on, not back
             setMode('manual');
-            // Deep-link / autofocus dismissal: drift begins after a short beat
-            if (focusWasAuto && driftEnabled) idleSec = IDLE_RESUME_SEC - 1.2;
+            // Deep-link / autofocus dismissal: the tour resumes after a short beat
+            if (focusWasAuto) idleSec = IDLE_RESUME_SEC - 1.2;
           }
           prevActiveStar = currentActiveStar;
         }
@@ -1855,7 +1792,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             wheelVel !== 0 || touch.pinchVel !== 0 || Math.abs(speed) > 0.5;
           if (inputActive) idleSec = 0;
           else idleSec += dt;
-          if (idleSec >= IDLE_RESUME_SEC && driftEnabled && !activeStarRef.current) {
+          if (idleSec >= IDLE_RESUME_SEC && !activeStarRef.current) {
             setMode('drift');
           }
         }
@@ -2062,7 +1999,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
-        setDriftingFnRef.current = null;
+        tourNextFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
         crossfadeFnRef.current = null;
@@ -2090,7 +2027,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
         if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
-        if (container.contains(dwellOverlay)) container.removeChild(dwellOverlay);
 
         liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
         liveStars.clear();

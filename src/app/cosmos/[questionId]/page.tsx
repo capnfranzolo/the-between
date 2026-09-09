@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createSpirograph, withSeed } from '@/lib/spirograph/renderer';
 import CosmosScene, {
-  type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode,
+  type ThoughtData, type BondData, type CosmosSceneHandle,
   CROSSFADE_IN_MS,
 } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
@@ -298,8 +298,6 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
-  // Camera mode reported by the scene — drift is the default state
-  const [sceneMode, setSceneMode] = useState<CamMode>('drift');
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
 
@@ -404,6 +402,8 @@ export default function CosmosPage() {
             const pending = pendingPopRef.current;
             pendingPopRef.current = null;
             if (pending) performSwitchRef.current(pending, false);
+            // New world — the tour sails to its first star right away.
+            else sceneRef.current?.tourNext();
           }, CROSSFADE_IN_MS);
         });
       })
@@ -550,8 +550,16 @@ export default function CosmosPage() {
     return !!localStorage.getItem(PENDING_BOND_KEY(userStarId));
   }, [userStarId, bonds]);
 
-  const handleThoughtClick = (id: string) => {
-    sound.play('select');
+  // ── The tour (drift v2) — arrival opens the REAL focused view: panel at the
+  // bottom, full live star animation, and a quiet ring counting down to the
+  // next star. Waiting is drifting; clicking the ring pauses on this star. ──
+  const TOUR_MS = 10000;
+  const [tourPaused, setTourPaused] = useState(false);
+
+  const startTourStop = (id: string) => {
+    // Your own star starts paused so a birth moment is never cut short.
+    const star = data?.stars.find(st => st.id === id);
+    setTourPaused(!!myShortcode && star?.shortcode === myShortcode);
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -559,6 +567,23 @@ export default function CosmosPage() {
     setReason('');
     sceneRef.current?.flyToThought(id);
   };
+
+  const handleThoughtClick = (id: string) => {
+    sound.play('select');
+    startTourStop(id);
+  };
+
+  // The scene already chimed for a tour arrival — no 'select' sound here.
+  const handleDriftArrive = useCallback((id: string) => {
+    const star = data?.stars.find(st => st.id === id);
+    setTourPaused(!!myShortcode && star?.shortcode === myShortcode);
+    setSelected(id);
+    setConnecting(false);
+    setConnectConfirmed(false);
+    setConnectedBondId(null);
+    setReason('');
+    sceneRef.current?.flyToThought(id);
+  }, [data, myShortcode]);
 
   const handleConnect = async (targetId: string) => {
     if (!userStarId || reason.trim().length < 4) return;
@@ -619,10 +644,35 @@ export default function CosmosPage() {
         autoFocused.current = true;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-focuses a star once cosmos data arrives; ref-guarded to run once
         setSelected(initialStarId);
+        // Your own star (a birth, or returning home) starts paused — the tour
+        // never whisks a newborn away mid-bloom.
+        if (initialShortcode === myShortcode) setTourPaused(true);
         setTimeout(() => sceneRef.current?.flyToThought(initialStarId), 80);
       }
     }
-  }, [initialShortcode, data]);
+  }, [initialShortcode, data, myShortcode]);
+
+  // The countdown: one timer, restarted whenever the stop or a gating overlay
+  // changes; the ring animates in CSS keyed the same way, so they stay in step.
+  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}`;
+  useEffect(() => {
+    if (!tourEligible || tourPaused) return;
+    const t = setTimeout(() => {
+      setSelected(null);
+      sceneRef.current?.tourNext();
+    }, TOUR_MS);
+    return () => clearTimeout(t);
+  }, [tourKey, tourPaused, tourEligible]);
+
+  const tourToggle = useCallback(() => {
+    setTourPaused(p => {
+      if (!p) return true;             // stay with this star
+      setSelected(null);               // → next star, right now
+      sceneRef.current?.tourNext();
+      return false;
+    });
+  }, []);
 
   const clearSelection = () => {
     setSelected(null);
@@ -654,7 +704,7 @@ export default function CosmosPage() {
         userStar={userStarId}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
-        onModeChange={setSceneMode}
+        onDriftArrive={handleDriftArrive}
         initialAtmosphere={getAtmosphere(questionId)}
         arrivalHold={!starParam}
       />
@@ -729,6 +779,13 @@ export default function CosmosPage() {
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
+            tour={{
+              running: tourEligible && !tourPaused,
+              paused: tourPaused,
+              durationMs: TOUR_MS,
+              restartKey: tourKey,
+              onToggle: tourToggle,
+            }}
           />
         )}
 
@@ -866,40 +923,7 @@ export default function CosmosPage() {
           )}
         </div>
 
-        {/* Drift pause/play — reflects and controls the camera's drift state */}
-        {!selected && (
-          <button
-            onClick={() => sceneRef.current?.setDrifting(sceneMode !== 'drift')}
-            aria-label={sceneMode === 'drift' ? 'Pause drift' : 'Resume drift'}
-            style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
-              display: 'flex', alignItems: 'center', gap: 8,
-              background: 'transparent',
-              border: '1px solid rgba(240,232,224,0.14)',
-              borderRadius: 999,
-              padding: '8px 16px',
-              minHeight: 36,
-              color: BTW.textDim,
-              fontFamily: SANS, fontSize: 10,
-              letterSpacing: '0.24em', textTransform: 'uppercase',
-              cursor: 'pointer', pointerEvents: 'auto',
-              touchAction: 'manipulation',
-              transition: 'color .2s, border-color .2s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.32)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.14)'; }}
-          >
-            <span aria-hidden style={{ fontSize: 9, letterSpacing: 0 }}>
-              {sceneMode === 'drift' ? '❚❚' : '▶'}
-            </span>
-            drift
-          </button>
-        )}
-
-        {/* Add star */}
+      {/* Add star */}
         <button
           onClick={() => setShowComposer(true)}
           title="Add your thought"

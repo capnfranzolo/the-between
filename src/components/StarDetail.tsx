@@ -38,6 +38,10 @@ interface StarDetailProps {
   userStar?: UserStarContext | null;
   /** Defect #5 — visitor has no star of their own in this cosmos. */
   onAnswerCTA?: () => void;
+  /** The tour countdown — a quiet ring filling toward the next star.
+   *  `running` starts the fill (restarting whenever `restartKey` changes),
+   *  `paused` freezes it (the visitor chose to stay); clicking toggles. */
+  tour?: { running: boolean; paused: boolean; durationMs: number; restartKey: string; onToggle: () => void };
   /** Phase 8 — this panel opened on the star that was just born. */
   justBorn?: boolean;
   /** Defect #9 — this is the star the visitor's own star already orbits. */
@@ -212,7 +216,7 @@ function StarMini({ dims, size, text, animVariant = 'rise' }: {
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
   connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
-  justBorn, isBondTarget, pendingRise, myStarPending,
+  justBorn, isBondTarget, pendingRise, myStarPending, tour,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -386,19 +390,23 @@ export default function StarDetail({
 
       </div>
 
-      {/* ── Sticky footer ── */}
+      {/* ── Sticky footer: share | centered action | tour ring ── */}
       <div style={{
         flexShrink: 0,
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: 12,
-        padding: '12px 24px',
+        gap: 10,
+        padding: '12px 16px 12px 20px',
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
         borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
       }}>
         <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />
 
+        <div style={{
+          flex: 1, minWidth: 0, display: 'flex',
+          justifyContent: 'center', alignItems: 'center',
+        }}>
         {showConnect && (
           // Star icon sits to the left; button keeps its natural pill height
           <button
@@ -496,7 +504,70 @@ export default function StarDetail({
             What shape are you? →
           </button>
         )}
+        </div>
+
+        {tour ? <TourRing tour={tour} /> : <div style={{ width: 34, flexShrink: 0 }} />}
       </div>
     </div>
+  );
+}
+
+// ── The tour ring — a 34px button whose ring fills toward the next star.
+// Pure CSS animation (no re-renders beside the WebGL loop): stroke-dashoffset
+// runs durationMs linear, restarted by keying on the star, frozen via
+// animation-play-state when the visitor chooses to stay. ─────────────────────
+const RING_C = 2 * Math.PI * 14; // r=14 circumference
+
+function ensureTourRingCSS() {
+  const ID = 'btw-tour-ring-css';
+  if (typeof document === 'undefined' || document.getElementById(ID)) return;
+  const el = document.createElement('style');
+  el.id = ID;
+  el.textContent = `@keyframes btwTourFill { from { stroke-dashoffset: ${RING_C}; } to { stroke-dashoffset: 0; } }`;
+  document.head.appendChild(el);
+}
+
+function TourRing({ tour }: { tour: NonNullable<StarDetailProps['tour']> }) {
+  useEffect(() => { ensureTourRingCSS(); }, []);
+  const { running, paused, durationMs, restartKey, onToggle } = tour;
+  return (
+    <button
+      key={restartKey}
+      onClick={onToggle}
+      aria-label={paused ? 'Continue to the next star' : 'Stay with this star'}
+      title={paused ? 'next star' : 'stay here'}
+      style={{
+        width: 34, height: 34, flexShrink: 0,
+        position: 'relative',
+        background: 'transparent',
+        border: 'none', padding: 0,
+        cursor: 'pointer',
+        color: BTW.textDim,
+        touchAction: 'manipulation',
+      }}
+    >
+      <svg width="34" height="34" viewBox="0 0 34 34" style={{ position: 'absolute', inset: 0 }}>
+        <circle cx="17" cy="17" r="14" fill="none" stroke={withAlpha(BTW.textPri, 0.12)} strokeWidth="1.5" />
+        {running && !paused && (
+          <circle
+            cx="17" cy="17" r="14" fill="none"
+            stroke={withAlpha(BTW.horizon[3], 0.75)} strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeDasharray={RING_C}
+            transform="rotate(-90 17 17)"
+            style={{ animation: `btwTourFill ${durationMs}ms linear forwards` }}
+          />
+        )}
+      </svg>
+      <span style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: paused ? 13 : 8, letterSpacing: 0,
+        color: paused ? BTW.horizon[3] : BTW.textDim,
+        fontFamily: SANS,
+      }}>
+        {paused ? '→' : '❚❚'}
+      </span>
+    </button>
   );
 }

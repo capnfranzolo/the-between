@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, type CamMode } from '@/components/cosmos/CosmosScene';
+import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle } from '@/components/cosmos/CosmosScene';
 import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -68,7 +68,6 @@ function LandingPageInner() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
-  const [sceneMode, setSceneMode] = useState<CamMode>('drift');
   const sceneRef = useRef<CosmosSceneHandle>(null);
 
   // ── Arrival beat — the question alone over an empty sky, then it rises ──
@@ -102,9 +101,20 @@ function LandingPageInner() {
   // lets the confirmation panel offer a real "share this pair" link.
   const [connectedBondId, setConnectedBondId] = useState<string | null>(null);
 
-  const handleDwell = useCallback(() => {
+  // ── The tour (drift v2) — arrival opens the REAL focused view: panel at the
+  // bottom, full live star animation, and a quiet ring counting down to the
+  // next star. Waiting is drifting; clicking the ring pauses on this star. ──
+  const TOUR_MS = 10000;
+  const [tourPaused, setTourPaused] = useState(false);
+
+  const handleDriftArrive = useCallback((id: string) => {
     setDwellCount(c => c + 1);
-  }, []);
+    // The scene already chimed for this arrival — no 'select' sound here.
+    const star = data?.stars.find(st => st.id === id);
+    setTourPaused(!!myShortcode && star?.shortcode === myShortcode);
+    setSelected(id);
+    sceneRef.current?.flyToThought(id);
+  }, [data, myShortcode]);
 
   // Decide, once on mount, whether this browser gets the scripted intro.
   useEffect(() => {
@@ -311,6 +321,12 @@ function LandingPageInner() {
 
   const handleThoughtClick = (id: string) => {
     sound.play('select');
+    {
+      // A fresh stop restarts the countdown; your own star starts paused so
+      // the birth moment is never cut short.
+      const star = data?.stars.find(st => st.id === id);
+      setTourPaused(!!myShortcode && star?.shortcode === myShortcode);
+    }
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -318,6 +334,28 @@ function LandingPageInner() {
     setReason('');
     sceneRef.current?.flyToThought(id);
   };
+
+  // The countdown: one timer, restarted whenever the stop or a gating overlay
+  // changes; the ring animates in CSS keyed the same way, so they stay in step.
+  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}`;
+  useEffect(() => {
+    if (!tourEligible || tourPaused) return;
+    const t = setTimeout(() => {
+      setSelected(null);
+      sceneRef.current?.tourNext();
+    }, TOUR_MS);
+    return () => clearTimeout(t);
+  }, [tourKey, tourPaused, tourEligible]);
+
+  const tourToggle = useCallback(() => {
+    setTourPaused(p => {
+      if (!p) return true;             // stay with this star
+      setSelected(null);               // → next star, right now
+      sceneRef.current?.tourNext();
+      return false;
+    });
+  }, []);
 
   const clearSelection = () => {
     setSelected(null);
@@ -398,8 +436,7 @@ function LandingPageInner() {
         userStar={userStarId}
         onThoughtClick={handleThoughtClick}
         onBackgroundClick={clearSelection}
-        onModeChange={setSceneMode}
-        onDwell={handleDwell}
+        onDriftArrive={handleDriftArrive}
         arrivalHold={!cameToContribute}
       />
 
@@ -507,6 +544,13 @@ function LandingPageInner() {
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
+            tour={{
+              running: tourEligible && !tourPaused,
+              paused: tourPaused,
+              durationMs: TOUR_MS,
+              restartKey: tourKey,
+              onToggle: tourToggle,
+            }}
           />
         )}
 
@@ -619,39 +663,6 @@ function LandingPageInner() {
         >
           The Between
         </button>
-
-        {/* Drift pause/play */}
-        {!selected && (
-          <button
-            onClick={() => sceneRef.current?.setDrifting(sceneMode !== 'drift')}
-            aria-label={sceneMode === 'drift' ? 'Pause drift' : 'Resume drift'}
-            style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
-              display: 'flex', alignItems: 'center', gap: 8,
-              background: 'transparent',
-              border: '1px solid rgba(240,232,224,0.14)',
-              borderRadius: 999,
-              padding: '8px 16px',
-              minHeight: 36,
-              color: BTW.textDim,
-              fontFamily: SANS, fontSize: 10,
-              letterSpacing: '0.24em', textTransform: 'uppercase',
-              cursor: 'pointer', pointerEvents: 'auto',
-              touchAction: 'manipulation',
-              transition: 'color .2s, border-color .2s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.32)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = 'rgba(240,232,224,0.14)'; }}
-          >
-            <span aria-hidden style={{ fontSize: 9, letterSpacing: 0 }}>
-              {sceneMode === 'drift' ? '❚❚' : '▶'}
-            </span>
-            drift
-          </button>
-        )}
 
         {/* Add yours — a bare "+" until unlocked, then a labeled invitation */}
         <button
