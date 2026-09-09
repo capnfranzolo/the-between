@@ -11,7 +11,6 @@ import ConnectionDrawer from '@/components/ConnectionDrawer';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import SkyRail from '@/components/SkyRail';
-import SoundControl from '@/components/SoundControl';
 import ArrivalTitle from '@/components/ArrivalTitle';
 import LivenessCounter from '@/components/LivenessCounter';
 import ShareButton from '@/components/ShareButton';
@@ -20,7 +19,6 @@ import UniqueOverlay from '@/components/UniqueOverlay';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
-import { sound } from '@/lib/sound';
 import { SITE_URL, BIRTH_FLAG_KEY } from '@/lib/constants';
 
 const DIM_DEFAULTS = { certainty: 0.5, warmth: 0.5, tension: 0.5, vulnerability: 0.5, scope: 0.5, rootedness: 0.5, emotionIndex: 3, curveType: 'hypotrochoid' as const, reasoning: '' };
@@ -374,9 +372,6 @@ export default function CosmosPage() {
     if (newId === currentQuestionId || switchingRef.current) return;
     switchingRef.current = true;
     setSwitching(true);
-    // Phase 7 — the ambient bed travels with the sky: start its crossfade at
-    // the same moment the visual one begins.
-    sound.setWorld(newId);
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -427,7 +422,6 @@ export default function CosmosPage() {
 
   // Phase 7 — keep the ambient bed pointed at the world on screen (mount, and
   // as a no-op backstop after a rail switch, which already called setWorld).
-  useEffect(() => { sound.setWorld(currentQuestionId); }, [currentQuestionId]);
 
   // Phase 7/8 — a star was just born: submitting navigates here, so the moment
   // arrives across a document boundary as a sessionStorage flag. The camera is
@@ -569,7 +563,6 @@ export default function CosmosPage() {
   };
 
   const handleThoughtClick = (id: string) => {
-    sound.play('select');
     startTourStop(id);
   };
 
@@ -601,7 +594,6 @@ export default function CosmosPage() {
     setConnecting(false);
     setConnectConfirmed(true);
     setConnectedBondId(null);
-    sound.play('bond'); // the finale — fires with the confirmation, not the round trip
     // …and the sky performs it: both stars bloom, and the reason is written
     // once along the orbit they now share.
     sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
@@ -723,8 +715,6 @@ export default function CosmosPage() {
         onSelect={id => performSwitch(id, true)}
         disabled={switching}
       />
-
-      <SoundControl />
 
       {data?.totals && (
         <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />

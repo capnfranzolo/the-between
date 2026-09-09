@@ -72,13 +72,8 @@ export default function ArrivalTitle({
     const t1 = window.setTimeout(() => setPhase('hold'), 40); // next frame-ish
     const t2 = window.setTimeout(beginRise, ENTER_MS + HOLD_MS);
 
-    // Any deliberate input skips the beat, same ethos as the intro — except
-    // answering the "sound?" invitation, which is not a gesture at the sky.
-    const skip = (e: Event) => {
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.('[data-btw-sound-control]')) return;
-      beginRise();
-    };
+    // Any deliberate input skips the beat, same ethos as the intro.
+    const skip = () => beginRise();
     const opts = { capture: true, passive: true } as const;
     window.addEventListener('pointerdown', skip, opts);
     window.addEventListener('keydown', skip, opts);

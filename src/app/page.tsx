@@ -9,14 +9,12 @@ import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import LivenessCounter from '@/components/LivenessCounter';
-import SoundControl from '@/components/SoundControl';
 import ShareButton from '@/components/ShareButton';
 import ArrivalTitle from '@/components/ArrivalTitle';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
-import { sound } from '@/lib/sound';
 import { SITE_URL } from '@/lib/constants';
 
 // The landing cosmos is always question 1 unless a specific question is
@@ -177,7 +175,6 @@ function LandingPageInner() {
     };
     function skip(e: Event) {
       const t = e.target as Element | null;
-      if (t?.closest?.('[data-btw-sound-control]')) return;
       remove();
       endIntro();
     }
@@ -242,8 +239,6 @@ function LandingPageInner() {
       .catch(() => {});
   }, [currentQuestionId, myShortcode]);
 
-  // Phase 7 — the landing cosmos is a world too; give the bed its voice.
-  useEffect(() => { if (currentQuestionId) sound.setWorld(currentQuestionId); }, [currentQuestionId]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
 
@@ -344,7 +339,6 @@ function LandingPageInner() {
   }, [userStarId, bonds]);
 
   const handleThoughtClick = (id: string) => {
-    sound.play('select');
     {
       // A fresh stop restarts the countdown; your own star starts paused so
       // the birth moment is never cut short.
@@ -405,7 +399,6 @@ function LandingPageInner() {
     setConnecting(false);
     setConnectConfirmed(true);
     setConnectedBondId(null);
-    sound.play('bond'); // the finale — fires with the confirmation, not the round trip
     // …and the sky performs it: both stars bloom, and the reason is written
     // once along the orbit they now share.
     sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
@@ -441,7 +434,6 @@ function LandingPageInner() {
     if (!currentQuestionId || newId === currentQuestionId || switchingRef.current) return;
     switchingRef.current = true;
     setSwitching(true);
-    sound.setWorld(newId);
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
@@ -555,8 +547,6 @@ function LandingPageInner() {
           onDone={() => setArrivalDone(true)}
         />
       )}
-
-      <SoundControl />
 
       {data?.totals && (
         <LivenessCounter thoughts={data.totals.thoughts} bonds={data.totals.bonds} />

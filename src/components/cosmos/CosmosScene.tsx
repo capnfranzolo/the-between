@@ -3,7 +3,6 @@ import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 're
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
 import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
-import { sound } from '@/lib/sound';
 import {
   BloomChoreographer, OrbitInscription, orderRingForReading,
   NEAR_SIDE, GLYPH_EM, PREFERRED_FONT, type ScreenPoint,
@@ -895,7 +894,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       bloomStarFnRef.current = (id: string) => {
         // 'arrival' — the star stays at nothing until the camera has come to
         // it, so the bloom and the birth sound land on the same beat.
-        blooms.begin(id, 'arrival', () => sound.play('birth'));
+        blooms.begin(id, 'arrival');
       };
 
       bondFinaleFnRef.current = (fromId: string, toId: string, reason: string) => {
@@ -1098,7 +1097,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             const em = g.userData.emotionIndex as number;
             driftRecentEmotions.push(em);
             if (driftRecentEmotions.length > 3) driftRecentEmotions.shift();
-            sound.play('chime', { emotionIndex: em });
             driftPhase = 'handoff';
             handoffT = 0;
             onDriftArriveRef.current?.(driftTargetId!);
@@ -1817,9 +1815,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         ));
 
         if (dt > 0.0005) {
-          sound.setCameraSpeed(
-            Math.hypot(camera.position.x - prevCamX, camera.position.z - prevCamZ) / dt,
-          );
+
         }
         prevCamX = camera.position.x;
         prevCamZ = camera.position.z;
@@ -2022,7 +2018,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
         renderer.domElement.removeEventListener('touchend',   onTouchEnd);
-        sound.setCameraSpeed(0); // the wind stops with the scene
         if (hoverTimer) clearTimeout(hoverTimer);
         if (smokeDisperseTimer) clearTimeout(smokeDisperseTimer);
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
