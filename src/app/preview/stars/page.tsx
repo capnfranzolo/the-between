@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSpirograph, CURVE_TYPES, type SpiroDimensions, type CurveType } from '@/lib/spirograph/renderer';
+import { FAMILY_TYPES, FAMILY_THRESHOLDS, type FamilyName } from '@/lib/spirograph/families';
 import { BTW, SANS, SERIF } from '@/lib/btw';
 
 // ── /preview/stars — unlisted archetype gallery ───────────────────────────────
@@ -37,10 +38,9 @@ const FORMS: FormDef[] = [
   { key: 'saturn-comet', label: 'saturn + comet', rule: 'composition', dims: { scope: 0.95, certainty: 0.2 } },
 ];
 
-// ── Proposal forms — dramatic candidates, drawn by src/lib/spirograph/
-// proposals.ts over a plain base form. Not in the product; the ones the owner
-// picks graduate into archetypes.ts with real dimension triggers. ?exp=<key>
-// renders one large. ──────────────────────────────────────────────────────────
+// ── The six families (round-6 remap) and their types. Sections below render
+// straight from FAMILY_TYPES so this page can never drift from the resolver;
+// pitches are display copy only. ?exp=<key> renders one form large. ────────────
 interface ProposalDef {
   key: string;
   label: string;
@@ -48,6 +48,17 @@ interface ProposalDef {
   /** Standalone geometries replace the spirograph entirely (round 2). */
   standalone?: boolean;
 }
+
+const T = FAMILY_THRESHOLDS;
+const FAMILY_META: Record<FamilyName, { rule: string; meaning: string }> = {
+  tangle:   { rule: 'the default — none of the below', meaning: 'inward thoughts, self-reflection (dressed by the archetypes above)' },
+  currents: { rule: `resolve < ${T.currentsResolve} or temporality < ${T.currentsMemory}`, meaning: 'wonder, longing, open questions, memory' },
+  lattice:  { rule: `resolve > ${T.latticeResolve}`, meaning: 'conviction, insight, things linked to things' },
+  radiance: { rule: `charge > ${T.radianceCharge}`, meaning: 'intensity, passion, declarations' },
+  field:    { rule: `connection > ${T.fieldConnection}`, meaning: 'growth, nature, people, the collective' },
+  void:     { rule: `sadness + vulnerability > ${T.voidVulnerability} + charge < ${T.voidCharge}`, meaning: 'grief, loss, the unsaid' },
+};
+const FAMILY_ORDER: FamilyName[] = ['tangle', 'currents', 'lattice', 'radiance', 'field', 'void'];
 
 const PROPOSALS: ProposalDef[] = [
   // Overlays on the spirograph.
@@ -158,6 +169,12 @@ function PreviewInner() {
         </div>
       ) : (
         <>
+          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginBottom: 4 }}>
+            tangle dressings
+          </div>
+          <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
+            archetypes on the classic spirograph — tangle-family stars only
+          </div>
           {FORMS.map(def => (
             <div key={def.key} style={{ marginBottom: 44 }}>
               <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
@@ -180,43 +197,44 @@ function PreviewInner() {
             </div>
           ))}
 
-          {([
-            ['proposals · overlays', 'dressings on the familiar form — ?exp=<key> for one form, large', PROPOSALS.filter(p => !p.standalone)],
-            ['proposals · new geometries', 'whole different curve families — these replace the spirograph entirely', PROPOSALS.filter(p => p.standalone)],
-          ] as const).map(([heading, sub, list]) => (
-            <div key={heading}>
-              <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginTop: 64, marginBottom: 4 }}>
-                {heading}
+          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginTop: 64, marginBottom: 4 }}>
+            the six families
+          </div>
+          <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
+            color = emotion · family = meaning · type = seeded pick within the family · ?exp=&lt;type&gt; for one form, large
+          </div>
+          {FAMILY_ORDER.map(fam => (
+            <div key={fam} style={{ marginBottom: 52 }}>
+              <div style={{ fontSize: 13, letterSpacing: '0.2em', textTransform: 'uppercase', color: BTW.textPri, opacity: 0.75, marginBottom: 2 }}>
+                {fam}
+                <span style={{ color: BTW.textDim, opacity: 0.8, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 12, fontSize: 12 }}>
+                  {FAMILY_META[fam].meaning}
+                </span>
               </div>
-              <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
-                {sub}
+              <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, opacity: 0.7, marginBottom: 10 }}>
+                trigger: {FAMILY_META[fam].rule}
               </div>
-              {list.map(prop => (
-                <div key={prop.key} style={{ marginBottom: 44 }}>
-                  <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
-                    {prop.label}
-                    <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{prop.pitch}</span>
-                    <a href={`?exp=${prop.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {([1, 3, 5] as const).map((emo, i) => {
-                      const curveType = CURVE_TYPES[(PROPOSALS.indexOf(prop) + i * 2) % CURVE_TYPES.length];
-                      const dims = {
-                        ...makeDims({ key: prop.key, label: prop.label, rule: '', dims: {} }, curveType, emo, `exp-${prop.key}-${i}`),
-                        experiment: prop.key,
-                      };
-                      return (
-                        <div key={i} style={{ textAlign: 'center' }}>
-                          <StarCell dims={dims} size={190} animate={false} />
-                          <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>
-                            {prop.standalone ? `variant ${i + 1}` : curveType}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18 }}>
+                {FAMILY_TYPES[fam].map((type, ti) => {
+                  const pitch = PROPOSALS.find(pr => pr.key === type)?.pitch;
+                  const curveType = CURVE_TYPES[(ti * 2 + fam.length) % CURVE_TYPES.length];
+                  const dims = {
+                    ...makeDims({ key: type, label: type, rule: '', dims: {} }, curveType, (ti * 2 + 1) % 7, `fam-${fam}-${type}`),
+                    resolve: 0.5, charge: 0.45, connection: 0.4, temporality: 0.5,
+                    ...(type !== 'spirograph' ? { experiment: type } : {}),
+                  };
+                  return (
+                    <div key={type} style={{ textAlign: 'center', maxWidth: 200 }}>
+                      <StarCell dims={dims} size={190} animate={false} />
+                      <div style={{ fontSize: 11, color: BTW.textDim, marginTop: -6 }}>
+                        {type !== 'spirograph'
+                          ? <a href={`?exp=${type}`} style={{ color: BTW.textDim }} title={pitch}>{type} →</a>
+                          : 'spirograph'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </>
