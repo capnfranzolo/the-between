@@ -1,9 +1,8 @@
 'use client';
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import { MIN_UNIQUE_LENGTH, MAX_UNIQUE_LENGTH } from '@/lib/constants';
+import { MAX_UNIQUE_LENGTH, MIN_UNIQUE_LENGTH, BIRTH_FLAG_KEY } from '@/lib/constants';
 import type { CurveType } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 
@@ -21,12 +20,14 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   const tooLong = text.length > MAX_UNIQUE_LENGTH;
+  // The trace is the step, not a formality (locked decision 8) — the button
+  // stays visibly inert until there is something to leave behind (defect #7).
+  const ready = text.trim().length >= MIN_UNIQUE_LENGTH && !tooLong;
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (submitting || !ready) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -43,7 +44,16 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
       const data = await res.json();
       if (data.shortcode) {
         localStorage.setItem('my_star', data.shortcode);
-        router.push(`/cosmos/${data.questionId}?star=${data.shortcode}`);
+        // Phase 7 — the cosmos this navigates to plays the birth bloom for
+        // this star, once. (Phase 8 will hang the visual bloom off the same
+        // flag; the sound already knows when the moment is.)
+        try { sessionStorage.setItem(BIRTH_FLAG_KEY, data.shortcode); } catch { /* private mode */ }
+        // Hard navigation (not router.push): this overlay can be opened from
+        // /cosmos/[questionId] itself (Phase 6 "What shape are you?" CTA), where
+        // a client-side push to the same route segment (only `?star=` differs)
+        // would not remount the page or refetch cosmos data — the new star
+        // would never appear. A full navigation guarantees the fresh mount.
+        window.location.assign(`/cosmos/${data.questionId}?star=${data.shortcode}`);
       } else {
         setError(data.error ?? 'Something went wrong. Try again.');
         setSubmitting(false);
@@ -82,10 +92,10 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
           fontFamily: SERIF, fontWeight: 400, fontSize: 26, lineHeight: 1.22,
           margin: '0 0 8px', color: BTW.textPri,
         }}>
-          Who are you?
+          Leave a trace beside your star.
         </h2>
         <div style={{ fontSize: 13, color: BTW.textDim, marginBottom: 24, lineHeight: 1.5 }}>
-          How do you identify? What&rsquo;s a favorite thing?
+          Something only you would say. Strangers will see it beside your words.
         </div>
 
         <textarea
@@ -113,8 +123,8 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
           alignItems: 'center', marginTop: 8,
           fontSize: 12, color: tooLong ? '#F0B878' : BTW.textDim, letterSpacing: '0.04em',
         }}>
-          <span style={{ opacity: text.length ? 1 : 0, transition: 'opacity .3s' }}>
-            {tooLong ? 'a little shorter' : 'optional, anonymous, simple'}
+          <span style={{ opacity: 0.9, transition: 'opacity .3s' }}>
+            {tooLong ? 'a little shorter' : 'anonymous, and yours'}
           </span>
           <span>{text.length} / {MAX_UNIQUE_LENGTH}</span>
         </div>
@@ -142,18 +152,21 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting || tooLong}
+            disabled={!ready || submitting}
             style={{
               background: 'transparent',
-              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
-              color: BTW.horizon[3], padding: '14px 28px', borderRadius: 999,
+              border: `1px solid ${ready ? withAlpha(BTW.horizon[3], 0.7) : withAlpha(BTW.textPri, 0.16)}`,
+              color: ready ? BTW.horizon[3] : BTW.textDim,
+              padding: '14px 28px', borderRadius: 999,
               fontFamily: SANS, fontSize: 13, fontWeight: 500,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              whiteSpace: 'nowrap', cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              cursor: ready && !submitting ? 'pointer' : 'default',
               backdropFilter: 'blur(6px)',
-              opacity: submitting || tooLong ? 0.6 : 1,
+              opacity: !ready || submitting ? 0.55 : 1,
+              transition: 'opacity .3s ease, border-color .3s ease, color .3s ease',
             }}
-            onMouseEnter={e => { if (!submitting) e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
+            onMouseEnter={e => { if (ready && !submitting) e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.14); }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
           >
             {submitting ? 'Entering…' : 'Enter the cosmos →'}

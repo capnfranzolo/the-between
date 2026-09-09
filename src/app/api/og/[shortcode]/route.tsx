@@ -85,11 +85,16 @@ export async function GET(
 
   if (shortcode === 'default') return defaultImage();
 
-  // 1. Fetch star
+  // 1. Fetch star — approved only. A star still awaiting the human queue
+  // never gets an unfurl-able image: the submitter's own ShareButton is
+  // active before that clears (the LLM gate never tells them they're
+  // flagged), so this is the guard that keeps a third party from ever
+  // seeing pending content via a link preview.
   const { data: star } = await supabaseServer
     .from('stars')
     .select('id, answer, unique_fact, dimensions, question_id')
     .eq('shortcode', shortcode)
+    .eq('status', 'approved')
     .single();
 
   if (!star || !star.dimensions) return defaultImage();
@@ -105,7 +110,13 @@ export async function GET(
   const answerText = truncate(star.answer ?? '');
   const byline: string | null = star.unique_fact ?? null;
 
-  const dims: SpiroDimensions = { ...DIM_DEFAULTS, ...(star.dimensions as Partial<SpiroDimensions>) };
+  // `seed: shortcode` is what makes the shared image show the *same* structural
+  // archetype (Phase 5) the cosmos and the panel mini preview draw for this star.
+  const dims: SpiroDimensions = {
+    ...DIM_DEFAULTS,
+    ...(star.dimensions as Partial<SpiroDimensions>),
+    seed: shortcode,
+  };
 
   // 3. Render spirograph at 800×800 source, displayed at 400×400 (2× sharp)
   const spiroBg = await tryRenderSpiro(dims, 800);
@@ -127,8 +138,12 @@ export async function GET(
         }}
       >
         {spiroBg && (
+          // Satori renders this JSX to a PNG, not to the DOM, so next/image
+          // (a React DOM component) cannot be used here.
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={spiroBg}
+            alt=""
             width={400}
             height={400}
             style={{ marginBottom: 40, display: 'block' }}

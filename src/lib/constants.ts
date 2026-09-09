@@ -10,3 +10,12 @@ export const MIN_REASON_LENGTH = 4;
 export const MAX_REASON_LENGTH = 100;
 
 export const SITE_URL = 'thebetween.world';
+
+/**
+ * sessionStorage key carrying the shortcode of a star that was *just* born.
+ * Submitting navigates to the cosmos, so the birth moment has to survive one
+ * document boundary: UniqueOverlay sets it, the cosmos page consumes it once
+ * (Phase 7 plays the bloom; Phase 8 will hang the visual bloom off the same
+ * flag).
+ */
+export const BIRTH_FLAG_KEY = 'btw_star_born';

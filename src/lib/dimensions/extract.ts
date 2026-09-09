@@ -8,8 +8,14 @@ const DEFAULTS: DimensionResult = {
   vulnerability: 0.5,
   scope: 0.5,
   rootedness: 0.5,
+  resolve: 0.5,
+  charge: 0.5,
+  connection: 0.5,
+  temporality: 0.5,
   emotionIndex: 3,
   reasoning: 'default',
+  publishable: true,
+  flagReason: null,
 };
 
 function clamp01(v: unknown): number {
@@ -22,6 +28,40 @@ function clampEmotion(v: unknown): number {
   return Math.max(0, Math.min(6, Math.round(v)));
 }
 
+// Safe default: never let an LLM hiccup (missing/malformed field) block a submission.
+function parsePublishable(v: unknown): boolean {
+  if (typeof v !== 'boolean') return true;
+  return v;
+}
+
+function parseFlagReason(v: unknown, publishable: boolean): string | null {
+  if (publishable) return null;
+  return typeof v === 'string' && v.trim() ? v : 'flagged';
+}
+
+// The public subset of a dimension result: what may be stored in a star's
+// dimensions JSON and returned to clients. The publish-gate verdict
+// (publishable/flagReason) never leaves the server, and unknown client-supplied
+// fields are dropped.
+export function visualDimensions(
+  r: DimensionResult
+): Omit<DimensionResult, 'publishable' | 'flagReason'> {
+  return {
+    certainty: r.certainty,
+    warmth: r.warmth,
+    tension: r.tension,
+    vulnerability: r.vulnerability,
+    scope: r.scope,
+    rootedness: r.rootedness,
+    resolve: r.resolve,
+    charge: r.charge,
+    connection: r.connection,
+    temporality: r.temporality,
+    emotionIndex: r.emotionIndex,
+    reasoning: r.reasoning,
+  };
+}
+
 export async function extractDimensions(answer: string): Promise<DimensionResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -30,16 +70,30 @@ export async function extractDimensions(answer: string): Promise<DimensionResult
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    // Identity-linked API keys must name the workspace the request acts in.
+    // Absent the env var this is a no-op, so standard keys are unaffected.
+    const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
+    const client = new Anthropic({
+      apiKey,
+      ...(workspaceId
+        ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } }
+        : {}),
+    });
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      max_tokens: 420,
       system: DIMENSION_PROMPT,
       messages: [{ role: 'user', content: answer }],
     });
 
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    let text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    // The model occasionally wraps the JSON in a markdown code fence despite being
+    // told not to — strip it rather than fail closed into defaults.
+    const fenceMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+    if (fenceMatch) text = fenceMatch[1];
     const parsed = JSON.parse(text);
+
+    const publishable = parsePublishable(parsed.publishable);
 
     const result: DimensionResult = {
       certainty:     clamp01(parsed.certainty),
@@ -48,8 +102,14 @@ export async function extractDimensions(answer: string): Promise<DimensionResult
       vulnerability: clamp01(parsed.vulnerability),
       scope:         clamp01(parsed.scope),
       rootedness:    clamp01(parsed.rootedness),
+      resolve:       clamp01(parsed.resolve),
+      charge:        clamp01(parsed.charge),
+      connection:    clamp01(parsed.connection),
+      temporality:   clamp01(parsed.temporality),
       emotionIndex:  clampEmotion(parsed.emotionIndex),
       reasoning:     typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
+      publishable,
+      flagReason:    parseFlagReason(parsed.flagReason, publishable),
     };
 
     console.log('[dimensions] extracted:', result);

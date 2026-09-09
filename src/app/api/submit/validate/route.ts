@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
 import { supabaseServer } from '@/lib/supabase/server';
 import { hashString } from '@/lib/btw';
-import { extractDimensions } from '@/lib/dimensions/extract';
+import { extractDimensions, visualDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
@@ -126,6 +126,8 @@ export async function POST(req: NextRequest) {
   }
 
   const dimResult = await extractDimensions(answer);
-  const dimensions = { ...dimResult, curveType: randomCurveType() };
+  // The publish-gate verdict never reaches the client (and is re-derived
+  // server-side in /api/submit, since these dimensions round-trip through it).
+  const dimensions = { ...visualDimensions(dimResult), curveType: randomCurveType() };
   return Response.json({ valid: true, dimensions });
 }

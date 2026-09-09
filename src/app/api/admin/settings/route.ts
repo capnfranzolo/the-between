@@ -21,9 +21,8 @@ export async function PATCH(req: NextRequest) {
   if (!key || typeof value !== 'string') {
     return Response.json({ error: 'Missing key or value' }, { status: 400 });
   }
-  // Try upsert first; if the table has no updated_at column Supabase will
-  // reject the extra field — fall back to a plain upsert without it.
-  let upsertError = (await supabaseServer
+  // settings.updated_at has a DB-side default, so it is never sent here.
+  const upsertError = (await supabaseServer
     .from('settings')
     .upsert({ key, value }, { onConflict: 'key' })).error;
 

@@ -3,7 +3,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import ShareButton from './ShareButton';
 import { SITE_URL } from '@/lib/constants';
-import { createSpirograph } from '@/lib/spirograph/renderer';
+import { createSpirograph, withSeed } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
 
@@ -12,15 +12,17 @@ export interface CosmosStarData {
   shortcode: string;
   text: string;
   unique_fact?: string | null;
-  x?: number;
-  y?: number;
-  depth?: number;
   dimensions: DimensionResult & { curveType: CurveType };
   mine?: boolean;
+  /** Only ever populated for the requester's own star (see /api/cosmos's
+   *  `mine` param) — never exposed for anyone else's. */
+  status?: string;
 }
 
 export interface UserStarContext {
   text: string;
+  /** Needed as the Phase 5 archetype seed so the mini preview matches the sky. */
+  shortcode: string;
   dimensions: CosmosStarData['dimensions'];
 }
 
@@ -29,11 +31,30 @@ interface StarDetailProps {
   hasMystar: boolean;
   userHasOutgoingBond?: boolean;
   onConnect: () => void;
-  connections?: Array<{ reason: string; relatedStarId?: string }>;
+  connections?: Array<{ id?: string; reason: string; relatedStarId?: string }>;
   onConnectionClick?: (id: string) => void;
   onDismiss?: () => void;
   nudge?: boolean;
   userStar?: UserStarContext | null;
+  /** Defect #5 — visitor has no star of their own in this cosmos. */
+  onAnswerCTA?: () => void;
+  /** The tour countdown — a quiet ring filling toward the next star.
+   *  `running` starts the fill (restarting whenever `restartKey` changes),
+   *  `paused` freezes it (the visitor chose to stay); clicking toggles. */
+  tour?: { running: boolean; paused: boolean; durationMs: number; restartKey: string; onToggle: () => void };
+  /** Phase 8 — this panel opened on the star that was just born. */
+  justBorn?: boolean;
+  /** Defect #9 — this is the star the visitor's own star already orbits. */
+  isBondTarget?: boolean;
+  /** The LLM gate spec: never say "flagged"/"pending"/"moderation" — the
+   *  submitter's own star simply "will rise into the shared sky once it's
+   *  seen" while awaiting the human queue. Only ever true on `star.mine`. */
+  pendingRise?: boolean;
+  /** The visitor's own star (elsewhere in this cosmos, not necessarily
+   *  `star`) hasn't cleared the queue yet — the connect affordance stays
+   *  hidden everywhere until it does, the same as if they had no star at
+   *  all, so a not-yet-public star can never author a public bond. */
+  myStarPending?: boolean;
 }
 
 // Spirograph geometry (outerRadius=120 * zoom=1.4) needs ~400+ px canvas.
@@ -194,7 +215,8 @@ function StarMini({ dims, size, text, animVariant = 'rise' }: {
 
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
-  connections, onConnectionClick, onDismiss, nudge, userStar,
+  connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
+  justBorn, isBondTarget, pendingRise, myStarPending, tour,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -233,8 +255,13 @@ export default function StarDetail({
     };
   }, [onDismiss]);
 
-  const showConnect = hasMystar && !star.mine && !userHasOutgoingBond;
+  const showConnect = hasMystar && !star.mine && !userHasOutgoingBond && !myStarPending;
   const showUserStar = userStar && showConnect;
+  // Defect #9 — the one-bond rule is explained where the affordance was, never
+  // silently missing. On the star the visitor actually bound to, the state is
+  // not a refusal but a fact.
+  const spentOnAnother = hasMystar && !star.mine && !!userHasOutgoingBond && !isBondTarget;
+  const spentOnThis    = hasMystar && !star.mine && !!userHasOutgoingBond && !!isBondTarget;
 
   return (
     <div
@@ -319,27 +346,42 @@ export default function StarDetail({
               {connections.map((c, i) => (
                 <div
                   key={i}
-                  onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
                   style={{
-                    paddingLeft: 14,
-                    borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
-                    fontFamily: SANS, fontSize: 13,
-                    lineHeight: 1.45, color: BTW.textSec,
-                    minHeight: 44, display: 'flex', alignItems: 'center',
-                    cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
-                    borderRadius: 4,
-                    transition: 'color .15s, background .15s',
+                    display: 'flex', alignItems: 'center', gap: 8,
                   }}
-                  onMouseEnter={c.relatedStarId && onConnectionClick ? e => {
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                  } : undefined}
-                  onMouseLeave={c.relatedStarId && onConnectionClick ? e => {
-                    e.currentTarget.style.color = '';
-                    e.currentTarget.style.background = '';
-                  } : undefined}
                 >
-                  {c.reason}
+                  <div
+                    onClick={c.relatedStarId && onConnectionClick ? () => onConnectionClick(c.relatedStarId!) : undefined}
+                    style={{
+                      flex: 1,
+                      paddingLeft: 14,
+                      borderLeft: `2px solid ${withAlpha(BTW.horizon[2], 0.45)}`,
+                      fontFamily: SANS, fontSize: 13,
+                      lineHeight: 1.45, color: BTW.textSec,
+                      minHeight: 44, display: 'flex', alignItems: 'center',
+                      cursor: c.relatedStarId && onConnectionClick ? 'pointer' : 'default',
+                      borderRadius: 4,
+                      transition: 'color .15s, background .15s',
+                    }}
+                    onMouseEnter={c.relatedStarId && onConnectionClick ? e => {
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                    } : undefined}
+                    onMouseLeave={c.relatedStarId && onConnectionClick ? e => {
+                      e.currentTarget.style.color = '';
+                      e.currentTarget.style.background = '';
+                    } : undefined}
+                  >
+                    {c.reason}
+                  </div>
+                  {c.id && (
+                    <ShareButton
+                      url={`https://${SITE_URL}/b/${c.id}`}
+                      ogImageUrl={`https://${SITE_URL}/api/og/bond/${c.id}`}
+                      shareText="A bond formed on The Between"
+                      ariaLabel="Share this pair"
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -348,19 +390,23 @@ export default function StarDetail({
 
       </div>
 
-      {/* ── Sticky footer ── */}
+      {/* ── Sticky footer: share | centered action | tour ring ── */}
       <div style={{
         flexShrink: 0,
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: 12,
-        padding: '12px 24px',
+        gap: 10,
+        padding: '12px 16px 12px 20px',
         paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
         borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
       }}>
         <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />
 
+        <div style={{
+          flex: 1, minWidth: 0, display: 'flex',
+          justifyContent: 'center', alignItems: 'center',
+        }}>
         {showConnect && (
           // Star icon sits to the left; button keeps its natural pill height
           <button
@@ -383,18 +429,145 @@ export default function StarDetail({
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             {showUserStar && (
-              <StarMini dims={userStar!.dimensions} size={36} />
+              <StarMini dims={withSeed(userStar!.dimensions, userStar!.shortcode)} size={36} />
             )}
             Connect your star →
           </button>
         )}
 
-        {star.mine && (
-          <div style={{ fontSize: 12, color: BTW.horizon[3], letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-            your star
+        {spentOnAnother && (
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.textPri, 0.14)}`,
+              color: BTW.textDim,
+              padding: '9px 14px',
+              borderRadius: 999,
+              fontSize: 10, fontWeight: 400, letterSpacing: '0.14em',
+              textTransform: 'uppercase', lineHeight: 1.5,
+              textAlign: 'right', maxWidth: 200, whiteSpace: 'normal',
+              cursor: 'default', fontFamily: SANS,
+            }}
+          >
+            your star already orbits another
+          </button>
+        )}
+
+        {spentOnThis && (
+          <div style={{
+            fontSize: 10, color: BTW.horizon[3], opacity: 0.85,
+            letterSpacing: '0.14em', textTransform: 'uppercase',
+            textAlign: 'right', maxWidth: 200, lineHeight: 1.5,
+          }}>
+            your star orbits this one
           </div>
         )}
+
+        {star.mine && (
+          <div style={{
+            fontSize: 12, color: BTW.horizon[3],
+            letterSpacing: pendingRise ? '0.08em' : justBorn ? '0.12em' : '0.18em',
+            textTransform: pendingRise ? 'none' : 'uppercase', textAlign: 'right', lineHeight: 1.5,
+            maxWidth: pendingRise ? 200 : undefined,
+            whiteSpace: pendingRise ? 'normal' : undefined,
+            fontStyle: pendingRise ? 'italic' : undefined,
+            fontFamily: pendingRise ? SERIF : undefined,
+          }}>
+            {pendingRise
+              ? 'it will rise into the shared sky once it’s seen.'
+              : justBorn ? 'your star lives here.' : 'your star'}
+          </div>
+        )}
+
+        {/* Defect #5 — shared-link visitor with no star of their own in this
+            cosmos gets a door in, not a dead end. */}
+        {!hasMystar && onAnswerCTA && (
+          <button
+            onClick={onAnswerCTA}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+              color: BTW.horizon[3],
+              padding: '10px 18px',
+              borderRadius: 999,
+              fontSize: 13, fontWeight: 500, letterSpacing: '0.08em',
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+              cursor: 'pointer', fontFamily: SANS,
+              touchAction: 'manipulation',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12)}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            What shape are you? →
+          </button>
+        )}
+        </div>
+
+        {tour ? <TourRing tour={tour} /> : <div style={{ width: 34, flexShrink: 0 }} />}
       </div>
     </div>
+  );
+}
+
+// ── The tour ring — a 34px button whose ring fills toward the next star.
+// Pure CSS animation (no re-renders beside the WebGL loop): stroke-dashoffset
+// runs durationMs linear, restarted by keying on the star, frozen via
+// animation-play-state when the visitor chooses to stay. ─────────────────────
+const RING_C = 2 * Math.PI * 14; // r=14 circumference
+
+function ensureTourRingCSS() {
+  const ID = 'btw-tour-ring-css';
+  if (typeof document === 'undefined' || document.getElementById(ID)) return;
+  const el = document.createElement('style');
+  el.id = ID;
+  el.textContent = `@keyframes btwTourFill { from { stroke-dashoffset: ${RING_C}; } to { stroke-dashoffset: 0; } }`;
+  document.head.appendChild(el);
+}
+
+function TourRing({ tour }: { tour: NonNullable<StarDetailProps['tour']> }) {
+  useEffect(() => { ensureTourRingCSS(); }, []);
+  const { running, paused, durationMs, restartKey, onToggle } = tour;
+  return (
+    <button
+      key={restartKey}
+      onClick={onToggle}
+      aria-label={paused ? 'Continue to the next star' : 'Stay with this star'}
+      title={paused ? 'next star' : 'stay here'}
+      style={{
+        width: 34, height: 34, flexShrink: 0,
+        position: 'relative',
+        background: 'transparent',
+        border: 'none', padding: 0,
+        cursor: 'pointer',
+        color: BTW.textDim,
+        touchAction: 'manipulation',
+      }}
+    >
+      <svg width="34" height="34" viewBox="0 0 34 34" style={{ position: 'absolute', inset: 0 }}>
+        <circle cx="17" cy="17" r="14" fill="none" stroke={withAlpha(BTW.textPri, 0.12)} strokeWidth="1.5" />
+        {running && !paused && (
+          <circle
+            cx="17" cy="17" r="14" fill="none"
+            stroke={withAlpha(BTW.horizon[3], 0.75)} strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeDasharray={RING_C}
+            transform="rotate(-90 17 17)"
+            style={{ animation: `btwTourFill ${durationMs}ms linear forwards` }}
+          />
+        )}
+      </svg>
+      <span style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: paused ? 13 : 8, letterSpacing: 0,
+        color: paused ? BTW.horizon[3] : BTW.textDim,
+        fontFamily: SANS,
+      }}>
+        {paused ? '→' : '❚❚'}
+      </span>
+    </button>
   );
 }

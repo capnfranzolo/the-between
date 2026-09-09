@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { CurveType, SpiroDimensions, SpirographInstance } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
@@ -136,16 +136,20 @@ function DimTable({ dims, before }: { dims: DimsShape; before?: DimsShape }) {
 
 const SPIRO_RENDER_SIZE = 480;
 
-function SpiroPreview({ dims, size = 90 }: { dims: SpiroDimensions; size?: number }) {
+// `seed` is the star's shortcode — it drives the Phase 5 structural archetype,
+// so the moderation preview shows the same form the public cosmos does. It is
+// deliberately a separate prop: it must never leak into the dims the editor saves.
+function SpiroPreview({ dims, size = 90, seed }: { dims: SpiroDimensions; size?: number; seed?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const instRef   = useRef<SpirographInstance | null>(null);
+  const seededDims = useMemo(() => (seed ? { ...dims, seed } : dims), [dims, seed]);
 
   // Create once on mount at full internal size, then CSS-scale to display size
   useEffect(() => {
     if (typeof window === 'undefined') return;
     import('@/lib/spirograph/renderer').then(({ createSpirograph }) => {
       if (!canvasRef.current) return;
-      const inst = createSpirograph(canvasRef.current, dims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
+      const inst = createSpirograph(canvasRef.current, seededDims, { size: SPIRO_RENDER_SIZE, dpr: 1 });
       // Renderer sets canvas.style.width = RENDER_SIZE+'px'; override to display size
       canvasRef.current.style.width  = size + 'px';
       canvasRef.current.style.height = size + 'px';
@@ -158,8 +162,8 @@ function SpiroPreview({ dims, size = 90 }: { dims: SpiroDimensions; size?: numbe
 
   // Update geometry on dim changes without teardown
   useEffect(() => {
-    instRef.current?.update(dims);
-  }, [dims]);
+    instRef.current?.update(seededDims);
+  }, [seededDims]);
 
   return (
     <div style={{ width: `${size}px`, height: `${size}px`, overflow: 'hidden', borderRadius: 8, flexShrink: 0 }}>
@@ -177,11 +181,13 @@ const EMOTION_COLORS = ['#4488ff', '#aa66ff', '#44cc88', '#cc6666', '#ffcc44', '
 
 function SpiroEditor({
   dims,
+  seed,
   onChange,
   onSave,
   saving,
 }: {
   dims: SpiroDimensions;
+  seed?: string;
   onChange: (d: SpiroDimensions) => void;
   onSave: () => void;
   saving: boolean;
@@ -195,7 +201,7 @@ function SpiroEditor({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Live preview — stacked above sliders so sliders get full column width */}
-      <SpiroPreview dims={dims} size={90} />
+      <SpiroPreview dims={dims} seed={seed} size={90} />
 
       {/* Controls */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -300,6 +306,7 @@ function StarDetailPanel({
 
   // Keep editedDims in sync if dims update from the server (regen / save)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors server-provided dimensions into local edit state after a regen/save
     if (dims) setEditedDims(dims as SpiroDimensions);
   }, [dims]);
 
@@ -420,6 +427,7 @@ function StarDetailPanel({
           {editedDims
             ? <SpiroEditor
                 dims={editedDims}
+                seed={star.shortcode}
                 onChange={setEditedDims}
                 onSave={saveDims}
                 saving={savingDims}
@@ -481,7 +489,7 @@ function ConnectionDetailPanel({
           </div>
         ))}
       </div>
-      <div style={{ color: '#aaa', fontStyle: 'italic', fontSize: 13, marginBottom: 12 }}>"{conn.reason}"</div>
+      <div style={{ color: '#aaa', fontStyle: 'italic', fontSize: 13, marginBottom: 12 }}>&quot;{conn.reason}&quot;</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <select value={status} onChange={e => setStatus(e.target.value as AdminConnection['status'])} style={S.input}>
           <option value="pending">pending</option>
@@ -639,6 +647,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
 
   // Only re-run when filter/search/question changes — not on every render
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears selection when the filter changes; the paged load is async
     load(0, true);
     setSelected(new Set());
     setExpanded(null);
@@ -838,7 +847,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
               type="checkbox"
               checked={selected.has(star.id)}
               onClick={e => e.stopPropagation()}
-              onChange={e => { const s = new Set(selected); e.target.checked ? s.add(star.id) : s.delete(star.id); setSelected(s); }}
+              onChange={e => { const s = new Set(selected); if (e.target.checked) s.add(star.id); else s.delete(star.id); setSelected(s); }}
             />
             <StatusBadge status={star.status} />
             <a
@@ -873,7 +882,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
                 type="checkbox"
                 checked={selected.has(star.id)}
                 onClick={e => e.stopPropagation()}
-                onChange={e => { const s = new Set(selected); e.target.checked ? s.add(star.id) : s.delete(star.id); setSelected(s); }}
+                onChange={e => { const s = new Set(selected); if (e.target.checked) s.add(star.id); else s.delete(star.id); setSelected(s); }}
               />
               <StatusBadge status={star.status} />
               <a
@@ -946,6 +955,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
     setLoading(false);
   }, [statusFilter, questionFilter]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- clears selection when the filter changes; the paged load is async
   useEffect(() => { load(0, true); setSelected(new Set()); setExpanded(null); }, [statusFilter, questionFilter, load]);
 
   async function quickAction(id: string, status: 'approved' | 'rejected') {
@@ -1026,7 +1036,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
               type="checkbox"
               checked={selected.has(conn.id)}
               onClick={e => e.stopPropagation()}
-              onChange={e => { const s = new Set(selected); e.target.checked ? s.add(conn.id) : s.delete(conn.id); setSelected(s); }}
+              onChange={e => { const s = new Set(selected); if (e.target.checked) s.add(conn.id); else s.delete(conn.id); setSelected(s); }}
             />
             <StatusBadge status={conn.status} />
             <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1053,7 +1063,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
             onClick={() => setExpanded(e => e === conn.id ? null : conn.id)}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <input type="checkbox" checked={selected.has(conn.id)} onClick={e => e.stopPropagation()} onChange={e => { const s = new Set(selected); e.target.checked ? s.add(conn.id) : s.delete(conn.id); setSelected(s); }} />
+              <input type="checkbox" checked={selected.has(conn.id)} onClick={e => e.stopPropagation()} onChange={e => { const s = new Set(selected); if (e.target.checked) s.add(conn.id); else s.delete(conn.id); setSelected(s); }} />
               <StatusBadge status={conn.status} />
               <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(conn.created_at)}</span>
             </div>
@@ -1063,7 +1073,7 @@ function ConnectionsTab({ questionFilter }: { questionFilter: string }) {
             <div style={{ fontSize: 12, color: '#aaa', marginBottom: 4 }}>
               <span style={{ ...S.mono, color: '#6af' }}>{conn.to_star?.shortcode}</span> {trunc(conn.to_star?.answer ?? '', 60)}
             </div>
-            {conn.reason && <div style={{ color: '#888', fontStyle: 'italic', fontSize: 12, marginBottom: 6 }}>"{trunc(conn.reason, 80)}"</div>}
+            {conn.reason && <div style={{ color: '#888', fontStyle: 'italic', fontSize: 12, marginBottom: 6 }}>&quot;{trunc(conn.reason, 80)}&quot;</div>}
             <div style={{ display: 'flex', gap: 0 }} onClick={e => e.stopPropagation()}>
               <button onClick={() => quickAction(conn.id, 'approved')} style={S.iconBtn}>✓</button>
               <button onClick={() => quickAction(conn.id, 'rejected')} style={S.iconBtn}>✗</button>
@@ -1133,6 +1143,7 @@ function QuestionsTab() {
       .catch(() => { setError('Failed to load questions'); setLoading(false); });
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial questions fetch on mount
   useEffect(() => { load(); }, []);
 
   function openEdit(q: AdminQuestion) {
@@ -1482,6 +1493,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!authed) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- starts the stats poll once the admin session is authed
     loadStats();
     const interval = setInterval(loadStats, 30000);
 

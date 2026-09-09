@@ -8,12 +8,16 @@ interface ShareButtonProps {
   ogImageUrl?: string;
   style?: React.CSSProperties;
   nudge?: boolean;
+  /** Override the default share caption (e.g. for a bond rather than a single star). */
+  shareText?: string;
+  /** Override the trigger's title/aria-label (e.g. "Share this pair" for a bond row). */
+  ariaLabel?: string;
 }
 
 // Social share URL builders
-function buildShareUrl(platform: string, url: string): string {
+function buildShareUrl(platform: string, url: string, shareText: string): string {
   const encoded = encodeURIComponent(url);
-  const text = encodeURIComponent("A thought on The Between — what do you know is true but can't prove?");
+  const text = encodeURIComponent(shareText);
   switch (platform) {
     case 'facebook':  return `https://www.facebook.com/sharer/sharer.php?u=${encoded}`;
     case 'x':         return `https://twitter.com/intent/tweet?url=${encoded}&text=${text}`;
@@ -78,7 +82,9 @@ const CheckIcon = () => (
 const TRAY_WIDTH  = 164;
 const TRAY_HEIGHT = 216;
 
-export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButtonProps) {
+const DEFAULT_SHARE_TEXT = "A thought on The Between — what do you know is true but can't prove?";
+
+export default function ShareButton({ url, ogImageUrl, style, nudge, shareText = DEFAULT_SHARE_TEXT, ariaLabel = 'Share this star' }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -86,6 +92,7 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
 
   useEffect(() => {
     if (!nudge) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- starts the timed nudge animation when the prop flips
     setNudgePhase('visible');
     const fadeTimer = setTimeout(() => setNudgePhase('fading'), 3200);
     const goneTimer = setTimeout(() => setNudgePhase('gone'), 3900); // 700ms for transition
@@ -157,11 +164,12 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
 
       // Fallback 1: instagram-stories URL scheme (opens Stories on iOS even
       // without the image; user can pull from camera roll)
+      // eslint-disable-next-line react-hooks/immutability -- assigning window.location.href is a navigation, not a state mutation
       window.location.href =
         'instagram-stories://share?backgroundTopColor=%231E1840&backgroundBottomColor=%23A06880';
       return;
     } else {
-      window.open(buildShareUrl(id, url), '_blank', 'noopener,noreferrer,width=600,height=500');
+      window.open(buildShareUrl(id, url, shareText), '_blank', 'noopener,noreferrer,width=600,height=500');
     }
     setOpen(false);
   };
@@ -178,8 +186,8 @@ export default function ShareButton({ url, ogImageUrl, style, nudge }: ShareButt
     <button
       ref={triggerRef}
       onClick={() => open ? setOpen(false) : openTray()}
-      title="Share this star"
-      aria-label="Share this star"
+      title={ariaLabel}
+      aria-label={ariaLabel}
       aria-expanded={open}
       style={{
         display: 'inline-flex',

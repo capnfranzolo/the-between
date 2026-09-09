@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { createSpirograph, type SpiroDimensions } from '@/lib/spirograph/renderer';
+import { createSpirograph, withSeed, type SpiroDimensions } from '@/lib/spirograph/renderer';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
 import { MAX_REASON_LENGTH, MIN_REASON_LENGTH } from '@/lib/constants';
 
-interface UserStar {
+interface DrawerStar {
   text: string;
+  /** Needed as the Phase 5 archetype seed so the mini preview matches the sky. */
+  shortcode: string;
   dimensions: SpiroDimensions;
 }
 
@@ -14,7 +16,10 @@ interface ConnectionDrawerProps {
   onChange: (val: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
-  userStar?: UserStar | null;
+  userStar?: DrawerStar | null;
+  /** Defect #8 — the star being bound to, shown beside your own: you can't
+   *  say why two thoughts belong together while looking at one of them. */
+  targetStar?: DrawerStar | null;
 }
 
 // Mini animated spirograph — renders at 600px (full geometry), CSS-scales to `size`
@@ -41,7 +46,45 @@ function StarMini({ dims, size }: { dims: SpiroDimensions; size: number }) {
   );
 }
 
-export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit, userStar }: ConnectionDrawerProps) {
+// One side of the pair — a thought and the star it belongs to, side by side
+// with the other so the reason is written with both of them in view.
+function PairSide({ label, star }: { label: string; star: DrawerStar }) {
+  return (
+    <div style={{ flex: '1 1 236px', minWidth: 0 }}>
+      <div style={{
+        fontFamily: SANS, fontSize: 10, letterSpacing: '0.24em',
+        textTransform: 'uppercase', color: BTW.textDim, marginBottom: 6,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 12px',
+        background: 'rgba(240,232,224,0.04)',
+        border: `1px solid ${withAlpha(BTW.textPri, 0.10)}`,
+        borderRadius: 12,
+      }}>
+        <StarMini dims={withSeed(star.dimensions, star.shortcode)} size={44} />
+        <div style={{
+          flex: 1,
+          fontFamily: SERIF,
+          fontStyle: 'italic',
+          fontSize: 15,
+          color: BTW.textSec,
+          lineHeight: 1.45,
+          overflow: 'hidden',
+          display: '-webkit-box',
+          WebkitLineClamp: 3,
+          WebkitBoxOrient: 'vertical',
+        }}>
+          {star.text}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit, userStar, targetStar }: ConnectionDrawerProps) {
   const ready = reason.trim().length >= MIN_REASON_LENGTH;
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -83,13 +126,34 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
         color: BTW.textPri,
         zIndex: 7,
         pointerEvents: 'auto',
+        // The pair takes room; on a phone with the keyboard up the drawer
+        // scrolls rather than pushing the CTA off-screen.
+        maxHeight: 'min(76vh, 660px)',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch' as React.CSSProperties['WebkitOverflowScrolling'],
         transition: 'bottom .15s ease-out',
         animation: 'btwRise .35s cubic-bezier(.2,.8,.3,1)',
       }}
     >
-      <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, marginBottom: 14 }}>
+      <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, marginBottom: 4 }}>
         Why do these belong together?
       </div>
+      {/* Scarcity, said plainly (locked decision 9) */}
+      <div style={{
+        fontFamily: SANS, fontSize: 11, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: BTW.horizon[3], opacity: 0.8,
+        marginBottom: 14, lineHeight: 1.5,
+      }}>
+        You orbit one star. Choose with care.
+      </div>
+
+      {/* Defect #8 — both thoughts, side by side, before the reason is written */}
+      {(userStar || targetStar) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+          {userStar && <PairSide label="yours" star={userStar} />}
+          {targetStar && <PairSide label="theirs" star={targetStar} />}
+        </div>
+      )}
 
       {/* Textarea */}
       <textarea
@@ -120,36 +184,6 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
       <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em', marginTop: 6, textAlign: 'right' }}>
         {reason.length}/{MAX_REASON_LENGTH}
       </div>
-
-      {/* User's own star context — shown above the CTA */}
-      {userStar && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          marginTop: 12,
-          padding: '10px 14px',
-          background: 'rgba(240,232,224,0.04)',
-          border: `1px solid ${withAlpha(BTW.textPri, 0.10)}`,
-          borderRadius: 12,
-        }}>
-          <StarMini dims={userStar.dimensions} size={52} />
-          <div style={{
-            flex: 1,
-            fontFamily: SERIF,
-            fontStyle: 'italic',
-            fontSize: 17,
-            color: BTW.textDim,
-            lineHeight: 1.5,
-            overflow: 'hidden',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-          }}>
-            {userStar.text}
-          </div>
-        </div>
-      )}
 
       {/* CTA */}
       <button

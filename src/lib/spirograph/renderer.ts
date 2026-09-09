@@ -5,6 +5,13 @@
  * Renders animated firefly tracers on a 3D-projected parametric curve.
  */
 
+import {
+  resolveArchetype, drawArchetypeUnder, drawArchetypeOver,
+  type ArchetypeSpec, type Projector, type RGB,
+} from './archetypes';
+import { drawProposal, isStandaloneProposal } from './proposals';
+import { resolveFamily, type FamilyName } from './families';
+
 // ═══════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════
@@ -18,6 +25,27 @@ export interface SpiroDimensions {
   rootedness: number;
   emotionIndex: number;
   curveType: CurveType;
+  /**
+   * Phase 5 — the star's shortcode, used as the archetype seed so the cosmos,
+   * the panel mini preview and the OG image resolve the same structure.
+   * Optional: pre-birth previews have no shortcode and fall back to a hash of
+   * the dimension values (see `archetypeSeed`).
+   */
+  seed?: string;
+  /**
+   * The four semantic axes (round-6 remap) — they choose the star's FAMILY.
+   * Optional: stars extracted before the remap lack them and resolve to the
+   * classic tangle/spirograph, pixel-identical to their prior look.
+   */
+  resolve?: number;
+  charge?: number;
+  connection?: number;
+  temporality?: number;
+  /**
+   * /preview/stars only — overrides the resolved family type with a specific
+   * form from `proposals.ts`. Never set on stored dimensions.
+   */
+  experiment?: string;
 }
 
 export type CurveType = 'hypotrochoid' | 'epitrochoid' | 'rose' | 'lissajous' | 'rhodonea';
@@ -71,6 +99,12 @@ interface Geometry {
   vulnerability: number;
   curveType: CurveType;
   certainty: number;
+  /** Phase 5 — structural archetype resolved once, alongside the geometry. */
+  arch: ArchetypeSpec;
+  /** Round 6 — the star's family and concrete form ('spirograph' or a
+   *  proposals.ts kind), resolved once here so every surface agrees. */
+  family: FamilyName;
+  form: string;
 }
 
 interface CamState {
@@ -227,6 +261,9 @@ function project(x: number, y: number, z: number, cam: CamState): { sx: number; 
 
 function computeGeometry(dims: SpiroDimensions): Geometry {
   const { certainty, warmth, tension, vulnerability, scope, rootedness, curveType } = dims;
+  const arch = resolveArchetype(dims);
+  const famSpec = resolveFamily(dims, arch.seed);
+
   const R = CONFIG.outerRadius;
 
   const petalTarget = CONFIG.petals.min + vulnerability * (CONFIG.petals.max - CONFIG.petals.min);
@@ -237,7 +274,9 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   const totalTheta = totalRevolutions * 2 * Math.PI * (petals + 1);
 
   const maxTilt = scope * CONFIG.maxTiltFactor;
-  const angularSpeed = CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm);
+  // Round 6 — charge is a global speed dial: burning thoughts move quicker.
+  const chargeMult = 0.75 + (dims.charge ?? 0.5) * 0.5;
+  const angularSpeed = (CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm)) * chargeMult;
   const fireflyCount = Math.max(CONFIG.fireflies.min,
     Math.round((1 - rootedness) * (CONFIG.fireflies.max - CONFIG.fireflies.min) + CONFIG.fireflies.min));
 
@@ -248,7 +287,9 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   return {
     R, r, d, petals, totalRevolutions, totalTheta, maxTilt,
     angularSpeed, fireflyCount, tailFraction, fadeExp, strokeBase,
-    scope, tension, vulnerability, curveType, certainty,
+    scope, tension, vulnerability, curveType, certainty, arch,
+    family: famSpec.family,
+    form: dims.experiment ?? famSpec.type,
   };
 }
 
@@ -278,6 +319,24 @@ function renderFrame(
   const pj = (pt: { x: number; y: number; z: number }) => project(pt.x, pt.y, pt.z, cam);
 
   ctx.clearRect(0, 0, logW, logH);
+
+  // Phase 5 — structural archetypes.
+  const archR = CONFIG.outerRadius;
+  const projector: Projector = (x, y, z) => project(x, y, z, cam);
+
+  // Round 6 — standalone family forms replace the spirograph entirely. They
+  // share `projector`, so the same slow world-turn animates them.
+  if (geo.form !== 'spirograph' && isStandaloneProposal(geo.form)) {
+    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
+      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+    });
+    return;
+  }
+
+  // Archetype dressings (satellites/binary/saturn/comet) belong to the
+  // tangle family — overlay forms (pulsar, eclipse) ride a bare spirograph.
+  const dressed = geo.form === 'spirograph';
+  if (dressed) drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
 
   // Ghost trace
   if (geo.certainty > CONFIG.ghostThreshold) {
@@ -352,12 +411,34 @@ function renderFrame(
     ctx.arc(headProj.sx, headProj.sy, glowR, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // Phase 5 — foreground structures (binary cores, satellite motes) draw last
+  // so they stay legible over the firefly tangle.
+  if (dressed) drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+
+  // Overlay family forms (pulsar's beams, void's eclipse) draw over the bare
+  // spirograph — they restyle or occlude the base form.
+  if (geo.form !== 'spirograph') {
+    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
+      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+    });
+  }
 }
 
 
 // ═══════════════════════════════════════════════════════
 // PUBLIC API
 // ═══════════════════════════════════════════════════════
+
+/**
+ * Phase 5 — stamps a star's shortcode onto its dimensions as the archetype
+ * seed. Call this wherever dimensions come out of the database and are about to
+ * be drawn, so the cosmos sprite, the panel mini preview and the OG image all
+ * resolve the same structure for the same star.
+ */
+export function withSeed<T extends SpiroDimensions>(dims: T, shortcode: string | null | undefined): T {
+  return shortcode ? { ...dims, seed: shortcode } : dims;
+}
 
 export function randomCurveType(): CurveType {
   return CURVE_TYPES[Math.floor(Math.random() * CURVE_TYPES.length)];

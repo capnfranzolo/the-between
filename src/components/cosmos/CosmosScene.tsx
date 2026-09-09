@@ -1,7 +1,12 @@
 'use client';
-import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstance } from '@/lib/spirograph/renderer';
+import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
+import {
+  BloomChoreographer, OrbitInscription, orderRingForReading,
+  NEAR_SIDE, GLYPH_EM, PREFERRED_FONT, type ScreenPoint,
+} from './moments';
 
 export interface ThoughtData {
   id: string;
@@ -10,8 +15,10 @@ export interface ThoughtData {
   z: number;
   emotionIndex: number;
   dimensions: SpiroDimensions;
-  /** Answer text — shown as a smoke/ghost effect on hover */
+  /** Answer text — shown during drift dwell and as a smoke/ghost effect on hover */
   answer?: string;
+  /** Unique fact — the byline shown under the answer during drift dwell */
+  uniqueFact?: string;
 }
 
 export interface BondData {
@@ -21,22 +28,81 @@ export interface BondData {
   reason?: string;
 }
 
+/**
+ * Camera mode state machine:
+ *   drift   — the tour's sail: glide star→star; arrival hands off to focused
+ *   manual  — the visitor has the stick: drag-look, wheel/pinch move, WASD
+ *   focused — a star is selected (panel open); the camera frames it
+ */
+export type CamMode = 'drift' | 'manual' | 'focused';
+
 export interface CosmosSceneHandle {
   flyToThought: (id: string) => void;
-  turnLeft: () => void;
-  turnRight: () => void;
-  setPitch: (p: number) => void;
+  /**
+   * The tour — advance to the next star: the camera sails (drift glide) to a
+   * nearby unvisited star and fires onDriftArrive when it gets there, at
+   * which point the page opens the panel (focused view). Idempotent: a no-op
+   * mid-glide, a clean re-seek otherwise. The star being departed is marked
+   * visited so the tour never re-picks it.
+   */
+  tourNext: () => void;
+  /**
+   * Phase 4 — sky rail world switch. Fades the current star field out,
+   * lerps the sky/terrain/star/cloud atmosphere to `atmosphere`, then calls
+   * `onMidpoint` (once the fade-out completes) so the caller can swap the
+   * `thoughts`/`bonds` props to the new question's data — newly-appearing
+   * stars fade in automatically. The camera's position/orientation and the
+   * drift/manual/focused mode are untouched; drift's visited-set resets so
+   * it explores the new world fresh.
+   */
+  crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) => void;
+  /**
+   * Phase 8 — star birth. Holds the star at nothing, then blooms it in place
+   * (scale/opacity/glow) once the camera has glided close enough for the
+   * moment to read. The birth sound fires on that same frame, so the bloom is
+   * never heard before it is seen.
+   */
+  bloomStar: (id: string) => void;
+  /**
+   * Phase 8 — the bond finale. Both stars bloom together and the reason is
+   * written once along the orbit they now share, then it is gone.
+   */
+  bondFinale: (fromId: string, toId: string, reason: string) => void;
+  /**
+   * Arrival beat — when the scene mounted with `arrivalHold`, ends the hold:
+   * the thought stars fade in and drift begins. The sky, terrain, clouds and
+   * ambient background starfield were live the whole time; only the thought
+   * stars and the camera were waiting. No-op if the hold already ended.
+   */
+  releaseArrival: () => void;
 }
+
+// Crossfade timing — exported so callers can guard re-entrancy for exactly
+// this long without duplicating the constant.
+export const CROSSFADE_OUT_MS = 650;
+export const CROSSFADE_IN_MS = 900;
 
 interface CosmosSceneProps {
   thoughts?: ThoughtData[];
   bonds?: BondData[];
   activeStar?: string | null;
   userStar?: string | null;
-  paused?: boolean;
-  mode?: 'passive' | 'active';
   onThoughtClick?: (id: string) => void;
   onBackgroundClick?: () => void;
+  /** Fires whenever the camera mode changes. Initial mode is 'drift'. */
+  onModeChange?: (mode: CamMode) => void;
+  /** Fires when a tour glide arrives at a star: the page should open that
+   *  star's panel (setSelected + flyToThought). Also the counter for
+   *  intro beats / the "Add yours" unlock. */
+  onDriftArrive?: (thoughtId: string) => void;
+  /** Sky/terrain/star/cloud atmosphere for the world at mount. Defaults to
+   *  DEFAULT_ATMOSPHERE. Subsequent world switches go through the
+   *  `crossfadeToWorld` imperative handle, not this prop. */
+  initialAtmosphere?: AtmosphereConfig;
+  /** Arrival beat — mount with the thought stars hidden and drift paused
+   *  (sky/terrain/clouds render normally) until `releaseArrival()` is called.
+   *  Read once at mount; used by the pages' centered-question title card. */
+  arrivalHold?: boolean;
 }
 
 interface StarSpiro {
@@ -69,6 +135,26 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
+// Builds the sky dome's horizon→zenith gradient as a 256×1 canvas texture —
+// smooth interpolation, no GLSL banding. Shared by the mount-time sky and
+// every Phase 4 world-switch crossfade (see AtmosphereConfig.skyStops).
+function buildSkyGradientTexture(stops: SkyStop[]): THREE.CanvasTexture {
+  const gc = document.createElement('canvas');
+  gc.width = 256; gc.height = 1;
+  const gx = gc.getContext('2d')!;
+  const grd = gx.createLinearGradient(0, 0, 256, 0);
+  for (const s of stops) grd.addColorStop(s.offset, s.color);
+  gx.fillStyle = grd;
+  gx.fillRect(0, 0, 256, 1);
+  const tex = new THREE.CanvasTexture(gc);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (tex as any).encoding = 3001; // THREE.sRGBEncoding
+  return tex;
+}
+
 const MAX_BAKED = 50;
 // Extra slots for on-demand dot→spiro upgrades as the camera approaches.
 // Keeps memory bounded while ensuring nearby stars never stay as blobs.
@@ -76,61 +162,74 @@ const MAX_PROXIMITY_UPGRADES = 20;
 // Canvas must be large enough that the glow (outerRadius 120 × zoom 1.4 + yOffset 30)
 // never clips. At size=560 the bottom margin is ~82px — safe even with glow overlap.
 const SPIRO_SIZE_LIVE = 560; // used for both baked and live so visual size stays identical
-const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at stop-dist
+const SELECTED_SCALE_MULT = 2.0; // ~⅓ of viewport height when focused at stop-dist
 // Sun sits slightly below horizon, directly in front of initial camera heading
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, paused, mode, onThoughtClick, onBackgroundClick }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDriftArrive, initialAtmosphere, arrivalHold }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const modeRef = useRef<'passive' | 'active'>('active');
+    // Mount-time only, like initialAtmosphere — the hold ends via the handle.
+    const arrivalHoldRef = useRef(arrivalHold ?? false);
     const perfOverlayRef = useRef<HTMLPreElement>(null);
 
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
     const removeThoughtFnRef = useRef<((id: string) => void) | null>(null);
     const flyToFnRef = useRef<((id: string) => void) | null>(null);
-    const turnRightFnRef = useRef<(() => void) | null>(null);
-    const turnLeftFnRef  = useRef<(() => void) | null>(null);
-    const setPitchFnRef  = useRef<((p: number) => void) | null>(null);
+    const tourNextFnRef = useRef<(() => void) | null>(null);
     const addBondFnRef = useRef<((b: BondData) => void) | null>(null);
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
+    const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
+    const bloomStarFnRef = useRef<((id: string) => void) | null>(null);
+    const bondFinaleFnRef = useRef<((fromId: string, toId: string, reason: string) => void) | null>(null);
+    const releaseArrivalFnRef = useRef<(() => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
     const activeBondIds = useRef<Set<string>>(new Set());
 
     // Readable by the Three.js animation loop without re-running setup
     const activeStarRef = useRef<string | null>(activeStar ?? null);
     const userStarRef = useRef<string | null>(userStar ?? null);
-    const pausedRef = useRef<boolean>(paused ?? false);
     useEffect(() => { activeStarRef.current = activeStar ?? null; }, [activeStar]);
     useEffect(() => { userStarRef.current = userStar ?? null; }, [userStar]);
-    useEffect(() => { pausedRef.current = paused ?? false; }, [paused]);
-    useEffect(() => { modeRef.current = mode ?? 'active'; }, [mode]);
 
     // Baked-in sky/terrain values
     const SKY_BRIGHT  = 1.10;
     const TERRAIN_BRIGHT = 1.00;
     const BASE_CAM_Y  = 65;
 
-    // Baked star/terrain tweaks
-    const dbgTerrainGlowRef = useRef(0.46);
-    const dbgStarDensityRef = useRef(0.80);
-    const dbgStarSpeedRef   = useRef(0.50);
-    const dbgStarFloorRef   = useRef(0.65);
+    // The atmosphere this scene mounted with — subsequent world switches go
+    // through crossfadeToWorld(), not this prop (see CosmosSceneProps).
+    const atmo0 = initialAtmosphere ?? DEFAULT_ATMOSPHERE;
 
-    const gradLiftRef  = useRef(0.22);
-    const gradSteepRef = useRef(1.85);
-    const sunShiftRef  = useRef(0.05);
+    // Baked star/terrain tweaks — seeded from the mount-time atmosphere,
+    // then live-tweened by crossfadeToWorld() on every subsequent switch.
+    const dbgTerrainGlowRef = useRef(atmo0.terrainGlow);
+    const dbgStarDensityRef = useRef(atmo0.starDensity);
+    const dbgStarSpeedRef   = useRef(0.50);
+    const dbgStarFloorRef   = useRef(atmo0.starFloor);
+
+    const gradLiftRef  = useRef(atmo0.gradLift);
+    const gradSteepRef = useRef(atmo0.gradSteep);
+    const sunShiftRef  = useRef(atmo0.sunShift);
 
     const onClickRef = useRef(onThoughtClick);
     useEffect(() => { onClickRef.current = onThoughtClick; }, [onThoughtClick]);
     const onBgClickRef = useRef(onBackgroundClick);
     useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
+    const onModeChangeRef = useRef(onModeChange);
+    useEffect(() => { onModeChangeRef.current = onModeChange; }, [onModeChange]);
+    const onDriftArriveRef = useRef(onDriftArrive);
+    useEffect(() => { onDriftArriveRef.current = onDriftArrive; }, [onDriftArrive]);
 
     useImperativeHandle(ref, () => ({
       flyToThought: (id: string) => flyToFnRef.current?.(id),
-      turnLeft:  () => turnLeftFnRef.current?.(),
-      turnRight: () => turnRightFnRef.current?.(),
-      setPitch:  (p: number) => setPitchFnRef.current?.(p),
+      tourNext: () => tourNextFnRef.current?.(),
+      crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) =>
+        crossfadeFnRef.current?.(atmosphere, onMidpoint),
+      bloomStar: (id: string) => bloomStarFnRef.current?.(id),
+      bondFinale: (fromId: string, toId: string, reason: string) =>
+        bondFinaleFnRef.current?.(fromId, toId, reason),
+      releaseArrival: () => releaseArrivalFnRef.current?.(),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -170,10 +269,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uTime:      { value: 0 },
           uSunDir:    { value: SUN_DIRECTION },
           uBrightness:{ value: SKY_BRIGHT },
-          uGradSteep: { value: 1.85 },
-          uGradLift:  { value: 0.22 },
-          uSunShift:  { value: 0.05 },
+          uGradSteep: { value: atmo0.gradSteep },
+          uGradLift:  { value: atmo0.gradLift },
+          uSunShift:  { value: atmo0.sunShift },
           uSkyGrad:   { value: null as THREE.Texture | null },
+          // Phase 4 world-switch crossfade: uSkyGrad is world A (current),
+          // uSkyGradB is world B (incoming); uMix eases 0→1 during the fade,
+          // then CosmosScene commits B → A and resets uMix to 0.
+          uSkyGradB:  { value: null as THREE.Texture | null },
+          uMix:       { value: 0 },
         },
         vertexShader: `
           varying vec3 vWorldDir;
@@ -190,6 +294,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           uniform float     uGradLift;
           uniform float     uSunShift;
           uniform sampler2D uSkyGrad;
+          uniform sampler2D uSkyGradB;
+          uniform float     uMix;
           varying vec3      vWorldDir;
 
           void main() {
@@ -202,8 +308,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
             float sunInfluence = pow(max(sunAz, 0.0), 3.0) * horizBand;
             t = clamp(t - sunInfluence * uSunShift, 0.0, 1.0);
 
-            // Sample baked gradient texture — smooth, no GLSL banding
-            vec3 color = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
+            // Sample baked gradient textures — smooth, no GLSL banding —
+            // and cross-dissolve between the current and incoming world.
+            vec3 colorA = texture2D(uSkyGrad, vec2(t, 0.5)).rgb;
+            vec3 colorB = texture2D(uSkyGradB, vec2(t, 0.5)).rgb;
+            vec3 color = mix(colorA, colorB, uMix);
             color *= 1.0 + sin(uTime * 0.07) * 0.006;
             gl_FragColor = vec4(color * uBrightness, 1.0);
           }
@@ -212,38 +321,17 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const skyDome = new THREE.Mesh(skyGeo, skyMat);
       scene.add(skyDome);
 
-      // Build gradient texture from canvas so interpolation is smooth (no GLSL banding).
-      // t=0 (x=0) = warm amber at horizon; t=1 (x=255) = space-blue night at zenith.
+      // Build the initial gradient texture from canvas so interpolation is
+      // smooth (no GLSL banding). t=0 (x=0) = warm amber at horizon; t=1
+      // (x=255) = space-blue night at zenith. Parameterized by atmo0.skyStops
+      // so each world's variant (src/lib/atmosphere.ts) reuses this exact
+      // build path — see buildSkyGradientTexture() below.
       {
-        const gc = document.createElement('canvas');
-        gc.width = 256; gc.height = 1;
-        const gx = gc.getContext('2d')!;
-        const grd = gx.createLinearGradient(0, 0, 256, 0);
-        // t=0 is below horizon (blocked by terrain); t=1 is zenith.
-        // Warm colors compressed into the bottom 8% so they appear only right at the horizon.
-        // Dark purple-to-black owns the upper 80%+ of the sky.
-        // Extra stops near black to smooth the banding at the top.
-        grd.addColorStop(0.000, '#d2a480'); // warm peach    (below horizon, hidden by terrain)
-        grd.addColorStop(0.025, '#b27f7e'); // rose-peach
-        grd.addColorStop(0.055, '#93637f'); // mauve-rose
-        grd.addColorStop(0.085, '#7d5784'); // purple-mauve  ← around visible horizon
-        grd.addColorStop(0.140, '#5a4177'); // purple
-        grd.addColorStop(0.230, '#443469'); // deep purple
-        grd.addColorStop(0.360, '#352a5c'); // dark blue-purple
-        grd.addColorStop(0.510, '#2a214e'); // deeper
-        grd.addColorStop(0.680, '#1e1a40'); // near-black blue
-        grd.addColorStop(0.820, '#120e30'); // smooth transition
-        grd.addColorStop(0.920, '#07051e'); // deep space
-        grd.addColorStop(1.000, '#000000'); // black at zenith
-        gx.fillStyle = grd;
-        gx.fillRect(0, 0, 256, 1);
-        const skyGradTex = new THREE.CanvasTexture(gc);
-        skyGradTex.minFilter = THREE.LinearFilter;
-        skyGradTex.magFilter = THREE.LinearFilter;
-        skyGradTex.wrapS = THREE.ClampToEdgeWrapping;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (skyGradTex as any).encoding = 3001; // THREE.sRGBEncoding
+        const skyGradTex = buildSkyGradientTexture(atmo0.skyStops);
         skyMat.uniforms.uSkyGrad.value = skyGradTex;
+        // Seed B with the same texture — irrelevant while uMix=0, and
+        // crossfadeToWorld() always replaces it before ever raising uMix.
+        skyMat.uniforms.uSkyGradB.value = skyGradTex;
       }
 
       // ─── BACKGROUND STARS ───
@@ -378,41 +466,53 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       // ─── CLOUDS ───
       // 8 clouds on desktop (was 30), 0 on mobile. Smaller textures reduce alpha overdraw.
+      // Each cloud's blob layout is stored so a Phase 4 world switch can
+      // re-tint the same shapes (paintCloudCanvas) without regenerating them.
+      interface CloudBlob { x: number; y: number; r: number; a: number }
       const isMobileCloud = /iPhone|iPad|Android/i.test(navigator.userAgent);
       const cloudCount = isMobileCloud ? 0 : 8;
-      const clouds: THREE.Sprite[] = [];
-      for (let i = 0; i < cloudCount; i++) {
-        const cw = 256; const ch = 100; // was 512×200 — same visual, ¼ the memory
-        const c = document.createElement('canvas');
-        c.width = cw; c.height = ch;
-        const ctx = c.getContext('2d')!;
-        const blobs = 10 + Math.floor(Math.random() * 8);
-        for (let j = 0; j < blobs; j++) {
-          const x = 60 + Math.random() * (cw - 120);
-          const y = 30 + Math.random() * (ch - 60);
-          const r = 40 + Math.random() * 80;
-          const a = 0.045 + Math.random() * 0.07;
-          const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-          grad.addColorStop(0, `rgba(140,100,170,${a})`);
-          grad.addColorStop(0.6, `rgba(140,100,170,${a * 0.4})`);
-          grad.addColorStop(1, 'rgba(140,100,170,0)');
+      const CLOUD_W = 256; const CLOUD_H = 100; // was 512×200 — same visual, ¼ the memory
+      function paintCloudCanvas(ctx: CanvasRenderingContext2D, blobs: CloudBlob[], tint: string) {
+        ctx.clearRect(0, 0, CLOUD_W, CLOUD_H);
+        for (const b of blobs) {
+          const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+          grad.addColorStop(0, `rgba(${tint},${b.a})`);
+          grad.addColorStop(0.6, `rgba(${tint},${b.a * 0.4})`);
+          grad.addColorStop(1, `rgba(${tint},0)`);
           ctx.fillStyle = grad;
-          ctx.fillRect(0, 0, cw, ch);
+          ctx.fillRect(0, 0, CLOUD_W, CLOUD_H);
         }
         // Feather all four edges so there's no hard canvas boundary
-        const vigX = ctx.createLinearGradient(0, 0, cw * 0.25, 0);
+        const vigX = ctx.createLinearGradient(0, 0, CLOUD_W * 0.25, 0);
         vigX.addColorStop(0, 'rgba(0,0,0,1)'); vigX.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigX2 = ctx.createLinearGradient(cw, 0, cw * 0.75, 0);
+        const vigX2 = ctx.createLinearGradient(CLOUD_W, 0, CLOUD_W * 0.75, 0);
         vigX2.addColorStop(0, 'rgba(0,0,0,1)'); vigX2.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigY = ctx.createLinearGradient(0, 0, 0, ch * 0.35);
+        const vigY = ctx.createLinearGradient(0, 0, 0, CLOUD_H * 0.35);
         vigY.addColorStop(0, 'rgba(0,0,0,1)'); vigY.addColorStop(1, 'rgba(0,0,0,0)');
-        const vigY2 = ctx.createLinearGradient(0, ch, 0, ch * 0.65);
+        const vigY2 = ctx.createLinearGradient(0, CLOUD_H, 0, CLOUD_H * 0.65);
         vigY2.addColorStop(0, 'rgba(0,0,0,1)'); vigY2.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.globalCompositeOperation = 'destination-out';
         for (const vig of [vigX, vigX2, vigY, vigY2]) {
-          ctx.fillStyle = vig; ctx.fillRect(0, 0, cw, ch);
+          ctx.fillStyle = vig; ctx.fillRect(0, 0, CLOUD_W, CLOUD_H);
         }
         ctx.globalCompositeOperation = 'source-over';
+      }
+      const clouds: THREE.Sprite[] = [];
+      for (let i = 0; i < cloudCount; i++) {
+        const c = document.createElement('canvas');
+        c.width = CLOUD_W; c.height = CLOUD_H;
+        const ctx = c.getContext('2d')!;
+        const blobCount = 10 + Math.floor(Math.random() * 8);
+        const blobs: CloudBlob[] = [];
+        for (let j = 0; j < blobCount; j++) {
+          blobs.push({
+            x: 60 + Math.random() * (CLOUD_W - 120),
+            y: 30 + Math.random() * (CLOUD_H - 60),
+            r: 40 + Math.random() * 80,
+            a: 0.045 + Math.random() * 0.07,
+          });
+        }
+        paintCloudCanvas(ctx, blobs, atmo0.cloudTint);
         const tex = new THREE.CanvasTexture(c);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.3 });
         const sprite = new THREE.Sprite(mat);
@@ -420,15 +520,41 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const dist = 20 + Math.random() * 280;
         sprite.position.set(Math.cos(angle) * dist, 25 + Math.random() * 50, Math.sin(angle) * dist);
         sprite.scale.set(30 + Math.random() * 50, 15 + Math.random() * 20, 1);
-        sprite.userData = { dx: (Math.random() - 0.5) * 0.3, dz: (Math.random() - 0.5) * 0.3 };
+        sprite.userData = {
+          dx: (Math.random() - 0.5) * 0.3, dz: (Math.random() - 0.5) * 0.3,
+          canvas: c, ctx, blobs,
+        };
         scene.add(sprite);
         clouds.push(sprite);
       }
 
+      // Re-tints every cloud's existing blob layout in place — Phase 4 world
+      // switch only, called once per crossfade (not blended; clouds are a
+      // quiet background garnish and the retint is not visually abrupt).
+      function applyCloudTint(tint: string) {
+        for (const cloud of clouds) {
+          const { ctx, blobs } = cloud.userData as { ctx: CanvasRenderingContext2D; blobs: CloudBlob[] };
+          paintCloudCanvas(ctx, blobs, tint);
+          ((cloud.material as THREE.SpriteMaterial).map as THREE.CanvasTexture).needsUpdate = true;
+        }
+      }
+
       // ─── THOUGHTS ───
       const thoughtGroups = new Map<string, THREE.Group>();
-      const thoughtMeshes: THREE.Mesh[] = [];
-      interface LiveEntry { canvas: HTMLCanvasElement; inst: SpirographInstance; texture: THREE.CanvasTexture; origTexture: THREE.Texture }
+      interface LiveEntry {
+        canvas: HTMLCanvasElement;
+        inst: SpirographInstance;
+        texture: THREE.CanvasTexture;
+        /** The live animation rides its own sprite ABOVE the baked one and
+         *  cross-dissolves in/out — never a hard texture swap. */
+        overlay: THREE.Sprite;
+        baked: THREE.Sprite;
+        timeOffset: number;
+        fade: number;        // 0 = baked still, 1 = fully live
+        dying: boolean;      // fading back out; cleaned up at fade 0
+      }
+      const LIVE_FADE_IN_S = 0.5;
+      const LIVE_FADE_OUT_S = 0.35;
       const liveStars = new Map<string, LiveEntry>();
       let bakedStarCount = 0;
       let proximityUpgradeCount = 0;
@@ -438,37 +564,32 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const SPIRO_SIZE = SPIRO_SIZE_LIVE;
       const SPRITE_SCALE = 16;
 
+      // Phase 4 world-switch crossfade: while true, newly-created thought
+      // groups start fully transparent and are marked userData.fadingIn so
+      // the fade-in tick in animate() ramps them 0→1 over CROSSFADE_IN_MS.
+      let fadeInPendingStars = false;
+
+      // Arrival beat: mount with thought stars hidden (they reuse the
+      // crossfade fade-in path) and drift's camera paused until the pages'
+      // title card calls releaseArrival(). Sky/terrain/clouds are unaffected.
+      let arrivalHoldActive = arrivalHoldRef.current;
+      if (arrivalHoldActive) fadeInPendingStars = true;
+
+      function setGroupOpacity(g: THREE.Group, o: number) {
+        g.children.forEach(child => {
+          if (child instanceof THREE.Sprite) {
+            (child.material as THREE.SpriteMaterial).opacity = o;
+          }
+        });
+      }
+
       function createThought(t: ThoughtData) {
         if (thoughtGroups.has(t.id)) return;
         const rand = seededRand(hashStr(t.id));
         const [er, eg, eb] = EMOTIONS[t.emotionIndex]?.rgb ?? [255, 255, 255];
-        const color = (er << 16) | (eg << 8) | eb;
         const group = new THREE.Group();
         let spiro: StarSpiro | null = null;
-
-        if (modeRef.current === 'passive') {
-          // Blurred glow dot — 64×64 soft radial gradient
-          const dc = document.createElement('canvas'); dc.width = 64; dc.height = 64;
-          const dctx = dc.getContext('2d')!;
-          const gr = dctx.createRadialGradient(32, 32, 0, 32, 32, 30);
-          gr.addColorStop(0,   `rgba(${er},${eg},${eb},0.75)`);
-          gr.addColorStop(0.4, `rgba(${er},${eg},${eb},0.28)`);
-          gr.addColorStop(0.8, `rgba(${er},${eg},${eb},0.05)`);
-          gr.addColorStop(1,   `rgba(${er},${eg},${eb},0)`);
-          dctx.fillStyle = gr; dctx.fillRect(0, 0, 64, 64);
-          const passiveTex = new THREE.CanvasTexture(dc);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (passiveTex as any).encoding = 3001;
-          const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: passiveTex, transparent: true, depthWrite: false }));
-          dot.scale.set(8, 8, 1);
-          group.add(dot);
-          // No spiro, no clickSphere — passive stars are non-interactive
-          group.position.set(t.x, t.y, t.z);
-          group.userData = { id: t.id, baseY: t.y, bobPhase: rand() * Math.PI * 2, bobSpeed: 0.2 + rand() * 0.3, scaleMult: 1.0, spiro: null, orbit: null, pulsePhase: 0 };
-          scene.add(group);
-          thoughtGroups.set(t.id, group);
-          return;
-        }
+        let glow: THREE.Sprite | null = null;
 
         if (bakedStarCount < MAX_BAKED) {
           bakedStarCount++;
@@ -523,14 +644,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }));
           glowSprite.scale.set(SPRITE_SCALE * 2.2, SPRITE_SCALE * 2.2, 1);
           group.add(glowSprite);
+          // Kept on the group so the Phase 8 bloom can flare it without
+          // walking the children every frame.
+          glow = glowSprite;
         }
-        const clickSphere = new THREE.Mesh(
-          new THREE.SphereGeometry(5, 8, 8),
-          new THREE.MeshBasicMaterial({ visible: false, colorWrite: false }),
-        );
-        clickSphere.userData = { thoughtId: t.id, thoughtGroup: group };
-        group.add(clickSphere);
-        thoughtMeshes.push(clickSphere);
+        // No collider mesh — picking is generous screen-space projection (see pickStar)
 
         group.position.set(t.x, t.y, t.z);
         group.userData = {
@@ -543,18 +661,26 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           pulsePhase: rand() * Math.PI * 2,
           orbit: null,
           spiro,
+          glow,
           // dotDims: stored when spiro is null (beyond MAX_BAKED cap) so activateLive()
           // can upgrade the dot fallback to a full spirograph on first selection.
           dotDims: spiro ? undefined : t.dimensions,
           answer: t.answer ?? '',
+          uniqueFact: t.uniqueFact ?? '',
           scaleMult: 1.0,
+          fadingIn: false,
         };
+        if (fadeInPendingStars) {
+          setGroupOpacity(group, 0);
+          group.userData.fadingIn = true;
+        }
         scene.add(group);
         thoughtGroups.set(t.id, group);
       }
 
       function activateLive(id: string) {
-        if (liveStars.has(id)) return;
+        const existing = liveStars.get(id);
+        if (existing) { existing.dying = false; return; } // re-selected mid-dissolve
         const g = thoughtGroups.get(id);
         if (!g) return;
         let spiro = g.userData.spiro as StarSpiro | null;
@@ -593,33 +719,50 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const liveTexture = new THREE.CanvasTexture(liveCanvas);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (liveTexture as any).encoding = 3001; // THREE.sRGBEncoding
-        const mat = spiro.sprite.material as THREE.SpriteMaterial;
-        const origTexture = mat.map!;
-        mat.map = liveTexture;
-        mat.needsUpdate = true;
-        liveStars.set(id, { canvas: liveCanvas, inst: liveInst, texture: liveTexture, origTexture });
+        // Prime the live frame at the star's own phase so orbiting bodies are
+        // exactly where the baked still left them — the dissolve then only has
+        // to cover frame-rate, never position jumps.
+        liveInst.renderStatic(0);
+        const overlay = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: liveTexture, transparent: true, depthWrite: false, opacity: 0,
+        }));
+        overlay.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+        g.add(overlay);
+        liveStars.set(id, {
+          canvas: liveCanvas, inst: liveInst, texture: liveTexture,
+          overlay, baked: spiro.sprite, timeOffset: spiro.timeOffset,
+          fade: 0, dying: false,
+        });
+      }
+
+      // Removes a live entry NOW — no dissolve. The gentle path is
+      // deactivateLive(), which fades out first.
+      function destroyLive(id: string) {
+        const live = liveStars.get(id);
+        if (!live) return;
+        live.inst.stop();
+        const g = thoughtGroups.get(id);
+        if (g) g.remove(live.overlay);
+        (live.overlay.material as THREE.SpriteMaterial).dispose();
+        (live.baked.material as THREE.SpriteMaterial).opacity = 1;
+        live.texture.dispose();
+        liveStars.delete(id);
       }
 
       function deactivateLive(id: string) {
         const live = liveStars.get(id);
         if (!live) return;
-        live.inst.stop();
-        const g = thoughtGroups.get(id);
-        if (g) {
-          const spiro = g.userData.spiro as StarSpiro | null;
-          if (spiro) {
-            const mat = spiro.sprite.material as THREE.SpriteMaterial;
-            mat.map = live.origTexture;
-            mat.needsUpdate = true;
-          }
-        }
-        live.texture.dispose();
-        liveStars.delete(id);
+        // Dissolve back to the baked still; the render tick cleans up at 0.
+        live.dying = true;
       }
 
       function destroyThought(id: string) {
-        deactivateLive(id);
+        destroyLive(id);
         if (id === activeStarRef.current) flyTargetXZ = null;
+        if (id === driftTargetId) {
+          driftTargetId = null;
+          driftPhase = 'seek';
+        }
         const group = thoughtGroups.get(id);
         if (!group) return;
         const spiro = group.userData.spiro as StarSpiro | null;
@@ -641,8 +784,6 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
         });
         thoughtGroups.delete(id);
-        const idx = thoughtMeshes.findIndex(m => m.userData.thoughtId === id);
-        if (idx >= 0) thoughtMeshes.splice(idx, 1);
       }
 
       // Lazy upgrade: swap a dot-fallback star to a real spirograph sprite when the
@@ -711,46 +852,321 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       addBondFnRef.current = createBond;
       removeBondFnRef.current = destroyBond;
 
-      // ─── CAMERA STATE ───
-      // Initial heading toward SUN_DIRECTION (sunset straight ahead)
+      // ─── MOMENTS (Phase 8) ──────────────────────────────────────────────
+      // Star birth and the bond finale. Both are transient: the bloom is an
+      // envelope multiplied into the existing sprite scale/opacity (no new
+      // geometry, ever), and the inscription is one SVG overlay that holds
+      // nothing between moments. See ./moments.ts.
+      const blooms = new BloomChoreographer();
+      const inscription = new OrbitInscription(container);
+      let pendingFinale: { fromId: string; toId: string; reason: string; waited: number } | null = null;
+      let activeFinale: { fromId: string; toId: string; textLen: number } | null = null;
+
+      const ringVec = new THREE.Vector3();
+      const ringCam = new THREE.Vector3();
+
+      // Projects the orbit the two bound stars now share — widened to a legible
+      // ring around the pair, ordered so the reason reads along its near side.
+      // null when the geometry isn't there yet or any of it is behind the camera.
+      function projectOrbitRing(fromId: string, toId: string, textLen: number): ScreenPoint[] | null {
+        if (!container) return null; // hoisted fn — re-narrow for TS
+        const fg = thoughtGroups.get(fromId);
+        const tg = thoughtGroups.get(toId);
+        if (!fg || !tg) return null;
+        const orbit = fg.userData.orbit as { radius: number; tilt: number } | null;
+        if (!orbit) return null;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        const N = 96;
+        const sinT = Math.sin(orbit.tilt);
+        const cosT = Math.cos(orbit.tilt);
+
+        const ring = (radius: number): ScreenPoint[] | null => {
+          const out: ScreenPoint[] = [];
+          for (let i = 0; i < N; i++) {
+            const a = (i / N) * Math.PI * 2;
+            ringVec.set(
+              tg.position.x + Math.cos(a) * radius,
+              tg.position.y + Math.sin(a) * radius * sinT,
+              tg.position.z + Math.sin(a) * radius * cosT,
+            );
+            ringCam.copy(ringVec).applyMatrix4(camera.matrixWorldInverse);
+            if (ringCam.z > -1) return null; // behind (or on) the camera plane
+            ringVec.project(camera);
+            out.push({ x: (ringVec.x + 1) / 2 * w, y: (-ringVec.y + 1) / 2 * h });
+          }
+          return out;
+        };
+
+        const base = ring(orbit.radius);
+        if (!base) return null;
+        let minX = Infinity, maxX = -Infinity;
+        for (const p of base) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
+        const baseW = Math.max(maxX - minX, 1);
+        let basePerim = 0;
+        for (let i = 1; i < base.length; i++) {
+          basePerim += Math.hypot(base[i].x - base[i - 1].x, base[i].y - base[i - 1].y);
+        }
+        // Widen the true orbit only as far as the reason needs to be readable,
+        // and never past what the viewport can hold: a short reason is written
+        // on the orbit itself, a long one on a wider ring around the pair.
+        const wantPerim = (textLen * PREFERRED_FONT * GLYPH_EM) / NEAR_SIDE;
+        const maxK = Math.min(w * 0.86, 560) / baseW;
+        const k = Math.max(1, Math.min(Math.max(maxK, 1), wantPerim / Math.max(basePerim, 1)));
+        const wide = k > 1.02 ? ring(orbit.radius * k) : base;
+        if (!wide) return null;
+        return orderRingForReading(wide);
+      }
+
+      bloomStarFnRef.current = (id: string) => {
+        // 'arrival' — the star stays at nothing until the camera has come to
+        // it, so the bloom and the birth sound land on the same beat.
+        blooms.begin(id, 'arrival');
+      };
+
+      bondFinaleFnRef.current = (fromId: string, toId: string, reason: string) => {
+        blooms.begin(fromId, 'now');
+        blooms.begin(toId, 'now');
+        inscription.clear();
+        activeFinale = null;
+        // The orbit is created by the bonds prop sync a beat later; the tick
+        // below waits for it (and for the blooms to lead) before writing.
+        pendingFinale = { fromId, toId, reason, waited: 0 };
+      };
+
+      // ─── CAMERA STATE MACHINE ───────────────────────────────────────────
+      // Exactly one mode owns the camera each frame (see CamMode docs above).
+      // Initial heading toward SUN_DIRECTION (sunset straight ahead).
+      let camMode: CamMode = 'drift';
       let heading = Math.atan2(SUN_DIRECTION.x, -SUN_DIRECTION.z);
-      let targetHeading: number | null = null;
-      let pitchTarget: number | null = null;
-      let flyTargetXZ: { x: number; z: number } | null = null;
-      let flyStarTargetY = BASE_CAM_Y;
-      let camTargetY = BASE_CAM_Y;
-      let speed = 4;
-      let turnVel = 0;    // rad/s — keyboard/arrow turn with easing
-      let strafeVel = 0; // units/s — Q/E lateral slide
       let pitch = 0.30;
-      // Default rest pitch — updated by setPitch handle and pitch-click navigation
-      let defaultPitch = 0.30;
+      let speed = 0;             // forward u/s — W/boost only, no baseline cruise
+      let turnVel = 0;           // rad/s — keyboard/arrow turn with easing
+      let strafeVel = 0;         // units/s — Q/E lateral slide
+      let wheelVel = 0;          // u/s — scroll-wheel forward/back, decays
+      const lookVel = { x: 0, y: 0 }; // rad/frame — drag/swipe momentum
+      let flyTargetXZ: { x: number; z: number } | null = null; // focused approach
+      let idleSec = 0;           // manual-mode idle accumulator
+      let camTargetY = BASE_CAM_Y;
       camera.position.set(0, BASE_CAM_Y, 0);
       let lastSnapX = 0;
       let lastSnapZ = 0;
       let disposed = false;
 
-      // Auto-rotate toward nearest star when none visible for 10 seconds
-      let noStarVisibleSec = 0;
-      let autoRotateTarget: number | null = null;
-      // Angular speed: ~0.2 rad/s → a 90° turn takes ~4.7 seconds
-      const AUTO_ROTATE_SPEED = 0.07; // rad/s — ~13 s per 90°, very glacial
-      // Only consider stars within ±90° of current heading (cos 90° = 0)
-      const AUTO_ROTATE_MAX_COS = 0.0; // dot product threshold
+      // Focus bookkeeping — was the current focus user-initiated (canvas
+      // click/tap) or automatic (deep link / own-star autofocus)? Dismissing
+      // an auto focus hands over to drift after a short beat instead of the
+      // full idle wait.
+      let lastUserSelectAt = -Infinity;
+      let focusWasAuto = false;
+
+      const IDLE_RESUME_SEC = 10;   // manual → drift after this much idle
+      // Arrival framing: look slightly below the star so it rides the upper
+      // third of the viewport — clear of the bottom panel / dwell text.
+      // (offset in radians of the 60° vertical FOV; viewport-relative at any size)
+      const FOCUS_STOP_DIST = 78;
+      const FOCUS_PITCH_OFFSET = 0.24;
+
+      function wrapAngle(a: number): number {
+        while (a > Math.PI) a -= Math.PI * 2;
+        while (a < -Math.PI) a += Math.PI * 2;
+        return a;
+      }
+      const clampPitch = (p: number) => Math.max(-0.4, Math.min(0.7, p));
+
+      // Ease heading/pitch toward framing a star, with angular-velocity caps
+      // so the turn is always gentle (no motion sickness, no snap).
+      function faceStar(
+        g: THREE.Group, pitchOffset: number, dt: number,
+        rate: number, maxTurn: number, maxPitchRate: number,
+      ) {
+        const dx = g.position.x - camera.position.x;
+        const dz = g.position.z - camera.position.z;
+        const hDist = Math.max(Math.hypot(dx, dz), 0.01);
+        const dy = g.position.y - camera.position.y;
+        const targetH = Math.atan2(dx, -dz);
+        const targetP = clampPitch(Math.atan2(dy, hDist) - pitchOffset);
+        const hStep = wrapAngle(targetH - heading) * Math.min(dt * rate, 1);
+        const maxH = maxTurn * dt;
+        heading += Math.max(-maxH, Math.min(maxH, hStep));
+        const pStep = (targetP - pitch) * Math.min(dt * rate, 1);
+        const maxP = maxPitchRate * dt;
+        pitch = clampPitch(pitch + Math.max(-maxP, Math.min(maxP, pStep)));
+      }
+
+      // ─── DRIFT CONTROLLER ───────────────────────────────────────────────
+      // Lean-back tour: pick a star (nearby + unseen this session + emotion
+      // variety + roughly ahead), glide there on an eased leg, dwell 8-12 s
+      // with the thought readable, continue. The controller always aims at a
+      // star, so the camera never faces empty sky.
+      const DRIFT_CRUISE = 26;          // u/s base — meditative planetarium pace
+      const DRIFT_LEG_MIN = 4.5;        // s — minimum glide duration
+      // The glide lands exactly on the focused framing distance, so arrival IS
+      // the focus — no second flight, no pause, no re-zoom.
+      const DRIFT_STOP_DIST = FOCUS_STOP_DIST;
+      const DRIFT_PITCH_OFFSET = 0.17;  // star rides upper third during dwell
+      const DRIFT_MAX_TURN = 0.55;      // rad/s heading cap while drifting
+      const DRIFT_MAX_PITCH_RATE = 0.35;
+      let driftPhase: 'seek' | 'glide' | 'handoff' = 'seek';
+      let handoffT = 0; // s waiting for the page to open the panel
+      let driftTargetId: string | null = null;
+      const driftVisited = new Set<string>();      // shown this session
+      const driftRecentEmotions: number[] = [];    // last 3 — gentle variety
+      let driftSeekDelay = 1.0; // s before first pick — lets deep-link focus land
+      let glideT = 0;
+      let glideDur = 6;
+      const glideFrom = new THREE.Vector3();
+      const glideTo = new THREE.Vector3();
+
+      function setMode(m: CamMode) {
+        if (camMode === m) return;
+        if (camMode === 'drift') {
+          driftPhase = 'seek';
+          driftTargetId = null;
+        }
+        camMode = m;
+        if (m === 'manual') {
+          // Fresh hands-over: zero every residual velocity so there's no jump
+          idleSec = 0;
+          speed = 0; turnVel = 0; strafeVel = 0; wheelVel = 0;
+          lookVel.x = 0; lookVel.y = 0;
+          touch.pinchVel = 0;
+        }
+        if (m === 'drift') {
+          driftPhase = 'seek';
+          driftSeekDelay = 0.4;
+        }
+        onModeChangeRef.current?.(m);
+      }
+
+      function pickNextDriftStar(): string | null {
+        // Candidates: the ~12 nearest unseen stars with something to read,
+        // scored by distance + turn away from current heading + emotion repeat.
+        const cx = camera.position.x;
+        const cz = camera.position.z;
+        const all: { id: string; g: THREE.Group; d: number }[] = [];
+        thoughtGroups.forEach((g, id) => {
+          if (id === driftTargetId || id === activeStarRef.current) return;
+          const answer = (g.userData.answer as string | undefined) ?? '';
+          if (!answer.trim()) return;
+          const d = Math.hypot(g.position.x - cx, g.position.z - cz);
+          if (d < 25) return; // effectively where we already are
+          all.push({ id, g, d });
+        });
+        if (all.length === 0) return null;
+        all.sort((a, b) => a.d - b.d);
+        let pool = all.filter(c => !driftVisited.has(c.id)).slice(0, 12);
+        if (pool.length === 0) {
+          // Everything has been shown — start the tour over
+          driftVisited.clear();
+          pool = all.slice(0, 12);
+        }
+        let bestId: string | null = null;
+        let bestScore = Infinity;
+        for (const c of pool) {
+          const dx = c.g.position.x - cx;
+          const dz = c.g.position.z - cz;
+          const turn = Math.abs(wrapAngle(Math.atan2(dx, -dz) - heading));
+          const em = c.g.userData.emotionIndex as number;
+          let score = c.d + turn * 60; // forward bias: ~60 units per radian of turn
+          if (driftRecentEmotions.includes(em)) score += 120;
+          if (score < bestScore) { bestScore = score; bestId = c.id; }
+        }
+        return bestId;
+      }
+
+      function startGlideTo(id: string) {
+        const g = thoughtGroups.get(id);
+        if (!g) return;
+        driftTargetId = id;
+        // Arrival point: on the line star→camera, DRIFT_STOP_DIST out
+        const dx = camera.position.x - g.position.x;
+        const dz = camera.position.z - g.position.z;
+        const hd = Math.hypot(dx, dz) || 1;
+        glideTo.set(
+          g.position.x + (dx / hd) * DRIFT_STOP_DIST,
+          BASE_CAM_Y,
+          g.position.z + (dz / hd) * DRIFT_STOP_DIST,
+        );
+        glideFrom.copy(camera.position);
+        glideFrom.y = BASE_CAM_Y;
+        const legDist = glideFrom.distanceTo(glideTo);
+        // Long legs earn a higher cruise so distant stars don't crawl, and the
+        // quintic ease below gives them long, gentle accelerations either end.
+        // (smootherstep peak velocity is 1.875× the average, hence 1.875)
+        const cruise = Math.min(62, DRIFT_CRUISE + legDist * 0.07);
+        glideDur = Math.max(DRIFT_LEG_MIN, (legDist * 1.875) / cruise);
+        glideT = 0;
+        driftPhase = 'glide';
+      }
+
+      function runDrift(dt: number) {
+        if (driftPhase === 'seek') {
+          driftSeekDelay -= dt;
+          if (driftSeekDelay > 0) return;
+          const next = pickNextDriftStar();
+          if (next) startGlideTo(next);
+          return;
+        }
+        const g = driftTargetId ? thoughtGroups.get(driftTargetId) : null;
+        if (!g) {
+          driftPhase = 'seek';
+          return;
+        }
+        if (driftPhase === 'glide') {
+          glideT += dt;
+          const u = Math.min(glideT / glideDur, 1);
+          // Quintic smootherstep — zero acceleration at both ends, so long
+          // travels breathe into and out of motion instead of lurching.
+          const e = u * u * u * (u * (u * 6 - 15) + 10);
+          camera.position.x = glideFrom.x + (glideTo.x - glideFrom.x) * e;
+          camera.position.z = glideFrom.z + (glideTo.z - glideFrom.z) * e;
+          // The approach IS the zoom: over the last stretch of the glide the
+          // star grows toward its focused scale and the framing pitch eases to
+          // the focused pitch, so the handoff to the panel is seamless.
+          const app = u > 0.55 ? (v => v * v * (3 - 2 * v))((u - 0.55) / 0.45) : 0;
+          g.userData.preScale = 1 + (SELECTED_SCALE_MULT - 1) * app;
+          faceStar(
+            g,
+            DRIFT_PITCH_OFFSET + (FOCUS_PITCH_OFFSET - DRIFT_PITCH_OFFSET) * app,
+            dt, 1.6, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE,
+          );
+          if (u >= 1) {
+            // Arrived — hand the star to the page, which opens the real
+            // focused view (panel + full live animation). The chime belongs
+            // to this moment; the page must NOT also play 'select'.
+            driftVisited.add(driftTargetId!);
+            const em = g.userData.emotionIndex as number;
+            driftRecentEmotions.push(em);
+            if (driftRecentEmotions.length > 3) driftRecentEmotions.shift();
+            driftPhase = 'handoff';
+            handoffT = 0;
+            onDriftArriveRef.current?.(driftTargetId!);
+          }
+        } else {
+          // handoff — keep the framing until the activeStar prop lands and
+          // the state machine flips to focused. If the page never responds
+          // (no handler wired), fall back to seeking so the tour never dies.
+          handoffT += dt;
+          faceStar(g, FOCUS_PITCH_OFFSET, dt, 2.0, DRIFT_MAX_TURN, DRIFT_MAX_PITCH_RATE);
+          if (handoffT > 3) {
+            driftPhase = 'seek';
+            driftSeekDelay = 0.5;
+          }
+        }
+      }
 
       flyToFnRef.current = (id: string) => {
         const g = thoughtGroups.get(id);
         if (!g) return;
-        const starPos = g.position;
-        const dx = starPos.x - camera.position.x;
-        const dz = starPos.z - camera.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        targetHeading = Math.atan2(dx, -dz);
-        autoRotateTarget = null;
-        noStarVisibleSec = 0;
-        const stopDist = 60;
-        if (dist > stopDist + 2) {
-          const t = (dist - stopDist) / dist;
+        // A canvas click/tap within the last 600 ms means this focus is
+        // user-initiated; otherwise it's automatic (deep link / autofocus).
+        focusWasAuto = performance.now() - lastUserSelectAt > 600;
+        const dx = g.position.x - camera.position.x;
+        const dz = g.position.z - camera.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > FOCUS_STOP_DIST + 2) {
+          const t = (dist - FOCUS_STOP_DIST) / dist;
           flyTargetXZ = {
             x: camera.position.x + dx * t,
             z: camera.position.z + dz * t,
@@ -758,91 +1174,212 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         } else {
           flyTargetXZ = null;
         }
-        // Stay at standard altitude — stars are above camera so we look up, not level
-        flyStarTargetY = BASE_CAM_Y;
       };
 
-      turnLeftFnRef.current = () => {
-        targetHeading = heading - Math.PI / 6;
-        autoRotateTarget = null;
-        flyTargetXZ = null;
+      tourNextFnRef.current = () => {
+        // The star being departed (imperatively, before the prop round-trip
+        // clears it) is marked visited so the seek never re-picks the star
+        // the visitor is looking at.
+        if (activeStarRef.current) driftVisited.add(activeStarRef.current);
+        if (camMode === 'drift' && driftPhase === 'glide') return; // already sailing
+        driftPhase = 'seek';
+        driftTargetId = null;
+        driftSeekDelay = 0;
+        if (camMode !== 'drift') setMode('drift');
       };
 
-      turnRightFnRef.current = () => {
-        targetHeading = heading + Math.PI / 6;
-        autoRotateTarget = null;
-        flyTargetXZ = null;
-      };
+      // ─── WORLD CROSSFADE (Phase 4 — sky rail) ────────────────────────────
+      // Fades the current star field out while lerping the sky/terrain/star
+      // atmosphere toward the incoming world, then hands back to the caller
+      // (onMidpoint) to swap the thoughts/bonds props — newly-created stars
+      // fade in automatically (see createThought's fadeInPendingStars check
+      // and the fade-in tick below). Camera position/heading/pitch and the
+      // drift/manual/focused mode are untouched.
+      let fadeOutActive = false;
+      let fadeOutT = 0;
+      let fadeOutMidCb: (() => void) | null = null;
+      let fadeInActive = false;
+      let fadeInT = 0;
+      const FADE_OUT_DUR = CROSSFADE_OUT_MS / 1000;
+      const FADE_IN_DUR = CROSSFADE_IN_MS / 1000;
+      let atmoFrom: AtmosphereConfig = atmo0;
+      let atmoTo: AtmosphereConfig = atmo0;
+      let skyGradTexB: THREE.CanvasTexture | null = null;
+      const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-      setPitchFnRef.current = (p: number) => {
-        defaultPitch = Math.max(-0.4, Math.min(0.7, p));
-        pitchTarget = defaultPitch;
-      };
+      function crossfadeToWorld(atmosphere: AtmosphereConfig, onMidpoint: () => void) {
+        // Defensive: callers already guard re-entrancy (see the pages'
+        // switching state), but never silently drop a caller's callback by
+        // overwriting a fade already in flight.
+        if (fadeOutActive || fadeInActive) return;
+        clearSmoke();
+        // A moment belongs to the world it happened in.
+        inscription.clear();
+        blooms.clear();
+        pendingFinale = null;
+        activeFinale = null;
+        if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+        hoverStarId = null;
+
+        // Drift explores the new world fresh; the camera itself is untouched.
+        driftPhase = 'seek';
+        driftTargetId = null;
+        driftVisited.clear();
+        driftRecentEmotions.length = 0;
+        driftSeekDelay = FADE_OUT_DUR + 0.25;
+
+        atmoFrom = {
+          skyStops: atmoFrom.skyStops, // unused on this side of the mix
+          starDensity: dbgStarDensityRef.current,
+          starFloor: dbgStarFloorRef.current,
+          terrainGlow: dbgTerrainGlowRef.current,
+          cloudTint: atmoTo.cloudTint,
+          gradLift: gradLiftRef.current,
+          gradSteep: gradSteepRef.current,
+          sunShift: sunShiftRef.current,
+        };
+        atmoTo = atmosphere;
+
+        if (skyGradTexB) skyGradTexB.dispose();
+        skyGradTexB = buildSkyGradientTexture(atmosphere.skyStops);
+        skyMat.uniforms.uSkyGradB.value = skyGradTexB;
+        skyMat.uniforms.uMix.value = 0;
+        applyCloudTint(atmosphere.cloudTint);
+
+        fadeInPendingStars = true;
+        fadeOutActive = true;
+        fadeOutT = 0;
+        fadeOutMidCb = onMidpoint;
+      }
+      crossfadeFnRef.current = crossfadeToWorld;
+
+      // Arrival beat — end the mount hold: thought stars ride the same
+      // fade-in tick the world crossfade uses, and drift wakes up.
+      function releaseArrival() {
+        if (!arrivalHoldActive) return;
+        arrivalHoldActive = false;
+        fadeInActive = true;
+        fadeInT = 0;
+        // First load sails straight to the nearest star (forward-biased pick).
+        driftSeekDelay = 0;
+      }
+      releaseArrivalFnRef.current = releaseArrival;
 
       // ─── INPUT ───
-      const keys: Record<string, boolean> = {};
-      const onKeyDown = (e: KeyboardEvent) => { keys[e.code] = true; };
-      const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
-      if (modeRef.current !== 'passive') {
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
+      // Any deliberate input (pointer down, wheel, touch, key) pauses drift
+      // instantly and hands the camera to manual controls mid-flight — the
+      // camera keeps its exact position/orientation, so there is no jump.
+      function interruptDriftForInput() {
+        idleSec = 0;
+        if (camMode === 'drift') setMode('manual');
       }
 
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
-      const onClickCanvas = (e: MouseEvent) => {
-        if (modeRef.current === 'passive') return;
-        const relX = e.clientX / container.clientWidth;
-        const relY = e.clientY / container.clientHeight;
-        mouse.x = relX * 2 - 1;
-        mouse.y = -(relY) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        if (hits.length > 0) {
-          // Stars always win — even with a panel open
-          const { thoughtId, thoughtGroup } = hits[0].object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
-          const dx = thoughtGroup.position.x - camera.position.x;
-          const dz = thoughtGroup.position.z - camera.position.z;
-          targetHeading = Math.atan2(dx, -dz);
-          onClickRef.current?.(thoughtId);
-        } else if (activeStarRef.current) {
-          // Panel is open — any background click dismisses it; no navigation
-          onBgClickRef.current?.();
+      const keys: Record<string, boolean> = {};
+      const onKeyDown = (e: KeyboardEvent) => {
+        keys[e.code] = true;
+        interruptDriftForInput();
+      };
+      const onKeyUp = (e: KeyboardEvent) => { keys[e.code] = false; };
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+
+      // ─── SCREEN-SPACE PICKING ─────────────────────────────────────────────
+      // Generous: pointer within PICK_RADIUS CSS px of a star's projected
+      // center picks the nearest such star. No dependence on tiny colliders,
+      // star bobbing, or camera motion.
+      const PICK_RADIUS = 48;
+      const pickVec = new THREE.Vector3();
+      function pickStar(clientX: number, clientY: number): string | null {
+        if (!container) return null; // hoisted fn — re-narrow for TS
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        let bestId: string | null = null;
+        let bestD = PICK_RADIUS;
+        thoughtGroups.forEach((g, id) => {
+          // Behind-camera guard — project() mirrors points behind the camera
+          pickVec.copy(g.position).applyMatrix4(camera.matrixWorldInverse);
+          if (pickVec.z >= 0) return;
+          pickVec.copy(g.position).project(camera);
+          const sx = (pickVec.x + 1) / 2 * w;
+          const sy = (-pickVec.y + 1) / 2 * h;
+          const d = Math.hypot(sx - clientX, sy - clientY);
+          if (d < bestD) { bestD = d; bestId = id; }
+        });
+        return bestId;
+      }
+
+      // ─── MOUSE — drag to look, click to select, wheel to move ────────────
+      let suppressClick = false; // a drag ends with a synthetic click — swallow it
+      const mouseDrag = { active: false, moved: false, lastX: 0, lastY: 0, startX: 0, startY: 0 };
+
+      const onMouseDown = (e: MouseEvent) => {
+        if (e.button !== 0) return;
+        interruptDriftForInput();
+        suppressClick = false;
+        mouseDrag.active = true;
+        mouseDrag.moved = false;
+        mouseDrag.lastX = mouseDrag.startX = e.clientX;
+        mouseDrag.lastY = mouseDrag.startY = e.clientY;
+        lookVel.x = 0;
+        lookVel.y = 0;
+      };
+      const onMouseMoveWindow = (e: MouseEvent) => {
+        if (!mouseDrag.active) return;
+        const dx = e.clientX - mouseDrag.lastX;
+        const dy = e.clientY - mouseDrag.lastY;
+        mouseDrag.lastX = e.clientX;
+        mouseDrag.lastY = e.clientY;
+        if (!mouseDrag.moved &&
+            Math.hypot(e.clientX - mouseDrag.startX, e.clientY - mouseDrag.startY) > 5) {
+          mouseDrag.moved = true;
+        }
+        if (!mouseDrag.moved) return;
+        idleSec = 0;
+        if (camMode !== 'manual') return; // focused: camera stays framed on the star
+        const sensX = (Math.PI * 1.4) / container.clientWidth;
+        const sensY = (Math.PI * 0.7) / container.clientHeight;
+        heading += dx * sensX;
+        pitch = clampPitch(pitch - dy * sensY);
+        lookVel.x = dx * sensX;
+        lookVel.y = -dy * sensY;
+      };
+      const onMouseUpWindow = () => {
+        if (!mouseDrag.active) return;
+        mouseDrag.active = false;
+        if (mouseDrag.moved) {
+          suppressClick = true; // momentum (lookVel) coasts in the animate loop
         } else {
-          // Bullseye navigation: center quarter → background click, outer ring → navigate
-          // nx/ny: -1 = left/top, +1 = right/bottom (screen space, y down)
-          const nx = (relX - 0.5) * 2;
-          const ny = (relY - 0.5) * 2;
-          const dist = Math.sqrt(nx * nx + ny * ny);
-
-          if (dist < 0.5) {
-            // Inner circle (≈ center 1/4 of screen area) — treat as background tap
-            onBgClickRef.current?.();
-          } else {
-            // Outer zone — navigate with intensity proportional to dist from center
-            // Scale: 0 at dist=0.5, 1 at dist=1.42 (full corner)
-            const t = Math.min((dist - 0.5) / 0.92, 1.0);
-            const maxPush = Math.PI / 6 + t * (Math.PI / 3 - Math.PI / 6); // π/6 → π/3
-
-            const ux = nx / dist; // unit direction
-            const uy = ny / dist;
-
-            // Heading component (left/right)
-            if (Math.abs(ux) > 0.15) {
-              targetHeading = heading + ux * maxPush;
-              flyTargetXZ = null;
-            }
-            // Pitch component (up/down) — also updates defaultPitch so the
-            // camera holds at the new angle instead of snapping back
-            if (Math.abs(uy) > 0.15) {
-              const newP = Math.max(-0.40, Math.min(0.70, pitch - uy * maxPush * 0.6));
-              pitchTarget = newP;
-              defaultPitch = newP;
-            }
-          }
+          lookVel.x = 0;
+          lookVel.y = 0;
         }
       };
+      renderer.domElement.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMoveWindow);
+      window.addEventListener('mouseup', onMouseUpWindow);
+
+      const onClickCanvas = (e: MouseEvent) => {
+        if (suppressClick) { suppressClick = false; return; }
+        const hitId = pickStar(e.clientX, e.clientY);
+        if (hitId) {
+          lastUserSelectAt = performance.now();
+          onClickRef.current?.(hitId);
+        } else if (activeStarRef.current) {
+          // Panel is open — a missed click dismisses it, nothing else
+          onBgClickRef.current?.();
+        }
+        // A missed click with no panel open does nothing — never moves the camera
+      };
       renderer.domElement.addEventListener('click', onClickCanvas);
+
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        interruptDriftForInput();
+        if (camMode !== 'manual') return; // ignore while a panel is open
+        const dy = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY;
+        // Scroll up / pinch-out → glide forward; decays in the animate loop
+        wheelVel = Math.max(-140, Math.min(140, wheelVel - dy * 0.35));
+      };
+      renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
 
       // ─── HOVER SMOKE EFFECT ───────────────────────────────────────────────
       // When the mouse rests on a star for 500 ms, its answer text rises up
@@ -968,24 +1505,26 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         }, 2600);
       }
       const onMouseMove = (e: MouseEvent) => {
-        // Skip smoke when a star detail is open or in passive mode
-        if (activeStarRef.current || modeRef.current === 'passive') return;
-        const relX = e.clientX / container.clientWidth;
-        const relY = e.clientY / container.clientHeight;
-        const hoverMouse = new THREE.Vector2(relX * 2 - 1, -(relY * 2 - 1));
-        raycaster.setFromCamera(hoverMouse, camera);
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        const hitId = hits.length > 0 ? (hits[0].object.userData.thoughtId as string | undefined) ?? null : null;
-        if (hitId !== hoverStarId) {
+        if (mouseDrag.active) {
+          renderer.domElement.style.cursor = mouseDrag.moved ? 'grabbing' : '';
+          return;
+        }
+        const hitId = pickStar(e.clientX, e.clientY);
+        // Pointer cursor over any pickable star
+        renderer.domElement.style.cursor = hitId ? 'pointer' : '';
+        // Smoke is a hover garnish only — skip while a panel is open.
+        if (activeStarRef.current) return;
+        const smokeId = hitId;
+        if (smokeId !== hoverStarId) {
           if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-          hoverStarId = hitId;
-          if (hitId) {
+          hoverStarId = smokeId;
+          if (smokeId) {
             if (!smokeInFlight) {
               // Nothing playing — start immediately after short delay
-              hoverTimer = setTimeout(() => triggerSmoke(hitId), 80);
+              hoverTimer = setTimeout(() => triggerSmoke(smokeId), 80);
             } else {
               // Let current smoke finish, queue this star for after
-              smokeNextStarId = hitId;
+              smokeNextStarId = smokeId;
             }
           } else {
             // Moved to empty space — cancel queued next but let current finish
@@ -996,42 +1535,29 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       renderer.domElement.addEventListener('mousemove', onMouseMove);
 
       // ─── TOUCH CONTROLS ─────────────────────────────────────────────────
-      // Swipe → yaw/pitch with momentum, pinch → zoom, tap → select, double-tap → boost
+      // Swipe → yaw/pitch with momentum, pinch → move, tap → select, double-tap → boost
       const touch = {
         active: false,
         startX: 0, startY: 0,
         lastX: 0, lastY: 0,
         startTime: 0,
         lastTapTime: 0,   // for double-tap detection
-        velX: 0,           // heading velocity (rad/frame), decays with friction
-        velY: 0,           // pitch velocity (rad/frame), decays with friction
         pinchDist: 0,
         pinchVel: 0,       // forward/backward velocity (units/frame), decays
       };
 
-      const raycastAtPoint = (clientX: number, clientY: number) => {
-        const relX = clientX / container.clientWidth;
-        const relY = clientY / container.clientHeight;
-        mouse.x = relX * 2 - 1;
-        mouse.y = -(relY) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        // Expand raycaster sphere threshold for easier finger targeting
-        const hits = raycaster.intersectObjects(thoughtMeshes);
-        return hits[0] ?? null;
-      };
-
       const onTouchStart = (e: TouchEvent) => {
-        if (modeRef.current === 'passive') return;
         // Always prevent default — stops pull-to-refresh and page rubber-band
         e.preventDefault();
+        interruptDriftForInput();
         if (e.touches.length === 1) {
           const t = e.touches[0];
           touch.active = true;
           touch.startX = touch.lastX = t.clientX;
           touch.startY = touch.lastY = t.clientY;
           touch.startTime = Date.now();
-          touch.velX = 0;
-          touch.velY = 0;
+          lookVel.x = 0;
+          lookVel.y = 0;
         } else if (e.touches.length === 2) {
           // Pinch start — record initial distance
           const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -1043,12 +1569,14 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       const onTouchMove = (e: TouchEvent) => {
         e.preventDefault();
+        idleSec = 0;
         if (e.touches.length === 1 && touch.active) {
           const t = e.touches[0];
           const dx = t.clientX - touch.lastX;
           const dy = t.clientY - touch.lastY;
           touch.lastX = t.clientX;
           touch.lastY = t.clientY;
+          if (camMode !== 'manual') return; // focused: camera stays framed
 
           // Sensitivity: pixels → radians. Tuned so a full-width swipe ≈ 180°.
           const sensX = (Math.PI * 1.4) / container.clientWidth;
@@ -1056,18 +1584,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           // Immediately apply delta (no lag) AND store as velocity for momentum
           heading += dx * sensX;
-          if (!activeStarRef.current) {
-            // Don't override pitch when locked to a selected star
-            pitch = Math.max(-0.4, Math.min(0.7, pitch - dy * sensY));
-          }
-          touch.velX = dx * sensX;
-          touch.velY = -dy * sensY;
-
-          // Clear any keyboard-triggered targetHeading / auto-rotate so swipe takes over
-          targetHeading = null;
-          autoRotateTarget = null;
-          noStarVisibleSec = 0;
-
+          pitch = clampPitch(pitch - dy * sensY);
+          lookVel.x = dx * sensX;
+          lookVel.y = -dy * sensY;
         } else if (e.touches.length === 2) {
           const dx = e.touches[1].clientX - e.touches[0].clientX;
           const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -1075,11 +1594,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const delta = dist - touch.pinchDist;
           touch.pinchDist = dist;
           // Pinch out (dist grows) → move forward; pinch in → pull back
-          touch.pinchVel = delta * 0.22;
+          if (camMode === 'manual') touch.pinchVel = delta * 0.22;
         }
       };
 
-      const onTouchEnd = (e: TouchEvent) => {
+      const onTouchEnd = () => {
         if (!touch.active) return;
         const moveDist = Math.sqrt(
           (touch.lastX - touch.startX) ** 2 + (touch.lastY - touch.startY) ** 2,
@@ -1095,22 +1614,21 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           if (isDoubleTap) {
             // Double-tap: temporary speed boost (replaces Space bar)
-            speed = 28;
+            if (camMode === 'manual') speed = 28;
           } else {
-            // Single tap: raycast for star selection
-            const hit = raycastAtPoint(touch.lastX, touch.lastY);
-            if (hit) {
-              const { thoughtId, thoughtGroup } = hit.object.userData as { thoughtId: string; thoughtGroup: THREE.Group };
-              const tdx = thoughtGroup.position.x - camera.position.x;
-              const tdz = thoughtGroup.position.z - camera.position.z;
-              targetHeading = Math.atan2(tdx, -tdz);
-              onClickRef.current?.(thoughtId);
-            } else {
+            // Single tap: generous screen-space pick
+            const hitId = pickStar(touch.lastX, touch.lastY);
+            if (hitId) {
+              lastUserSelectAt = performance.now();
+              onClickRef.current?.(hitId);
+            } else if (activeStarRef.current) {
               onBgClickRef.current?.();
             }
+            // Missed tap with no panel open: does nothing (drift already
+            // paused by the touchstart) — never moves the camera
           }
         }
-        // If it was a swipe, velX/velY are already set — momentum decays in animate loop
+        // If it was a swipe, lookVel is already set — momentum decays in animate loop
       };
 
       renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -1127,7 +1645,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // ─── ANIMATION ───
       const clock = new THREE.Clock();
       let prevActiveStar: string | null = null;
-      let freeTargetY = BASE_CAM_Y;
+      // Phase 7 — camera speed feeds the near-silent wind. Horizontal only:
+      // the altitude lerp shouldn't read as movement.
+      let prevCamX = camera.position.x;
+      let prevCamZ = camera.position.z;
 
       function animate() {
         if (disposed) return;
@@ -1147,63 +1668,129 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         bgStars.position.copy(camera.position);
         starMat.uniforms.uTime.value = time;
 
-        const isPaused = pausedRef.current;
-
-        // Activate/deactivate high-res live texture as active star changes
+        // Activate/deactivate high-res live texture as active star changes,
+        // and drive the focused-mode transitions of the state machine.
         const currentActiveStar = activeStarRef.current;
         if (currentActiveStar !== prevActiveStar) {
-          if (prevActiveStar) {
-            deactivateLive(prevActiveStar);
-            if (!currentActiveStar) {
-              // Deselected — float back to standard cruising altitude
-              freeTargetY = BASE_CAM_Y;
-            }
-          }
+          if (prevActiveStar) deactivateLive(prevActiveStar);
           if (currentActiveStar) {
             activateLive(currentActiveStar);
             // Clear any lingering smoke when a star is selected
             clearSmoke();
             if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
             hoverStarId = null;
+            setMode('focused');
+          } else if (camMode === 'focused') {
+            // Panel dismissed — back to manual; the idle timer restarts.
+            flyTargetXZ = null;
+            if (prevActiveStar) driftVisited.add(prevActiveStar); // tour moves on, not back
+            setMode('manual');
+            // Deep-link / autofocus dismissal: the tour resumes after a short beat
+            if (focusWasAuto) idleSec = IDLE_RESUME_SEC - 1.2;
           }
           prevActiveStar = currentActiveStar;
         }
 
-        // ── Touch momentum — coasts after swipe / pinch ends ──────────────────
-        if (Math.abs(touch.velX) > 0.0002) {
-          heading += touch.velX;
-          touch.velX *= 0.87; // friction: ~12 frames to stop from a medium swipe
-        } else { touch.velX = 0; }
-        if (Math.abs(touch.velY) > 0.0002 && !activeStarRef.current) {
-          pitch = Math.max(-0.4, Math.min(0.7, pitch + touch.velY));
-          touch.velY *= 0.87;
-        } else { touch.velY = 0; }
-        if (Math.abs(touch.pinchVel) > 0.05) {
-          // Pinch moves camera forward/backward — clamped so you can't enter terrain
-          const fwdX2 = Math.sin(heading);
-          const fwdZ2 = -Math.cos(heading);
-          camera.position.x += fwdX2 * touch.pinchVel;
-          camera.position.z += fwdZ2 * touch.pinchVel;
-          touch.pinchVel *= 0.82;
-        } else { touch.pinchVel = 0; }
+        // ── WORLD CROSSFADE TICK (Phase 4) — additive, doesn't touch camera ──
+        if (fadeOutActive) {
+          fadeOutT += dt;
+          const u = Math.min(fadeOutT / FADE_OUT_DUR, 1);
+          const e = u * u * (3 - 2 * u); // smoothstep
+          thoughtGroups.forEach(g => setGroupOpacity(g, 1 - e));
+          skyMat.uniforms.uMix.value = e;
+          dbgTerrainGlowRef.current = lerp(atmoFrom.terrainGlow, atmoTo.terrainGlow, e);
+          dbgStarDensityRef.current = lerp(atmoFrom.starDensity, atmoTo.starDensity, e);
+          dbgStarFloorRef.current   = lerp(atmoFrom.starFloor, atmoTo.starFloor, e);
+          gradLiftRef.current  = lerp(atmoFrom.gradLift, atmoTo.gradLift, e);
+          gradSteepRef.current = lerp(atmoFrom.gradSteep, atmoTo.gradSteep, e);
+          sunShiftRef.current  = lerp(atmoFrom.sunShift, atmoTo.sunShift, e);
+          if (u >= 1) {
+            fadeOutActive = false;
+            // Commit incoming (B) → current (A); reassign before disposing
+            // the old texture so a live sampler uniform is never left
+            // pointing at a disposed one.
+            const oldTex = skyMat.uniforms.uSkyGrad.value as THREE.Texture | null;
+            skyMat.uniforms.uSkyGrad.value = skyGradTexB;
+            skyMat.uniforms.uMix.value = 0;
+            oldTex?.dispose();
+            skyGradTexB = null;
+            proximityUpgradeCount = 0;
+            fadeInActive = true;
+            fadeInT = 0;
+            const cb = fadeOutMidCb;
+            fadeOutMidCb = null;
+            cb?.(); // caller swaps thoughts/bonds props now — new stars arrive at opacity 0
+          }
+        }
+        if (fadeInActive) {
+          fadeInT += dt;
+          const u = Math.min(fadeInT / FADE_IN_DUR, 1);
+          const e = u * u * (3 - 2 * u);
+          thoughtGroups.forEach(g => { if (g.userData.fadingIn) setGroupOpacity(g, e); });
+          if (u >= 1) {
+            fadeInActive = false;
+            fadeInPendingStars = false;
+            thoughtGroups.forEach(g => { g.userData.fadingIn = false; });
+          }
+        }
 
-        // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
-        // Q/E = lateral strafe (slide perpendicular to heading)
-        const MAX_TURN_VEL  = 1.8;  // max rad/s
-        const TURN_ACCEL    = 5.0;  // rad/s² spin-up
-        const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
-        const MAX_STRAFE    = 22;   // units/s
-        const STRAFE_ACCEL  = 55;
-        const STRAFE_DECEL  = 80;
-        if (!isPaused) {
+        // ── CAMERA — exactly one mode owns position/orientation per frame ────
+        if (camMode === 'drift') {
+          // Arrival beat: the camera waits with the title card — an empty
+          // glide before the stars exist would read as a broken drift.
+          if (!arrivalHoldActive) runDrift(dt);
+        } else if (camMode === 'focused') {
+          // Glide toward the framing point, easing out into the stop
+          if (flyTargetXZ) {
+            const fdx = flyTargetXZ.x - camera.position.x;
+            const fdz = flyTargetXZ.z - camera.position.z;
+            const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
+            if (fdist < 1.5) {
+              flyTargetXZ = null;
+            } else {
+              const flySpeed = Math.min(90, Math.max(10, fdist * 1.6));
+              const amt = Math.min(fdist, flySpeed * dt);
+              camera.position.x += (fdx / fdist) * amt;
+              camera.position.z += (fdz / fdist) * amt;
+            }
+          }
+          const ag = activeStarRef.current ? thoughtGroups.get(activeStarRef.current) : null;
+          if (ag) faceStar(ag, FOCUS_PITCH_OFFSET, dt, 2.5, 1.2, 0.8);
+        } else {
+          // ── manual — drag momentum, wheel/pinch move, silent WASD layer ────
+          if (Math.abs(lookVel.x) > 0.0002) {
+            heading += lookVel.x;
+            lookVel.x *= 0.87; // friction: ~12 frames to stop from a medium swipe
+          } else { lookVel.x = 0; }
+          if (Math.abs(lookVel.y) > 0.0002) {
+            pitch = clampPitch(pitch + lookVel.y);
+            lookVel.y *= 0.87;
+          } else { lookVel.y = 0; }
+          if (Math.abs(touch.pinchVel) > 0.05) {
+            camera.position.x += Math.sin(heading) * touch.pinchVel;
+            camera.position.z += -Math.cos(heading) * touch.pinchVel;
+            touch.pinchVel *= 0.82;
+          } else { touch.pinchVel = 0; }
+          if (Math.abs(wheelVel) > 0.3) {
+            camera.position.x += Math.sin(heading) * wheelVel * dt;
+            camera.position.z += -Math.cos(heading) * wheelVel * dt;
+            wheelVel *= Math.exp(-2.2 * dt); // ~0.3 s half-life
+          } else { wheelVel = 0; }
+
+          // Eased keyboard turning: A/ArrowLeft = left, D/ArrowRight = right
+          // Q/E = lateral strafe (slide perpendicular to heading)
+          const MAX_TURN_VEL  = 1.8;  // max rad/s
+          const TURN_ACCEL    = 5.0;  // rad/s² spin-up
+          const TURN_DECEL    = 8.0;  // rad/s² spin-down (snappier to stop)
+          const MAX_STRAFE    = 22;   // units/s
+          const STRAFE_ACCEL  = 55;
+          const STRAFE_DECEL  = 80;
           const wantLeft  = keys['KeyA'] || keys['ArrowLeft'];
           const wantRight = keys['KeyD'] || keys['ArrowRight'];
           if (wantLeft) {
             turnVel = Math.max(turnVel - TURN_ACCEL * dt, -MAX_TURN_VEL);
-            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
           } else if (wantRight) {
             turnVel = Math.min(turnVel + TURN_ACCEL * dt, MAX_TURN_VEL);
-            targetHeading = null; autoRotateTarget = null; noStarVisibleSec = 0;
           } else {
             const decel = TURN_DECEL * dt;
             if (Math.abs(turnVel) <= decel) turnVel = 0;
@@ -1211,41 +1798,43 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           }
           if (turnVel !== 0) heading += turnVel * dt;
 
-          const wantStrafeLeft  = keys['KeyQ'];
-          const wantStrafeRight = keys['KeyE'];
-          if (wantStrafeLeft) {
+          if (keys['KeyQ']) {
             strafeVel = Math.max(strafeVel - STRAFE_ACCEL * dt, -MAX_STRAFE);
-          } else if (wantStrafeRight) {
+          } else if (keys['KeyE']) {
             strafeVel = Math.min(strafeVel + STRAFE_ACCEL * dt, MAX_STRAFE);
           } else {
             const sd = STRAFE_DECEL * dt;
             if (Math.abs(strafeVel) <= sd) strafeVel = 0;
             else strafeVel -= Math.sign(strafeVel) * sd;
           }
-        } else {
-          // Paused — bleed off any existing velocity
-          if (Math.abs(turnVel)   > 0) turnVel   = 0;
-          if (Math.abs(strafeVel) > 0) strafeVel = 0;
-        }
 
-        // Heading: smooth toward target, auto-rotate when idle, or very slow drift
-        if (targetHeading !== null) {
-          let diff = targetHeading - heading;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          heading += diff * dt * 1.5;
-          if (Math.abs(diff) < 0.05) targetHeading = null;
-        } else if (autoRotateTarget !== null) {
-          // Constant angular velocity: ~0.2 rad/s → 90° takes ~4.7 s
-          let diff = autoRotateTarget - heading;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          const step = Math.sign(diff) * Math.min(Math.abs(diff), AUTO_ROTATE_SPEED * dt);
-          heading += step;
-          if (Math.abs(diff) < 0.04) autoRotateTarget = null;
-        } else if (!isPaused && !flyTargetXZ) {
-          // One rotation every ~50 minutes — sunset slowly sweeps across the view
-          heading += 0.002 * dt;
+          // W/Space/↑ move forward; no baseline auto-cruise — the camera only
+          // moves when asked, so missed clicks and stillness stay still.
+          const wantForward = keys['Space'] || keys['KeyW'] || keys['ArrowUp'];
+          const targetSpeed = wantForward ? 25 : 0;
+          speed += (targetSpeed - speed) * dt * 3;
+          if (Math.abs(speed) > 0.05) {
+            camera.position.x += Math.sin(heading) * speed * dt;
+            camera.position.z += -Math.cos(heading) * speed * dt;
+          }
+          if (strafeVel !== 0) {
+            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
+            const sideZ = Math.sin(heading);  // perpendicular Z
+            camera.position.x += sideX * strafeVel * dt;
+            camera.position.z += sideZ * strafeVel * dt;
+          }
+
+          // Idle → drift resumes from wherever the camera is
+          const inputActive =
+            mouseDrag.active || touch.active || wantLeft || wantRight || wantForward ||
+            keys['KeyS'] || keys['ArrowDown'] || keys['KeyQ'] || keys['KeyE'] ||
+            lookVel.x !== 0 || lookVel.y !== 0 ||
+            wheelVel !== 0 || touch.pinchVel !== 0 || Math.abs(speed) > 0.5;
+          if (inputActive) idleSec = 0;
+          else idleSec += dt;
+          if (idleSec >= IDLE_RESUME_SEC && !activeStarRef.current) {
+            setMode('drift');
+          }
         }
 
         const fwdX = Math.sin(heading);
@@ -1253,58 +1842,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Sun always in front of camera so warm glow stays ahead
         skyMat.uniforms.uSunDir.value.set(fwdX, -0.15, fwdZ).normalize();
 
-        // Speed for free drift — W/ArrowUp/Space accelerate; S/ArrowDown brakes
-        const targetSpeed = isPaused ? 0 : (
-          (keys['Space'] || keys['KeyW'] || keys['ArrowUp']) ? 25 :
-          (keys['KeyS'] || keys['ArrowDown']) ? 0 : 4
-        );
-        speed += (targetSpeed - speed) * dt * 3;
-
-        // Horizontal position
-        if (flyTargetXZ) {
-          const fdx = flyTargetXZ.x - camera.position.x;
-          const fdz = flyTargetXZ.z - camera.position.z;
-          const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
-          if (fdist < 2) {
-            flyTargetXZ = null;
-          } else {
-            const flyAmt = Math.min(fdist, 90 * dt);
-            camera.position.x += (fdx / fdist) * flyAmt;
-            camera.position.z += (fdz / fdist) * flyAmt;
-          }
-        } else if (!isPaused) {
-          camera.position.x += fwdX * speed * dt;
-          camera.position.z += fwdZ * speed * dt;
-          // Q/E strafe — slide perpendicular to heading
-          if (strafeVel !== 0) {
-            const sideX = Math.cos(heading);  // perpendicular X (sin(h+π/2) = cos h)
-            const sideZ = Math.sin(heading);  // perpendicular Z
-            camera.position.x += sideX * strafeVel * dt;
-            camera.position.z += sideZ * strafeVel * dt;
-          }
-        }
-
-        // Camera Y — always at BASE_CAM_Y; stars (y=80-140) are above so we always look up
+        // Camera Y — cruise altitude, floored by terrain; stars (y=80-140) sit
+        // above so we always look up
         const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 55);
-        camTargetY = Math.max(flyTargetXZ ? flyStarTargetY : freeTargetY, terrainFloor);
+        camTargetY = Math.max(BASE_CAM_Y, terrainFloor);
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
-
-        // Pitch-based smooth lookAt — angles interpolate, no world-space jump on star click
-        const activeId = activeStarRef.current;
-        if (activeId) {
-          const ag = thoughtGroups.get(activeId);
-          if (ag) {
-            const dx = ag.position.x - camera.position.x;
-            const dz = ag.position.z - camera.position.z;
-            const dy = (ag.position.y - 4) - camera.position.y;
-            const hDist = Math.max(Math.sqrt(dx * dx + dz * dz), 0.01);
-            pitch += (Math.atan2(dy, hDist) - pitch) * Math.min(dt * 2.5, 1);
-          }
-        } else {
-          const restP = pitchTarget !== null ? pitchTarget : defaultPitch;
-          pitch += (restP - pitch) * Math.min(dt * 1.5, 1);
-          if (pitchTarget !== null && Math.abs(pitch - pitchTarget) < 0.01) pitchTarget = null;
-        }
 
         const cosP = Math.cos(pitch);
         const sinP = Math.sin(pitch);
@@ -1314,59 +1856,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           camera.position.z + fwdZ * cosP * 200,
         ));
 
-        // ── Auto-rotate toward nearest star when none visible for 10 s ──────────
-        // Only run when no star is selected and no manual turn is active.
-        if (!activeStarRef.current && targetHeading === null && autoRotateTarget === null && !isPaused) {
-          // Camera forward direction (horizontal only for dot-product test)
-          const camFwdX = fwdX;
-          const camFwdZ = fwdZ;
+        if (dt > 0.0005) {
 
-          // Check if any thought star is roughly in front of the camera.
-          // Use a ~50° half-angle cone (cos 50° ≈ 0.64).
-          const COS_HALF_FOV = 0.64;
-          let anyVisible = false;
-          thoughtGroups.forEach(g => {
-            if (anyVisible) return;
-            const gx = g.position.x - camera.position.x;
-            const gz = g.position.z - camera.position.z;
-            const hDist = Math.sqrt(gx * gx + gz * gz);
-            if (hDist < 1) return;
-            const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
-            if (dot > COS_HALF_FOV) anyVisible = true;
-          });
-
-          if (anyVisible) {
-            noStarVisibleSec = 0;
-          } else {
-            noStarVisibleSec += dt;
-            if (noStarVisibleSec >= 10) {
-              // Find nearest star within ±90° of current heading
-              // (dot product > 0 means it's in front of us, not behind)
-              let bestDist = Infinity;
-              let bestHeading: number | null = null;
-              thoughtGroups.forEach(g => {
-                const gx = g.position.x - camera.position.x;
-                const gz = g.position.z - camera.position.z;
-                const hDist = Math.sqrt(gx * gx + gz * gz);
-                if (hDist < 1) return;
-                const dot = (gx / hDist) * camFwdX + (gz / hDist) * camFwdZ;
-                // Skip stars more than 90° away (behind us or overhead)
-                if (dot < AUTO_ROTATE_MAX_COS) return;
-                if (hDist < bestDist) {
-                  bestDist = hDist;
-                  bestHeading = Math.atan2(gx, -gz);
-                }
-              });
-              if (bestHeading !== null) {
-                autoRotateTarget = bestHeading;
-                noStarVisibleSec = 0;
-              }
-            }
-          }
-        } else if (activeStarRef.current || targetHeading !== null) {
-          noStarVisibleSec = 0;
         }
-        // ── end auto-rotate ───────────────────────────────────────────────────
+        prevCamX = camera.position.x;
+        prevCamZ = camera.position.z;
 
         if (Math.abs(camera.position.x - lastSnapX) > 300 || Math.abs(camera.position.z - lastSnapZ) > 300) {
           lastSnapX = Math.round(camera.position.x / 300) * 300;
@@ -1399,6 +1893,43 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           g.position.z = anchorGroup.position.z + Math.sin(angle) * orbit.radius * Math.cos(orbit.tilt);
           g.position.y = anchorGroup.position.y + Math.sin(angle) * orbit.radius * Math.sin(orbit.tilt);
         });
+        // ── MOMENTS TICK (Phase 8) — runs after the orbit pass so the
+        // inscription is aimed at where the stars are this frame, and before
+        // the scale pass, which samples the blooms. ──
+        blooms.update(dt, id => {
+          const g = thoughtGroups.get(id);
+          return g ? camera.position.distanceTo(g.position) : null;
+        });
+        if (pendingFinale) {
+          const fg = thoughtGroups.get(pendingFinale.fromId);
+          pendingFinale.waited += dt;
+          // Let the mutual bloom lead by a beat, then write — once the bond's
+          // orbit actually exists.
+          if (pendingFinale.waited >= 0.55 && fg?.userData.orbit) {
+            const pts = projectOrbitRing(
+              pendingFinale.fromId, pendingFinale.toId, pendingFinale.reason.trim().length,
+            );
+            if (pts && inscription.begin(pts, pendingFinale.reason)) {
+              activeFinale = {
+                fromId: pendingFinale.fromId,
+                toId: pendingFinale.toId,
+                textLen: pendingFinale.reason.trim().length,
+              };
+              pendingFinale = null;
+            }
+          }
+          // The orbit never arrived (or never projected): the blooms stand alone.
+          if (pendingFinale && pendingFinale.waited > 3) pendingFinale = null;
+        }
+        if (inscription.active) {
+          const pts = activeFinale
+            ? projectOrbitRing(activeFinale.fromId, activeFinale.toId, activeFinale.textLen)
+            : null;
+          if (pts) inscription.setPath(pts);
+          inscription.update(dt);
+          if (!inscription.active) activeFinale = null;
+        }
+
         // Pass 3: scale pulse + spiro animation for all stars
         // Throttle dot→spiro upgrades to 2 per frame to avoid mid-frame hitching.
         let dotUpgradesThisFrame = 0;
@@ -1406,11 +1937,28 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           const id = g.userData.id as string;
           const isSelected = id === activeStarRef.current;
           const baseScale = 1.0 + Math.sin(time * 0.8 + (g.userData.pulsePhase as number)) * 0.05;
-          const targetMult = isSelected ? SELECTED_SCALE_MULT : 1.0;
+          // While a star is the tour's approach target it pre-grows with the
+          // glide (userData.preScale); selection then takes over at the same
+          // value, so focus never snaps.
+          const pre = (camMode === 'drift' && id === driftTargetId)
+            ? ((g.userData.preScale as number | undefined) ?? 1.0)
+            : 1.0;
+          const targetMult = isSelected ? SELECTED_SCALE_MULT : pre;
           const curMult = g.userData.scaleMult as number;
-          const newMult = curMult + (targetMult - curMult) * Math.min(dt * 3.5, 1);
+          const newMult = curMult + (targetMult - curMult) * Math.min(dt * 2.8, 1);
           g.userData.scaleMult = newMult;
-          g.scale.setScalar(baseScale * newMult);
+          // Phase 8 — a birth/finale bloom multiplies into the star's own
+          // scale rather than replacing it, so focus framing keeps working.
+          const bloom = blooms.sample(id);
+          g.scale.setScalar(baseScale * newMult * (bloom ? bloom.scale : 1));
+          if (bloom) {
+            setGroupOpacity(g, bloom.opacity);
+            const glowSprite = g.userData.glow as THREE.Sprite | null;
+            if (glowSprite) {
+              const gs = SPRITE_SCALE * 2.2 * bloom.glow;
+              glowSprite.scale.set(gs, gs, 1);
+            }
+          }
 
           // Proximity upgrade: dot-fallback stars get a real spirograph once they're
           // close enough to be clearly visible (~20+ px on screen ≈ dist < 350).
@@ -1429,9 +1977,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           const live = liveStars.get(id);
           if (live) {
-            // Selected star: full 60 fps, driven from the single main RAF loop.
-            live.inst.renderStatic(time);
+            // Selected star: full 60 fps at the star's own phase, cross-
+            // dissolving with the baked still — never a hard swap.
+            live.inst.renderStatic(time + live.timeOffset);
             live.texture.needsUpdate = true;
+            live.fade = live.dying
+              ? Math.max(0, live.fade - dt / LIVE_FADE_OUT_S)
+              : Math.min(1, live.fade + dt / LIVE_FADE_IN_S);
+            (live.overlay.material as THREE.SpriteMaterial).opacity = live.fade;
+            (live.baked.material as THREE.SpriteMaterial).opacity = 1 - live.fade;
+            if (live.dying && live.fade <= 0) destroyLive(id);
           } else {
             // ── Distance-based animation tiers for baked/proximity-upgraded stars ─
             // Closer = more frequent re-renders = livelier. Each tier is cheap
@@ -1495,15 +2050,25 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         addThoughtFnRef.current = null;
         removeThoughtFnRef.current = null;
         flyToFnRef.current = null;
-        turnLeftFnRef.current  = null;
-        turnRightFnRef.current = null;
+        tourNextFnRef.current = null;
         addBondFnRef.current = null;
         removeBondFnRef.current = null;
+        crossfadeFnRef.current = null;
+        bloomStarFnRef.current = null;
+        bondFinaleFnRef.current = null;
+        blooms.clear();
+        inscription.dispose();
+        skyGradTexB?.dispose();
+        (skyMat.uniforms.uSkyGrad.value as THREE.Texture | null)?.dispose();
 
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
         window.removeEventListener('resize', onResize);
+        window.removeEventListener('mousemove', onMouseMoveWindow);
+        window.removeEventListener('mouseup', onMouseUpWindow);
+        renderer.domElement.removeEventListener('mousedown', onMouseDown);
         renderer.domElement.removeEventListener('click', onClickCanvas);
+        renderer.domElement.removeEventListener('wheel', onWheel);
         renderer.domElement.removeEventListener('mousemove', onMouseMove);
         renderer.domElement.removeEventListener('touchstart', onTouchStart);
         renderer.domElement.removeEventListener('touchmove',  onTouchMove);
@@ -1513,7 +2078,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
         if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
 
-        liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
+        liveStars.forEach(live => {
+          live.inst.stop();
+          (live.overlay.material as THREE.SpriteMaterial).dispose();
+          live.texture.dispose();
+        });
         liveStars.clear();
         bondOrbitals.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
@@ -1534,6 +2103,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           container.removeChild(renderer.domElement);
         }
       };
+    // initialAtmosphere is intentionally read once at mount only — every
+    // subsequent world change goes through the crossfadeToWorld() handle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ─── THOUGHTS SYNC ────────────────────────────────────────────────────
@@ -1567,22 +2139,34 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       const next = new Set(bonds?.map(b => b.id) ?? []);
 
-      for (const b of (bonds ?? [])) {
-        if (!activeBondIds.current.has(b.id)) {
-          add(b);
-          activeBondIds.current.add(b.id);
-        }
-      }
-
+      // Removals FIRST. A bond owns the from-star's single orbit slot, and the
+      // optimistic id ("local-…") is swapped for the real one the moment
+      // /api/connect answers: adding before removing would set the orbit from
+      // the new id and then have the old id's teardown null it again, leaving
+      // the just-bound star frozen off its orbit.
       for (const id of [...activeBondIds.current]) {
         if (!next.has(id)) {
           remove(id);
           activeBondIds.current.delete(id);
         }
       }
+
+      for (const b of (bonds ?? [])) {
+        if (!activeBondIds.current.has(b.id)) {
+          add(b);
+          activeBondIds.current.add(b.id);
+        }
+      }
     }, [bonds]);
 
-    const showPerf = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf');
+    // Read ?perf= after mount only — reading window.location during render
+    // makes the server and client render different HTML (hydration error).
+    const [showPerf, setShowPerf] = useState(false);
+    useEffect(() => {
+      if (new URLSearchParams(window.location.search).has('perf')) {
+        setShowPerf(true);
+      }
+    }, []);
     return (
       <>
         <div ref={containerRef} style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
