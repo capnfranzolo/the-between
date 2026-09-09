@@ -541,7 +541,20 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       // ─── THOUGHTS ───
       const thoughtGroups = new Map<string, THREE.Group>();
-      interface LiveEntry { canvas: HTMLCanvasElement; inst: SpirographInstance; texture: THREE.CanvasTexture; origTexture: THREE.Texture }
+      interface LiveEntry {
+        canvas: HTMLCanvasElement;
+        inst: SpirographInstance;
+        texture: THREE.CanvasTexture;
+        /** The live animation rides its own sprite ABOVE the baked one and
+         *  cross-dissolves in/out — never a hard texture swap. */
+        overlay: THREE.Sprite;
+        baked: THREE.Sprite;
+        timeOffset: number;
+        fade: number;        // 0 = baked still, 1 = fully live
+        dying: boolean;      // fading back out; cleaned up at fade 0
+      }
+      const LIVE_FADE_IN_S = 0.5;
+      const LIVE_FADE_OUT_S = 0.35;
       const liveStars = new Map<string, LiveEntry>();
       let bakedStarCount = 0;
       let proximityUpgradeCount = 0;
@@ -666,7 +679,8 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
 
       function activateLive(id: string) {
-        if (liveStars.has(id)) return;
+        const existing = liveStars.get(id);
+        if (existing) { existing.dying = false; return; } // re-selected mid-dissolve
         const g = thoughtGroups.get(id);
         if (!g) return;
         let spiro = g.userData.spiro as StarSpiro | null;
@@ -705,32 +719,45 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         const liveTexture = new THREE.CanvasTexture(liveCanvas);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (liveTexture as any).encoding = 3001; // THREE.sRGBEncoding
-        const mat = spiro.sprite.material as THREE.SpriteMaterial;
-        const origTexture = mat.map!;
-        mat.map = liveTexture;
-        mat.needsUpdate = true;
-        liveStars.set(id, { canvas: liveCanvas, inst: liveInst, texture: liveTexture, origTexture });
+        // Prime the live frame at the star's own phase so orbiting bodies are
+        // exactly where the baked still left them — the dissolve then only has
+        // to cover frame-rate, never position jumps.
+        liveInst.renderStatic(0);
+        const overlay = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: liveTexture, transparent: true, depthWrite: false, opacity: 0,
+        }));
+        overlay.scale.set(SPRITE_SCALE, SPRITE_SCALE, 1);
+        g.add(overlay);
+        liveStars.set(id, {
+          canvas: liveCanvas, inst: liveInst, texture: liveTexture,
+          overlay, baked: spiro.sprite, timeOffset: spiro.timeOffset,
+          fade: 0, dying: false,
+        });
+      }
+
+      // Removes a live entry NOW — no dissolve. The gentle path is
+      // deactivateLive(), which fades out first.
+      function destroyLive(id: string) {
+        const live = liveStars.get(id);
+        if (!live) return;
+        live.inst.stop();
+        const g = thoughtGroups.get(id);
+        if (g) g.remove(live.overlay);
+        (live.overlay.material as THREE.SpriteMaterial).dispose();
+        (live.baked.material as THREE.SpriteMaterial).opacity = 1;
+        live.texture.dispose();
+        liveStars.delete(id);
       }
 
       function deactivateLive(id: string) {
         const live = liveStars.get(id);
         if (!live) return;
-        live.inst.stop();
-        const g = thoughtGroups.get(id);
-        if (g) {
-          const spiro = g.userData.spiro as StarSpiro | null;
-          if (spiro) {
-            const mat = spiro.sprite.material as THREE.SpriteMaterial;
-            mat.map = live.origTexture;
-            mat.needsUpdate = true;
-          }
-        }
-        live.texture.dispose();
-        liveStars.delete(id);
+        // Dissolve back to the baked still; the render tick cleans up at 0.
+        live.dying = true;
       }
 
       function destroyThought(id: string) {
-        deactivateLive(id);
+        destroyLive(id);
         if (id === activeStarRef.current) flyTargetXZ = null;
         if (id === driftTargetId) {
           driftTargetId = null;
@@ -1950,9 +1977,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
           const live = liveStars.get(id);
           if (live) {
-            // Selected star: full 60 fps, driven from the single main RAF loop.
-            live.inst.renderStatic(time);
+            // Selected star: full 60 fps at the star's own phase, cross-
+            // dissolving with the baked still — never a hard swap.
+            live.inst.renderStatic(time + live.timeOffset);
             live.texture.needsUpdate = true;
+            live.fade = live.dying
+              ? Math.max(0, live.fade - dt / LIVE_FADE_OUT_S)
+              : Math.min(1, live.fade + dt / LIVE_FADE_IN_S);
+            (live.overlay.material as THREE.SpriteMaterial).opacity = live.fade;
+            (live.baked.material as THREE.SpriteMaterial).opacity = 1 - live.fade;
+            if (live.dying && live.fade <= 0) destroyLive(id);
           } else {
             // ── Distance-based animation tiers for baked/proximity-upgraded stars ─
             // Closer = more frequent re-renders = livelier. Each tier is cheap
@@ -2044,7 +2078,11 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         if (smokeCleanupTimer)  clearTimeout(smokeCleanupTimer);
         if (container.contains(smokeOverlay)) container.removeChild(smokeOverlay);
 
-        liveStars.forEach(live => { live.inst.stop(); live.texture.dispose(); });
+        liveStars.forEach(live => {
+          live.inst.stop();
+          (live.overlay.material as THREE.SpriteMaterial).dispose();
+          live.texture.dispose();
+        });
         liveStars.clear();
         bondOrbitals.forEach((_, id) => destroyBond(id));
         thoughtGroups.forEach((_, id) => destroyThought(id));
