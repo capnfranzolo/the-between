@@ -53,14 +53,14 @@ const PENDING_BOND_KEY = (starId: string) => `btw_pending_bond_${starId}`;
 function LandingPageInner() {
   const searchParams = useSearchParams();
   const requestedQuestionId = searchParams.get('question');
+  // ?question= pins the world (lozenge switches mirror it via replaceState so
+  // refresh keeps you where you were); ?compose=1 is the explicit "I came to
+  // type" intent — straight to the composer, no arrival theatre.
   // The landing world: an explicit ?question= wins; otherwise a RANDOM active
   // question is drawn once the list arrives, so the first question doesn't
   // absorb all the traffic and returning visitors land somewhere new.
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(requestedQuestionId);
-  // Arriving via another cosmos page's "+" is an explicit intent to
-  // contribute, not a fresh arrival — skip the scripted intro and go
-  // straight to the composer overlay.
-  const cameToContribute = !!requestedQuestionId;
+  const cameToContribute = searchParams.get('compose') === '1';
 
   const [data, setData] = useState<CosmosData | null>(null);
   const [selected, setSelected] = useState<string | null>(null);

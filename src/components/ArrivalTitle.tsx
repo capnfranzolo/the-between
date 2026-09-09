@@ -18,8 +18,11 @@ const HOLD_MS = 1900;   // a beat to read it
 const RISE_MS = 1200;   // travel up + shrink + go quiet
 
 // Matches the pages' top-chrome header exactly — the swap must be invisible.
+// The centered state is the SAME font-size and width as the landed header —
+// its extra size comes from transform: scale(), which never affects layout,
+// so the line breaks are identical from the first frame to the last.
 const HEADER_FONT = 'clamp(22px, 3.2vw, 36px)';
-const CENTER_FONT = 'clamp(26px, 4.6vw, 46px)';
+const CENTER_SCALE = 1.3;
 
 export default function ArrivalTitle({
   text,
@@ -98,7 +101,9 @@ export default function ArrivalTitle({
           position: 'absolute',
           left: '50%',
           top: risen ? 22 : '50%',
-          transform: risen ? 'translate(-50%, 0)' : 'translate(-50%, -50%)',
+          transform: risen
+            ? 'translate(-50%, 0) scale(1)'
+            : `translate(-50%, -50%) scale(${CENTER_SCALE})`,
           width: 'min(900px, calc(100vw - 60px))',
           textAlign: 'center',
           fontFamily: SERIF,
@@ -106,14 +111,14 @@ export default function ArrivalTitle({
           fontWeight: 400,
           lineHeight: 1.2,
           letterSpacing: '0.01em',
-          fontSize: risen ? HEADER_FONT : CENTER_FONT,
+          fontSize: HEADER_FONT,
           // Centered: the answers' white, fully present. Risen: the header's
           // quiet transparency.
           color: risen ? BTW.textPri : '#F0E8E0',
           opacity: phase === 'enter' ? 0 : risen ? 0.35 : 1,
           textShadow: '0 1px 24px rgba(10,6,24,0.6)',
           transition: risen
-            ? `top ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), font-size ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${RISE_MS}ms ease, color ${RISE_MS}ms ease`
+            ? `top ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${RISE_MS}ms ease, color ${RISE_MS}ms ease`
             : `opacity ${ENTER_MS}ms ease`,
         }}
       >
