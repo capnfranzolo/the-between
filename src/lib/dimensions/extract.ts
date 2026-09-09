@@ -8,6 +8,10 @@ const DEFAULTS: DimensionResult = {
   vulnerability: 0.5,
   scope: 0.5,
   rootedness: 0.5,
+  resolve: 0.5,
+  charge: 0.5,
+  connection: 0.5,
+  temporality: 0.5,
   emotionIndex: 3,
   reasoning: 'default',
   publishable: true,
@@ -49,6 +53,10 @@ export function visualDimensions(
     vulnerability: r.vulnerability,
     scope: r.scope,
     rootedness: r.rootedness,
+    resolve: r.resolve,
+    charge: r.charge,
+    connection: r.connection,
+    temporality: r.temporality,
     emotionIndex: r.emotionIndex,
     reasoning: r.reasoning,
   };
@@ -73,7 +81,7 @@ export async function extractDimensions(answer: string): Promise<DimensionResult
     });
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 350,
+      max_tokens: 420,
       system: DIMENSION_PROMPT,
       messages: [{ role: 'user', content: answer }],
     });
@@ -94,6 +102,10 @@ export async function extractDimensions(answer: string): Promise<DimensionResult
       vulnerability: clamp01(parsed.vulnerability),
       scope:         clamp01(parsed.scope),
       rootedness:    clamp01(parsed.rootedness),
+      resolve:       clamp01(parsed.resolve),
+      charge:        clamp01(parsed.charge),
+      connection:    clamp01(parsed.connection),
+      temporality:   clamp01(parsed.temporality),
       emotionIndex:  clampEmotion(parsed.emotionIndex),
       reasoning:     typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
       publishable,

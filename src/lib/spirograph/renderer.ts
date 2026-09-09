@@ -10,6 +10,7 @@ import {
   type ArchetypeSpec, type Projector, type RGB,
 } from './archetypes';
 import { drawProposal, isStandaloneProposal } from './proposals';
+import { resolveFamily, type FamilyName } from './families';
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -32,9 +33,17 @@ export interface SpiroDimensions {
    */
   seed?: string;
   /**
-   * EXPLORATORY — /preview/stars only. Names a proposal form from
-   * `proposals.ts` to draw over this star. Never set on stored dimensions;
-   * the cosmos, panel and OG paths do not pass it.
+   * The four semantic axes (round-6 remap) — they choose the star's FAMILY.
+   * Optional: stars extracted before the remap lack them and resolve to the
+   * classic tangle/spirograph, pixel-identical to their prior look.
+   */
+  resolve?: number;
+  charge?: number;
+  connection?: number;
+  temporality?: number;
+  /**
+   * /preview/stars only — overrides the resolved family type with a specific
+   * form from `proposals.ts`. Never set on stored dimensions.
    */
   experiment?: string;
 }
@@ -92,8 +101,10 @@ interface Geometry {
   certainty: number;
   /** Phase 5 — structural archetype resolved once, alongside the geometry. */
   arch: ArchetypeSpec;
-  /** Exploratory proposal form (preview page only) — see SpiroDimensions. */
-  experiment?: string;
+  /** Round 6 — the star's family and concrete form ('spirograph' or a
+   *  proposals.ts kind), resolved once here so every surface agrees. */
+  family: FamilyName;
+  form: string;
 }
 
 interface CamState {
@@ -251,6 +262,7 @@ function project(x: number, y: number, z: number, cam: CamState): { sx: number; 
 function computeGeometry(dims: SpiroDimensions): Geometry {
   const { certainty, warmth, tension, vulnerability, scope, rootedness, curveType } = dims;
   const arch = resolveArchetype(dims);
+  const famSpec = resolveFamily(dims, arch.seed);
 
   const R = CONFIG.outerRadius;
 
@@ -262,7 +274,9 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
   const totalTheta = totalRevolutions * 2 * Math.PI * (petals + 1);
 
   const maxTilt = scope * CONFIG.maxTiltFactor;
-  const angularSpeed = CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm);
+  // Round 6 — charge is a global speed dial: burning thoughts move quicker.
+  const chargeMult = 0.75 + (dims.charge ?? 0.5) * 0.5;
+  const angularSpeed = (CONFIG.speed.atWarm + (1 - warmth) * (CONFIG.speed.atCold - CONFIG.speed.atWarm)) * chargeMult;
   const fireflyCount = Math.max(CONFIG.fireflies.min,
     Math.round((1 - rootedness) * (CONFIG.fireflies.max - CONFIG.fireflies.min) + CONFIG.fireflies.min));
 
@@ -274,7 +288,8 @@ function computeGeometry(dims: SpiroDimensions): Geometry {
     R, r, d, petals, totalRevolutions, totalTheta, maxTilt,
     angularSpeed, fireflyCount, tailFraction, fadeExp, strokeBase,
     scope, tension, vulnerability, curveType, certainty, arch,
-    experiment: dims.experiment,
+    family: famSpec.family,
+    form: dims.experiment ?? famSpec.type,
   };
 }
 
@@ -309,17 +324,19 @@ function renderFrame(
   const archR = CONFIG.outerRadius;
   const projector: Projector = (x, y, z) => project(x, y, z, cam);
 
-  // Standalone proposal geometries (/preview/stars only) replace the base
-  // form entirely — the star is a different curve family, not an overlay.
-  // They share `projector`, so the same slow world-turn animates them.
-  if (geo.experiment && isStandaloneProposal(geo.experiment)) {
-    drawProposal(geo.experiment, ctx, projector, archR, baseRGB as RGB, time, {
+  // Round 6 — standalone family forms replace the spirograph entirely. They
+  // share `projector`, so the same slow world-turn animates them.
+  if (geo.form !== 'spirograph' && isStandaloneProposal(geo.form)) {
+    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
       ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
     });
     return;
   }
 
-  drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
+  // Archetype dressings (satellites/binary/saturn/comet) belong to the
+  // tangle family — overlay forms (pulsar, eclipse) ride a bare spirograph.
+  const dressed = geo.form === 'spirograph';
+  if (dressed) drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
 
   // Ghost trace
   if (geo.certainty > CONFIG.ghostThreshold) {
@@ -397,12 +414,12 @@ function renderFrame(
 
   // Phase 5 — foreground structures (binary cores, satellite motes) draw last
   // so they stay legible over the firefly tangle.
-  drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+  if (dressed) drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
 
-  // Exploratory proposal forms — /preview/stars only, never set on stored
-  // dimensions. Drawn last so a proposal can restyle or occlude the base form.
-  if (geo.experiment) {
-    drawProposal(geo.experiment, ctx, projector, archR, baseRGB as RGB, time, {
+  // Overlay family forms (pulsar's beams, void's eclipse) draw over the bare
+  // spirograph — they restyle or occlude the base form.
+  if (geo.form !== 'spirograph') {
+    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
       ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
     });
   }
