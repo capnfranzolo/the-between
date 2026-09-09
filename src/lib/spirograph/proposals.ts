@@ -153,7 +153,7 @@ function tracedPath(
     return { sx: a.sx + (b.sx - a.sx) * f, sy: a.sy + (b.sy - a.sy) * f, scale: a.scale + (b.scale - a.scale) * f };
   };
 
-  const SEG = 16;
+  const SEG = 26;
   const tailLen = tailFrac * n;
   for (let k = 0; k < tracers; k++) {
     const u = ((time * speed + k / tracers) % 1 + 1) % 1;
@@ -208,6 +208,35 @@ function vertexSpark(ctx: CanvasRenderingContext2D, pj: Projector, v: Pt3, c: RG
   ctx.fillStyle = rgba(c, 0.9 * lit * boost);
   ctx.arc(s.sx, s.sy, Math.max(0.8, 1.6 * s.scale), 0, Math.PI * 2);
   ctx.fill();
+}
+
+/** Energy running along a 3D segment: a bright head with a fading tail —
+ *  the "drawn" feeling, applied to straight edges. `u` is head position 0..1. */
+function glintTrail(
+  ctx: CanvasRenderingContext2D, pj: Projector, a: Pt3, b: Pt3, c: RGB, u: number,
+  opts: { span?: number; width?: number; alpha?: number; glowR?: number } = {},
+) {
+  const { span = 0.35, width = 1.6, alpha = 0.75, glowR = 7 } = opts;
+  const at = (t: number): Pt3 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t });
+  const STEPS = 8;
+  let prev = pj(at(u).x, at(u).y, at(u).z);
+  for (let j = 1; j <= STEPS; j++) {
+    const t = Math.max(0, u - (j / STEPS) * span);
+    const pp = at(t);
+    const sp = pj(pp.x, pp.y, pp.z);
+    ctx.beginPath();
+    ctx.strokeStyle = rgba(c, alpha * (1 - j / STEPS));
+    ctx.lineWidth = width * (1 - (j / STEPS) * 0.6);
+    ctx.lineCap = 'round';
+    ctx.moveTo(prev.sx, prev.sy);
+    ctx.lineTo(sp.sx, sp.sy);
+    ctx.stroke();
+    prev = sp;
+    if (t === 0) break;
+  }
+  const h = at(u);
+  const hs = pj(h.x, h.y, h.z);
+  glow(ctx, hs.sx, hs.sy, glowR * hs.scale, c, 0.45);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -385,10 +414,17 @@ function geode(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, 
 // outward from a shared base the way real quartz grows. ──────────────────────
 function quartz(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
   const rnd = mulberry(seed ^ 0x9142);
-  const N = 4 + Math.floor(rnd() * 3); // 4-6 points in the cluster
+  const N = 5 + Math.floor(rnd() * 3); // 5-7 points in the cluster
+  // The solid center the points grow from: a bright nucleus with a rocky core.
+  const heart0 = pj(0, 0, 0);
+  glow(ctx, heart0.sx, heart0.sy, 30 * heart0.scale, c, 0.55);
+  ctx.beginPath();
+  ctx.fillStyle = rgba(c, 0.95);
+  ctx.arc(heart0.sx, heart0.sy, Math.max(1.8, 3.4 * heart0.scale), 0, Math.PI * 2);
+  ctx.fill();
   for (let q = 0; q < N; q++) {
-    // Each crystal points outward-ish from the cluster heart.
-    const o: Orient = { rx: 0.5 + rnd() * 1.6, ry: rnd() * Math.PI * 2 };
+    // Full-sphere orientations — the cluster grows in every direction.
+    const o: Orient = { rx: Math.acos(2 * rnd() - 1), ry: rnd() * Math.PI * 2 };
     const len = R * (0.5 + rnd() * 0.55);
     const rad = R * (0.09 + rnd() * 0.07);
     const base = R * (0.02 + rnd() * 0.12);
@@ -407,27 +443,23 @@ function quartz(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB,
     const tip = orient({ x: 0, y: base + len, z: 0 }, o);
     for (let i = 0; i < 6; i++) {
       const j = (i + 1) % 6;
-      litEdge(ctx, pj, b0[i], b0[j], c, 0.7, 0.8);
-      litEdge(ctx, pj, b1[i], b1[j], c, 0.9, 0.8);
-      litEdge(ctx, pj, b0[i], b1[i], c, 0.9, 0.8);
-      litEdge(ctx, pj, b1[i], tip, c, 1.0, 0.8);
+      litEdge(ctx, pj, b0[i], b0[j], c, 0.28, 0.7);
+      litEdge(ctx, pj, b1[i], b1[j], c, 0.38, 0.7);
+      litEdge(ctx, pj, b0[i], b1[i], c, 0.38, 0.7);
+      litEdge(ctx, pj, b1[i], tip, c, 0.45, 0.7);
     }
     // A faint internal gleam line and the hot tip.
     litEdge(ctx, pj, orient({ x: 0, y: base, z: 0 }, o), tip, c, 0.3, 0.8);
     vertexSpark(ctx, pj, tip, c, 1.1);
-    // A glint slides up one prism edge and rings the tip on arrival.
-    const gu = ((time * 0.18 + q / N) % 1 + 1) % 1;
+    // The crystal is DRAWN: light travels base→tip with a dissolving tail.
+    const gu = ((time * 0.22 + q / N) % 1 + 1) % 1;
     const gi = Math.floor(rnd() * 6);
-    const gp: Pt3 = {
-      x: b1[gi].x + (tip.x - b1[gi].x) * gu,
-      y: b1[gi].y + (tip.y - b1[gi].y) * gu,
-      z: b1[gi].z + (tip.z - b1[gi].z) * gu,
-    };
-    const gs = pj(gp.x, gp.y, gp.z);
-    glow(ctx, gs.sx, gs.sy, 7 * gs.scale, c, 0.45 * (0.4 + 0.6 * gu));
+    const root = orient({ x: 0, y: 0, z: 0 }, o);
+    glintTrail(ctx, pj, root, tip, c, gu, { span: 0.45, width: 1.8 });
+    // And a second, quieter one climbing a prism edge out of phase.
+    glintTrail(ctx, pj, b0[gi], b1[gi], c, ((gu + 0.5) % 1), { span: 0.4, width: 1.1, alpha: 0.45, glowR: 4 });
+    if (gu > 0.9) vertexSpark(ctx, pj, tip, c, 1.2);
   }
-  const heart = pj(0, 0, 0);
-  glow(ctx, heart.sx, heart.sy, 20 * heart.scale, c, 0.3);
 }
 
 // ── shard — long linear splinters radiating from a bright heart: the most
@@ -444,14 +476,12 @@ function shard(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, 
     const baseA = orient({ x: -halfW, y: inner }, o);
     const baseB = orient({ x: halfW, y: inner }, o);
     const tip = orient({ x: 0, y: outer }, o);
-    litEdge(ctx, pj, baseA, tip, c, 0.9, 0.7);
-    litEdge(ctx, pj, baseB, tip, c, 0.6, 0.7);
-    litEdge(ctx, pj, baseA, baseB, c, 0.5, 0.7);
-    // Glint racing up the blade, brightest as it leaves the tip.
-    const gu = ((time * 0.22 + i / N) % 1 + 1) % 1;
-    const gp: Pt3 = { x: baseA.x + (tip.x - baseA.x) * gu, y: baseA.y + (tip.y - baseA.y) * gu, z: baseA.z + (tip.z - baseA.z) * gu };
-    const gs = pj(gp.x, gp.y, gp.z);
-    glow(ctx, gs.sx, gs.sy, 6 * gs.scale, c, 0.5 * (0.3 + 0.7 * gu));
+    // The strokes only imply the blade — the light does the drawing.
+    litEdge(ctx, pj, baseA, tip, c, 0.3, 0.6);
+    litEdge(ctx, pj, baseB, tip, c, 0.18, 0.6);
+    // Light races up the blade with a long dissolving tail.
+    const gu = ((time * 0.24 + i / N) % 1 + 1) % 1;
+    glintTrail(ctx, pj, baseA, tip, c, gu, { span: 0.55, width: 2.0, alpha: 0.85 });
     if (gu > 0.92) vertexSpark(ctx, pj, tip, c, 1.2);
   }
   const heart = pj(0, 0, 0);
@@ -490,14 +520,22 @@ function facet(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, 
       ctx.closePath();
       ctx.fill();
     }
-    litEdge(ctx, pj, girdle[i], girdle[j], c, 0.95, 0.8);   // girdle
-    litEdge(ctx, pj, table[i], table[j], c, 0.8, 0.8);      // table rim
-    litEdge(ctx, pj, girdle[i], table[i], c, 0.65, 0.7);    // crown kites
-    litEdge(ctx, pj, girdle[j], table[i], c, 0.65, 0.7);
-    litEdge(ctx, pj, girdle[i], culet, c, 0.5, 0.7);        // pavilion
+    litEdge(ctx, pj, girdle[i], girdle[j], c, 0.5, 0.7);    // girdle
+    litEdge(ctx, pj, table[i], table[j], c, 0.4, 0.7);      // table rim
+    litEdge(ctx, pj, girdle[i], table[i], c, 0.32, 0.6);    // crown kites
+    litEdge(ctx, pj, girdle[j], table[i], c, 0.32, 0.6);
+    litEdge(ctx, pj, girdle[i], culet, c, 0.25, 0.6);       // pavilion
   }
   for (const v of girdle) vertexSpark(ctx, pj, v, c, 0.7);
   vertexSpark(ctx, pj, culet, c, 1.1);
+  // The energy: light laps the girdle, and a second runner takes the crown
+  // rim the other way — the gem is being continuously drawn.
+  tracedPath(ctx, pj, girdle, c, time, { pathAlpha: 0, tracers: 2, speed: 0.05, tailFrac: 0.3, headGlow: 9 });
+  tracedPath(ctx, pj, [...table].reverse(), c, time, { pathAlpha: 0, tracers: 1, speed: 0.06, tailFrac: 0.3, headGlow: 8 });
+  // And now and then a bolt drops girdle→culet.
+  const bu = ((time * 0.3) % 1 + 1) % 1;
+  const bi = Math.floor(((time * 0.3) % N + N)) % N;
+  glintTrail(ctx, pj, girdle[bi], culet, c, bu, { span: 0.4, width: 1.4, alpha: 0.6, glowR: 5 });
 }
 
 // ── shatter — a caged burst in true 3D; every vertex eases to a new resting
@@ -521,15 +559,17 @@ function shatter(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB
     const u = ss(cyc < 1 ? cyc : 2 - cyc);
     verts.push({ x: a.x + (b2.x - a.x) * u, y: a.y + (b2.y - a.y) * u, z: a.z + (b2.z - a.z) * u });
   }
-  // Cage: ring order + a few cross-facets.
+  // Cage: quiet strokes that only imply the structure —
   for (let i = 0; i < N; i++) {
-    litEdge(ctx, pj, verts[i], verts[(i + 1) % N], c, 0.95, 0.9);
-    litEdge(ctx, pj, verts[i], verts[(i + 3) % N], c, 0.35, 0.7);
+    litEdge(ctx, pj, verts[i], verts[(i + 1) % N], c, 0.42, 0.8);
+    litEdge(ctx, pj, verts[i], verts[(i + 3) % N], c, 0.16, 0.6);
   }
+  // — while energy runs the ring and draws it for real.
+  tracedPath(ctx, pj, verts, c, time, { pathAlpha: 0, tracers: 3, speed: 0.05, tailFrac: 0.3, headGlow: 10 });
   // Shard spikes + hot vertices.
   for (const v of verts) {
-    litEdge(ctx, pj, v, { x: v.x * 1.2, y: v.y * 1.2, z: v.z * 1.2 }, c, 0.5, 0.7);
-    vertexSpark(ctx, pj, v, c);
+    litEdge(ctx, pj, v, { x: v.x * 1.2, y: v.y * 1.2, z: v.z * 1.2 }, c, 0.3, 0.6);
+    vertexSpark(ctx, pj, v, c, 0.8);
   }
   const heart = pj(0, 0, 0);
   glow(ctx, heart.sx, heart.sy, 18 * heart.scale, c, 0.35);
@@ -553,19 +593,11 @@ function constellation(ctx: CanvasRenderingContext2D, pj: Projector, R: number, 
   const links: [number, number][] = [];
   for (let i = 0; i < N - 1; i++) links.push([i, i + 1]);
   links.push([0, 3], [2, 5]);
-  for (const [a, b] of links) litEdge(ctx, pj, nodes[a], nodes[b], c, 0.55, 0.7);
-  // A pulse walks the chain of links.
-  const totalU = links.length;
-  const pu = ((time * 0.14) % 1) * totalU;
-  const li = Math.floor(pu), lf = pu - li;
-  const [a, b] = links[li % totalU];
-  const pp: Pt3 = {
-    x: nodes[a].x + (nodes[b].x - nodes[a].x) * lf,
-    y: nodes[a].y + (nodes[b].y - nodes[a].y) * lf,
-    z: nodes[a].z + (nodes[b].z - nodes[a].z) * lf,
-  };
-  const ps = pj(pp.x, pp.y, pp.z);
-  glow(ctx, ps.sx, ps.sy, 10 * ps.scale, c, 0.5);
+  for (const [a, b] of links) litEdge(ctx, pj, nodes[a], nodes[b], c, 0.26, 0.6);
+  // Pulses walk the survey chain, tails dissolving behind them.
+  const chain: Pt3[] = [];
+  for (const [a, b] of links) { chain.push(nodes[a], nodes[b]); }
+  tracedPath(ctx, pj, chain, c, time, { pathAlpha: 0, tracers: 2, speed: 0.045, tailFrac: 0.22, headGlow: 10 });
   nodes.forEach((v, i) => {
     const s = pj(v.x, v.y, v.z);
     const big = i % 3 === 0;
@@ -579,20 +611,30 @@ function constellation(ctx: CanvasRenderingContext2D, pj: Projector, R: number, 
 }
 
 // ── vortex — spiral arms alone, quicker, with light flowing outward. ─────────
-function vortex(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number) {
-  const ARMS = 3, STEPS = 34;
+function vortex(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
+  const rnd = mulberry(seed ^ 0x40e7);
+  const ARMS = 5, STEPS = 34;
   const spin = time * 0.22;
   for (let a = 0; a < ARMS; a++) {
-    const phase = (a / ARMS) * Math.PI * 2 + spin;
+    // Each arm lives in its own plane and twists out of it as it goes —
+    // a storm, not a disk.
+    const o: Orient = { rx: 0.2 + rnd() * 1.0, ry: rnd() * Math.PI * 2 };
+    const zDir = (rnd() < 0.5 ? 1 : -1) * (0.25 + rnd() * 0.35);
+    const phase = (a / ARMS) * Math.PI * 2 + spin * (rnd() < 0.5 ? 1 : -1);
+    const armAt = (k: number): Pt3 => {
+      const rad = (0.12 + k * 1.0) * R;
+      const th = phase + k * 3.6;
+      return orient({ x: Math.cos(th) * rad, y: Math.sin(th) * rad, z: k * k * R * zDir }, o);
+    };
     let prev: { sx: number; sy: number } | null = null;
     for (let i = 0; i <= STEPS; i++) {
       const k = i / STEPS;
-      const p = ring((0.12 + k * 1.02) * R, phase + k * 3.6, 0.5, 0);
+      const p = armAt(k);
       const s = pj(p.x, p.y, p.z);
       if (prev) {
         ctx.beginPath();
-        ctx.strokeStyle = rgba(c, 0.5 * (1 - k * 0.85));
-        ctx.lineWidth = 2.4 * (1 - k * 0.6);
+        ctx.strokeStyle = rgba(c, 0.4 * (1 - k * 0.85));
+        ctx.lineWidth = 2.2 * (1 - k * 0.6);
         ctx.lineCap = 'round';
         ctx.moveTo(prev.sx, prev.sy);
         ctx.lineTo(s.sx, s.sy);
@@ -600,13 +642,24 @@ function vortex(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB,
       }
       prev = s;
     }
-    // Light flows outward along the arm.
-    for (let f = 0; f < 2; f++) {
-      const k = ((time * 0.24 + f / 2 + a / ARMS) % 1 + 1) % 1;
-      const p = ring((0.12 + k * 1.02) * R, phase + k * 3.6, 0.5, 0);
-      const s = pj(p.x, p.y, p.z);
-      glow(ctx, s.sx, s.sy, 9 * s.scale * (1 - k * 0.4), c, 0.5 * (1 - k * 0.5));
+    // Light flows outward along the arm, tail dissolving behind it.
+    const k = ((time * 0.26 + a / ARMS) % 1 + 1) % 1;
+    let gp = pj(armAt(k).x, armAt(k).y, armAt(k).z);
+    for (let j = 1; j <= 8; j++) {
+      const kk = Math.max(0, k - (j / 8) * 0.2);
+      const p = armAt(kk);
+      const sp = pj(p.x, p.y, p.z);
+      ctx.beginPath();
+      ctx.strokeStyle = rgba(c, 0.7 * (1 - j / 8));
+      ctx.lineWidth = 2.0 * (1 - (j / 8) * 0.6);
+      ctx.lineCap = 'round';
+      ctx.moveTo(gp.sx, gp.sy);
+      ctx.lineTo(sp.sx, sp.sy);
+      ctx.stroke();
+      gp = sp;
     }
+    const h = pj(armAt(k).x, armAt(k).y, armAt(k).z);
+    glow(ctx, h.sx, h.sy, 9 * h.scale * (1 - k * 0.4), c, 0.5);
   }
   const core = pj(0, 0, 0);
   glow(ctx, core.sx, core.sy, 22 * core.scale, c, 0.55);
@@ -634,6 +687,27 @@ function corona(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB,
       if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
     }
     ctx.stroke();
+    // Light circulates the ring itself — the crown is being drawn around.
+    for (let g = 0; g < 2; g++) {
+      const gu = ((time * (0.1 + Math.abs(sh.spin)) + g / 2 + sh.phase) % 1 + 1) % 1;
+      const ga = gu * Math.PI * 2;
+      let prevg = pj(ring(rBase, ga, 0.3, spin).x, ring(rBase, ga, 0.3, spin).y, ring(rBase, ga, 0.3, spin).z);
+      for (let j = 1; j <= 9; j++) {
+        const p = ring(rBase, ga - (j / 9) * 0.8, 0.3, spin);
+        const sp = pj(p.x, p.y, p.z);
+        ctx.beginPath();
+        ctx.strokeStyle = rgba(c, 0.6 * (1 - j / 9) * (0.5 + 0.5 * pulse));
+        ctx.lineWidth = 1.8 * (1 - (j / 9) * 0.5);
+        ctx.lineCap = 'round';
+        ctx.moveTo(prevg.sx, prevg.sy);
+        ctx.lineTo(sp.sx, sp.sy);
+        ctx.stroke();
+        prevg = sp;
+      }
+      glow(ctx, prevg.sx, prevg.sy, 0, c, 0); // tail end fades to nothing
+      const hh = pj(ring(rBase, ga, 0.3, spin).x, ring(rBase, ga, 0.3, spin).y, ring(rBase, ga, 0.3, spin).z);
+      glow(ctx, hh.sx, hh.sy, 7 * hh.scale, c, 0.45 * (0.5 + 0.5 * pulse));
+    }
     for (let i = 0; i < sh.spikes; i++) {
       const th = (i / sh.spikes) * Math.PI * 2;
       const len = (i % 2 === 0 ? 1.28 : 1.12) * breathe;
@@ -727,7 +801,8 @@ function superformula(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c
     }
     const pts = fit(flat, R * scale).map(p => orient(p, o));
     tracedPath(ctx, pj, pts, c, time, {
-      pathAlpha: 0.38 - si * 0.07, width: 1.2 - si * 0.2, tracers: si < 2 ? 3 : 2, speed: 0.014 + si * 0.004,
+      pathAlpha: 0.14 - si * 0.02, width: 0.9 - si * 0.15, tracers: 2, speed: 0.018 + si * 0.004,
+      tailFrac: 0.26, headGlow: 10,
     });
   });
 }
@@ -757,36 +832,38 @@ function mystery(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB
   }
   const fitted = fit(raw, R * 0.95);
   const pts = fitted.map((p, i) => orient({ x: p.x, y: p.y, z: raw[i].z * R * 0.5 }, o));
-  tracedPath(ctx, pj, pts, c, time, { pathAlpha: 0.26, width: 0.9, tracers: 4, speed: 0.01 });
+  tracedPath(ctx, pj, pts, c, time, { pathAlpha: 0.09, width: 0.7, tracers: 4, speed: 0.012, tailFrac: 0.24, headGlow: 10 });
 }
 
 // ── phyllotaxis — the seed head now emanates: every seed is born at the
 // heart, rides the golden spiral out, and dissolves at the rim. ──────────────
 function phyllotaxis(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
   const rnd = mulberry(seed ^ 0xf10);
-  const N = 240 + Math.floor(rnd() * 60);
+  const N = 200 + Math.floor(rnd() * 50);
   const GA = Math.PI * (3 - Math.sqrt(5));
   const spin = time * 0.05;
-  for (let i = 0; i < N; i++) {
-    // Outward flow: each slot's age advances with time, wrapping at the rim.
-    const age = (((i / N) + time * 0.045) % 1 + 1) % 1;
-    const rf = Math.sqrt(age);
-    const th = i * GA + spin;
-    const r = rf * R * 0.95;
-    const dome = R * 0.28 * (1 - rf * rf);
-    const p = orient({ x: Math.cos(th) * r, y: Math.sin(th) * r, z: dome }, { rx: 0.5, ry: 0 });
-    const sp = pj(p.x, p.y, p.z);
-    // Born dim, brighten mid-journey, dissolve at the rim.
-    const life = Math.pow(Math.sin(Math.PI * age), 0.7);
-    ctx.beginPath();
-    ctx.fillStyle = rgba(c, 0.75 * life);
-    ctx.arc(sp.sx, sp.sy, Math.max(0.7, (0.9 + 1.6 * (1 - rf)) * sp.scale), 0, Math.PI * 2);
-    ctx.fill();
-    if (i % 24 === 0) glow(ctx, sp.sx, sp.sy, 6 * sp.scale, c, 0.25 * life);
+  // Two seed heads, cupped away from each other around a shared heart — a
+  // balanced 3D object rather than one rotating cone.
+  for (const side of [1, -1] as const) {
+    for (let i = 0; i < N; i++) {
+      const age = (((i / N) + time * 0.045) % 1 + 1) % 1;
+      const rf = Math.sqrt(age);
+      const th = i * GA + spin * side + (side < 0 ? GA / 2 : 0);
+      const r = rf * R * 0.95;
+      const dome = side * R * 0.30 * (1 - rf * rf);
+      const p = orient({ x: Math.cos(th) * r, y: Math.sin(th) * r, z: dome }, { rx: 0.5, ry: 0 });
+      const sp = pj(p.x, p.y, p.z);
+      // Born dim at the heart, brighten mid-journey, dissolve at the rim.
+      const life = Math.pow(Math.sin(Math.PI * age), 0.7);
+      ctx.beginPath();
+      ctx.fillStyle = rgba(c, 0.7 * life);
+      ctx.arc(sp.sx, sp.sy, Math.max(0.7, (0.9 + 1.6 * (1 - rf)) * sp.scale), 0, Math.PI * 2);
+      ctx.fill();
+      if (i % 26 === 0) glow(ctx, sp.sx, sp.sy, 6 * sp.scale, c, 0.22 * life);
+    }
   }
-  const hp = orient({ x: 0, y: 0, z: R * 0.28 }, { rx: 0.5, ry: 0 });
-  const heart = pj(hp.x, hp.y, hp.z);
-  glow(ctx, heart.sx, heart.sy, 16 * heart.scale, c, 0.4);
+  const heart = pj(0, 0, 0);
+  glow(ctx, heart.sx, heart.sy, 18 * heart.scale, c, 0.45);
 }
 
 // ── clothoid — no track left behind: arms are FIRED, one after another, each
@@ -818,11 +895,11 @@ function clothoid(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RG
     const rnd = mulberry((seed ^ 0xc10) + cyc * 7919 + k * 104729);
     const o: Orient = { rx: rnd() * Math.PI, ry: rnd() * Math.PI * 2 };
     const headF = u * STEPS;
-    const TAIL = 60;
+    const TAIL = 95;
     const fade = 1 - ss((u - 0.8) / 0.2); // the whole arm dissolves at the end
     let prev: { sx: number; sy: number } | null = null;
-    for (let j = 0; j <= 14; j++) {
-      const fi = headF - (j / 14) * TAIL;
+    for (let j = 0; j <= 22; j++) {
+      const fi = headF - (j / 22) * TAIL;
       if (fi < 0) break;
       const i0 = Math.min(STEPS - 1, Math.floor(fi));
       const p2 = fitted[i0];
@@ -830,8 +907,8 @@ function clothoid(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RG
       const sp = pj(p.x, p.y, p.z);
       if (prev) {
         ctx.beginPath();
-        ctx.strokeStyle = rgba(c, 0.85 * (1 - j / 14) * fade);
-        ctx.lineWidth = 2.8 * (1 - (j / 14) * 0.6);
+        ctx.strokeStyle = rgba(c, 0.85 * (1 - j / 22) * fade);
+        ctx.lineWidth = 2.8 * (1 - (j / 22) * 0.6);
         ctx.lineCap = 'round';
         ctx.moveTo(prev.sx, prev.sy);
         ctx.lineTo(sp.sx, sp.sy);
@@ -866,12 +943,17 @@ function attractor(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: R
     if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 80 || Math.abs(y) > 80) break;
   }
   if (flat.length < 400) return attractor(ctx, pj, R, c, time, seed + 7);
-  const mirrored = flat.concat(flat.map(p => ({ x: -p.x, y: -p.y })));
-  const pts = fit(mirrored, R * 0.95).map(p => orient(p, { rx: 0.38, ry: 0 }));
-  for (let i = 0; i < pts.length; i++) {
-    const s = pj(pts[i].x, pts[i].y, pts[i].z);
+  // Two wings folded onto a dihedral, hinged at the heart — a real 3D object
+  // (the fold angle breathes very slowly, like wings at rest).
+  const fitted = fit(flat, R * 0.9);
+  const fold = 0.55 + 0.15 * Math.sin(time * 0.1);
+  const wings: Pt3[] = [];
+  for (const p of fitted) wings.push(orient(p, { rx: 0.35, ry: fold }));
+  for (const p of fitted) wings.push(orient({ x: -p.x, y: -p.y }, { rx: 0.35, ry: -fold }));
+  for (let i = 0; i < wings.length; i++) {
+    const s = pj(wings[i].x, wings[i].y, wings[i].z);
     // The wind: a wave of light travelling the iteration order.
-    const wind = Math.pow(0.5 + 0.5 * Math.sin(i * 0.004 - time * 1.6), 3);
+    const wind = Math.pow(0.5 + 0.5 * Math.sin((i % fitted.length) * 0.004 - time * 1.6), 3);
     ctx.fillStyle = rgba(c, 0.1 + 0.55 * wind);
     ctx.fillRect(s.sx - 0.75, s.sy - 0.75, 1.5, 1.5);
   }
@@ -885,20 +967,25 @@ function stringart(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: R
   const rnd = mulberry(seed ^ 0x57a);
   const N = 72;
   const k = 2 + Math.floor(rnd() * 3);
-  const tiltX = 0.4;
-  const pt = (i: number): Pt3 => ring(R * 0.96, (i / N) * Math.PI * 2, tiltX, 0);
-  // Faint rim so the beads have a shore.
-  ctx.beginPath();
-  ctx.strokeStyle = rgba(c, 0.2);
-  ctx.lineWidth = 0.9;
-  for (let i = 0; i <= N; i++) {
-    const s = pj(pt(i).x, pt(i).y, pt(i).z);
-    if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
+  // Two rims crossed in space — the strings span BETWEEN the hoops, so the
+  // web is a genuine 3D sculpture, not a plane being rotated.
+  const oA: Orient = { rx: 0.45, ry: 0 };
+  const oB: Orient = { rx: 0.45, ry: Math.PI / 2 + (rnd() - 0.5) * 0.4 };
+  const ptA = (i: number): Pt3 => orient({ x: Math.cos((i / N) * Math.PI * 2) * R * 0.92, y: Math.sin((i / N) * Math.PI * 2) * R * 0.92 }, oA);
+  const ptB = (i: number): Pt3 => orient({ x: Math.cos((i / N) * Math.PI * 2) * R * 0.92, y: Math.sin((i / N) * Math.PI * 2) * R * 0.92 }, oB);
+  for (const pt of [ptA, ptB]) {
+    ctx.beginPath();
+    ctx.strokeStyle = rgba(c, 0.16);
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i <= N; i++) {
+      const s = pj(pt(i).x, pt(i).y, pt(i).z);
+      if (i === 0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
-  // A whisper of the chord structure, so the beads sketch over something.
+  // A whisper of the string structure, so the beads sketch over something.
   for (let i = 0; i < N; i += 2) {
-    const A = pt(i), B = pt((i * k) % N);
+    const A = ptA(i), B = ptB((i * k) % N);
     const sa = pj(A.x, A.y, A.z), sb = pj(B.x, B.y, B.z);
     ctx.beginPath();
     ctx.strokeStyle = rgba(c, 0.05);
@@ -907,23 +994,23 @@ function stringart(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: R
     ctx.lineTo(sb.sx, sb.sy);
     ctx.stroke();
   }
-  // Beads: each owns a chord (i → k·i), shuttles along it, then advances to
-  // the next chord — over time the whole envelope gets swept.
+  // Beads: each owns a string (rim A i → rim B k·i), shuttles along it, then
+  // advances to the next — over time the whole envelope gets swept.
   const BEADS = 14;
   for (let bd = 0; bd < BEADS; bd++) {
     const chordF = ((time * 0.05 + bd / BEADS) % 1 + 1) % 1;
     const i = chordF * N;
-    const A = pt(i), B = pt((i * k) % N);
+    const A = ptA(i), B = ptB((i * k) % N);
     // Ping-pong along the chord, each bead at its own phase.
     const cyc = (((time * 0.5 + bd * 0.37) % 2) + 2) % 2;
     const rising = cyc < 1;
     const u = ss(rising ? cyc : 2 - cyc);
     const dir = rising ? 1 : -1;
-    const TR = 8;
+    const TR = 12;
     let prev: { sx: number; sy: number } | null = null;
     for (let j = 0; j <= TR; j++) {
-      // Trail behind the direction of travel.
-      const uu = Math.max(0, Math.min(1, u - (j / TR) * 0.35 * dir));
+      // Trail behind the direction of travel — long enough to sketch the string.
+      const uu = Math.max(0, Math.min(1, u - (j / TR) * 0.55 * dir));
       const p: Pt3 = { x: A.x + (B.x - A.x) * uu, y: A.y + (B.y - A.y) * uu, z: A.z + (B.z - A.z) * uu };
       const s = pj(p.x, p.y, p.z);
       if (prev) {
@@ -945,14 +1032,15 @@ function stringart(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: R
 // one center, each walking its own plane. ────────────────────────────────────
 function spirolateral(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, time: number, seed: number) {
   const rnd = mulberry(seed ^ 0x59a1);
-  const G = 3;
-  for (let g = 0; g < G; g++) {
-    const alpha = ([144, 100, 108, 72, 135][Math.floor(rnd() * 5)] * Math.PI) / 180;
-    const m = 3 + Math.floor(rnd() * 4);
-    const drift = (0.15 + rnd() * 0.5) * (Math.PI / 180);
-    const o = randOrient(rnd);
-    const flat: { x: number; y: number }[] = [{ x: 0, y: 0 }];
-    let x = 0, y = 0, phi = rnd() * Math.PI * 2;
+  // ONE seeded walk, repeated three times around a shared axis — a rotor with
+  // real symmetry, every blade's mass balanced on the same heart.
+  const alpha = ([144, 100, 108, 72, 135][Math.floor(rnd() * 5)] * Math.PI) / 180;
+  const m = 3 + Math.floor(rnd() * 4);
+  const drift = (0.15 + rnd() * 0.5) * (Math.PI / 180);
+  const tiltX = 0.35 + rnd() * 0.5;
+  const flat: { x: number; y: number }[] = [{ x: 0, y: 0 }];
+  {
+    let x = 0, y = 0, phi = 0;
     for (let i = 0; i < 300; i++) {
       const len = ((i % m) + 1);
       x += Math.cos(phi) * len;
@@ -960,16 +1048,23 @@ function spirolateral(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c
       flat.push({ x, y });
       phi += alpha + drift * i;
     }
-    // Center the walk on its own start so all generators share the heart.
-    const fitted = fit(flat, R * (0.9 - g * 0.12));
-    const dx = fitted[0].x, dy = fitted[0].y;
+  }
+  const fitted = fit(flat, R * 0.62);
+  const dx = fitted[0].x, dy = fitted[0].y; // the walk starts exactly at the heart
+  for (let g = 0; g < 3; g++) {
+    const o: Orient = { rx: tiltX, ry: (g / 3) * Math.PI * 2 };
     const pts = fitted.map(p => orient({ x: p.x - dx, y: p.y - dy }, o));
     tracedPath(ctx, pj, pts, c, time, {
-      pathAlpha: 0.14, width: 0.7, tracers: 2, speed: 0.014 + g * 0.004, closed: false,
+      pathAlpha: 0.1, width: 0.7, tracers: 2, speed: 0.016, closed: false,
+      tailFrac: 0.2, headGlow: 9,
     });
   }
   const heart = pj(0, 0, 0);
-  glow(ctx, heart.sx, heart.sy, 12 * heart.scale, c, 0.35);
+  glow(ctx, heart.sx, heart.sy, 16 * heart.scale, c, 0.45);
+  ctx.beginPath();
+  ctx.fillStyle = rgba(c, 0.9);
+  ctx.arc(heart.sx, heart.sy, Math.max(1.2, 2.0 * heart.scale), 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // ── knot — owner-approved as is. ─────────────────────────────────────────────
@@ -987,7 +1082,7 @@ function knot(ctx: CanvasRenderingContext2D, pj: Projector, R: number, c: RGB, t
       z: Math.sin(fz * t + pz) * R * 0.72,
     });
   }
-  tracedPath(ctx, pj, pts, c, time, { pathAlpha: 0.2, width: 0.8, tracers: 5, speed: 0.012 });
+  tracedPath(ctx, pj, pts, c, time, { pathAlpha: 0.06, width: 0.6, tracers: 4, speed: 0.012, tailFrac: 0.24, headGlow: 10 });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1014,7 +1109,7 @@ export function drawProposal(
     case 'facet':         return facet(ctx, pj, R, color, time, seed);
     case 'shatter':       return shatter(ctx, pj, R, color, time, seed);
     case 'constellation': return constellation(ctx, pj, R, color, time, seed);
-    case 'vortex':        return vortex(ctx, pj, R, color, time);
+    case 'vortex':        return vortex(ctx, pj, R, color, time, seed);
     case 'corona':        return corona(ctx, pj, R, color, time);
     case 'harmonograph':  return harmonograph(ctx, pj, R, color, time, seed);
     case 'maurer':        return maurer(ctx, pj, R, color, time, seed);

@@ -11,7 +11,6 @@
  *
  *   low rootedness  → satellites   1–3 motes on slow orbits around the form
  *   high tension    → binary       a double core, two nuclei instead of one
- *   high scope      → halo         one faint inclined ring, wider than the curve
  *   low certainty   → comet        a bright head in eccentric orbit, tail streaming
  *
  * Everything drawn here stays inside the line-drawn luminous language: thin
@@ -46,16 +45,12 @@ export interface ArchetypeSpec {
   seed: number;
   satellites: SatelliteSpec[];
   binary: boolean;
-  halo: boolean;
   comet: boolean;
   /** How many archetypes are active — used to quieten busy combinations. */
   count: number;
   binaryAxis: number;
   binaryTilt: number;
   binarySep: number;      // fraction of R
-  haloRadius: number;     // fraction of R
-  haloTilt: number;
-  haloSpin: number;
   /** The comet is a body in orbit: a bright head sweeping the form on an
    *  inclined ellipse, its tail streaming behind along the path. */
   cometTilt: number;      // orbital plane inclination
@@ -92,13 +87,12 @@ export interface ArchetypeSource {
 export const ARCHETYPE_THRESHOLDS = {
   satellites: 0.16,   // rootedness below this
   binary:     0.70,   // tension above this
-  halo:       0.88,   // scope above this
   comet:      0.36,   // certainty below this
 } as const;
-// The crystalline knot and the armillary rare form were retired by owner
-// review (2026-09-09): the knot read as "just a denser tangle" and the
-// armillary as a lesser halo. Their trigger slots are open for whichever
-// /preview/stars proposals graduate.
+// Retired by owner review (2026-09) — crystalline knot ("a denser tangle"),
+// armillary rare ("a lesser halo"), and the halo band itself (the saturn
+// proposal does that idea better). Their trigger slots (high certainty,
+// high scope, 1%-rare) are open for graduating /preview/stars proposals.
 
 // ═══════════════════════════════════════════════════════
 // SEED
@@ -128,7 +122,6 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
 
   const wantsSat = dims.rootedness < T.satellites;
   const binary   = dims.tension    > T.binary;
-  const halo     = dims.scope      > T.halo;
   const comet    = dims.certainty  < T.comet;
 
   const satellites: SatelliteSpec[] = [];
@@ -150,24 +143,16 @@ export function resolveArchetype(dims: ArchetypeSource): ArchetypeSpec {
   }
 
   const count =
-    (satellites.length ? 1 : 0) + (binary ? 1 : 0) + (halo ? 1 : 0) + (comet ? 1 : 0);
+    (satellites.length ? 1 : 0) + (binary ? 1 : 0) + (comet ? 1 : 0);
 
   return {
     seed,
     satellites,
-    binary, halo, comet, count,
+    binary, comet, count,
     binaryAxis: rand() * Math.PI * 2,
     binaryTilt: (rand() - 0.5) * 1.2,
     // Wide enough apart that two suns read as two suns, not a smeared one.
     binarySep: 0.32 + (dims.tension - T.binary) * 0.5,
-    // The halo has to clear the curve to read as a ring rather than as another
-    // winding of it — but 1.18 R is about as far as the canvas allows before
-    // the near side of the ellipse clips.
-    haloRadius: 1.10 + rand() * 0.08,
-    // Kept well away from edge-on so the halo always reads as a ring around the
-    // form rather than as a stray line through it.
-    haloTilt: 0.30 + rand() * 0.55,
-    haloSpin: rand() * Math.PI * 2,
     // Comet orbit — inclined so the sweep stays visible as the form turns,
     // eccentric so each lap swells toward a perihelion and falls away.
     cometTilt: 0.35 + rand() * 0.6,
@@ -188,7 +173,6 @@ export function archetypeLabel(spec: ArchetypeSpec): string {
   const parts: string[] = [];
   if (spec.satellites.length) parts.push(`satellites×${spec.satellites.length}`);
   if (spec.binary) parts.push('binary');
-  if (spec.halo) parts.push('halo');
   if (spec.comet) parts.push('comet');
   return parts.length ? parts.join(' + ') : 'plain';
 }
@@ -264,7 +248,7 @@ function softGlow(
 }
 
 /**
- * Structures that sit behind the curve: the halo band and the comet's orbit.
+ * Structures that sit behind the curve: the comet's orbit.
  * Called before the ghost trace and the fireflies.
  */
 export function drawArchetypeUnder(
@@ -277,17 +261,6 @@ export function drawArchetypeUnder(
 ): void {
   if (spec.count === 0) return;
   const b = budget(spec);
-
-  // ── Halo: a bold inclined band — it has to read from across the sky, not
-  // reward squinting. A bright inner edge, the band body, and a faint outer
-  // feather, all sharing one plane so it stays a single object. ────────────
-  if (spec.halo) {
-    const spin = spec.haloSpin + time * 0.05;
-    strokeRing(ctx, pj, R, spec.haloRadius - 0.035, spec.haloTilt, spin, 90, color, 0.60 * b, 1.6);
-    strokeRing(ctx, pj, R, spec.haloRadius,         spec.haloTilt, spin, 90, color, 0.44 * b, 3.4);
-    strokeRing(ctx, pj, R, spec.haloRadius + 0.045, spec.haloTilt, spin, 90, color, 0.22 * b, 5.0);
-    strokeRing(ctx, pj, R, spec.haloRadius + 0.085, spec.haloTilt, spin, 90, color, 0.10 * b, 6.0);
-  }
 
   // ── Comet: a body in orbit — a bright head sweeping the form at pace,
   // its tail streaming behind along the path and flaring outward, away from
@@ -355,7 +328,7 @@ export function drawArchetypeOver(
   // cores blaze and a faint bridge of light spans them. ───────────────────
   if (spec.binary) {
     // The pair orbits at the tangle's own pace (owner review 2026-09-09).
-    const axis = spec.binaryAxis + time * 0.42;
+    const axis = spec.binaryAxis + time * 0.62;
     const pts: { sx: number; sy: number; scale: number }[] = [];
     for (const sign of [1, -1] as const) {
       const p = ringPoint(spec.binarySep * R * sign, axis, spec.binaryTilt, 0);

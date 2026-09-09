@@ -32,9 +32,7 @@ const FORMS: FormDef[] = [
   { key: 'plain',      label: 'plain',            rule: 'mid-range everything (~⅓ of the sky)', dims: {} },
   { key: 'satellites', label: 'satellites',       rule: 'rootedness < 0.16',                    dims: { rootedness: 0.06 } },
   { key: 'binary',     label: 'binary',           rule: 'tension > 0.70',                       dims: { tension: 0.86 } },
-  { key: 'halo',       label: 'halo',             rule: 'scope > 0.88',                         dims: { scope: 0.95 } },
   { key: 'comet',      label: 'comet',            rule: 'certainty < 0.36',                     dims: { certainty: 0.2 } },
-  { key: 'binary-halo', label: 'binary + halo',    rule: 'composition', dims: { tension: 0.86, scope: 0.95 } },
 ];
 
 // ── Proposal forms — dramatic candidates, drawn by src/lib/spirograph/
@@ -56,23 +54,23 @@ const PROPOSALS: ProposalDef[] = [
   { key: 'eclipse', label: 'eclipse', pitch: 'a black hole — fully dark disk, burning rim, and the diamond-ring flare of totality' },
   // Standalone geometries — these replace the spirograph entirely.
   { key: 'geode',        label: 'geode',          pitch: 'the crystal rock — irregular luminous polyhedron, facets lit by depth (owner-approved)', standalone: true },
-  { key: 'quartz',       label: 'quartz',         pitch: 'a cluster of hexagonal prism points with pyramid tips, glints climbing the edges', standalone: true },
-  { key: 'shard',        label: 'shard',          pitch: 'long linear splinters radiating from a bright heart — the most linear crystal', standalone: true },
-  { key: 'facet',        label: 'facet',          pitch: 'a brilliant-cut gem — table, crown kites, girdle, pavilion, a flash walking the crown', standalone: true },
-  { key: 'shatter',      label: 'shatter',        pitch: 'a caged burst in true 3D; every vertex eases to a new resting place on a slow cycle', standalone: true },
-  { key: 'constellation', label: 'constellation', pitch: 'bright nodes in true 3D joined by survey lines, a pulse walking the links', standalone: true },
-  { key: 'vortex',       label: 'vortex',         pitch: 'three spiral arms alone, quicker, light flowing outward along them', standalone: true },
-  { key: 'corona',       label: 'corona',         pitch: 'three nested spike crowns, breathing and counter-rotating around a pulsing core', standalone: true },
+  { key: 'quartz',       label: 'quartz',         pitch: 'a solid bright core with hex prism points growing in every direction, drawn by climbing light', standalone: true },
+  { key: 'shard',        label: 'shard',          pitch: 'blades implied by whisper strokes, drawn by light racing outward with dissolving tails', standalone: true },
+  { key: 'facet',        label: 'facet',          pitch: 'a brilliant-cut gem — light laps the girdle and crown, a flash walks the facets, bolts drop to the culet', standalone: true },
+  { key: 'shatter',      label: 'shatter',        pitch: 'the folding cage — quiet strokes, energy running the ring, vertices easing between rests', standalone: true },
+  { key: 'constellation', label: 'constellation', pitch: 'nodes in 3D, whisper links, pulses with dissolving tails walking the survey chain', standalone: true },
+  { key: 'vortex',       label: 'vortex',         pitch: 'five arms in five planes, each twisting out of its plane — a storm, light flowing outward', standalone: true },
+  { key: 'corona',       label: 'corona',         pitch: 'three breathing crowns with light circulating each ring as the spikes pulse', standalone: true },
   { key: 'harmonograph', label: 'harmonograph',   pitch: 'three damped pendulum traces, each in its own plane — a 3D object now', standalone: true },
   { key: 'maurer',       label: 'maurer rose',    pitch: 'the angular web given depth — samples lifted by a third harmonic, smooth tracers', standalone: true },
-  { key: 'superformula', label: 'superformula',   pitch: 'four Gielis star shells, each generator in its own plane', standalone: true },
-  { key: 'mystery',      label: 'mystery curve',  pitch: 'Farris curves lifted into 3D — a ribbon with exact n-fold symmetry', standalone: true },
-  { key: 'phyllotaxis',  label: 'phyllotaxis',    pitch: 'the seed head emanates — every seed born at the heart, riding the spiral out, dissolving at the rim', standalone: true },
-  { key: 'clothoid',     label: 'clothoid',       pitch: 'arms fired one after another, each in a fresh plane, existing only as a head and its dissolving tail', standalone: true },
-  { key: 'attractor',    label: 'attractor',      pitch: 'the feathered wing with wind — light rushing through the dust', standalone: true },
-  { key: 'stringart',    label: 'string art',     pitch: 'chords never drawn: beads shuttle along them with fading trails, the envelope emerges from motion', standalone: true },
-  { key: 'spirolateral', label: 'spirolateral',   pitch: 'three turtle walks sharing one heart, each in its own plane', standalone: true },
-  { key: 'knot',         label: 'lissajous knot', pitch: 'a true 3D knot; the world’s slow turn is what reveals it (owner-approved)', standalone: true },
+  { key: 'superformula', label: 'superformula',   pitch: 'four Gielis star shells in four planes, drawn by long-tailed light', standalone: true },
+  { key: 'mystery',      label: 'mystery curve',  pitch: 'the Farris ribbon in 3D, whisper path, long-tailed tracers building it', standalone: true },
+  { key: 'phyllotaxis',  label: 'phyllotaxis',    pitch: 'two seed heads cupped away from each other — a balanced object, seeds emanating and dissolving', standalone: true },
+  { key: 'clothoid',     label: 'clothoid',       pitch: 'arms fired in fresh planes, longer tails now — the whole form is the drawing', standalone: true },
+  { key: 'attractor',    label: 'attractor',      pitch: 'two dust wings folded on a slowly breathing hinge, wind rushing through them', standalone: true },
+  { key: 'stringart',    label: 'string art',     pitch: 'two rims crossed in space, strings spanning between them, beads sketching the web with long trails', standalone: true },
+  { key: 'spirolateral', label: 'spirolateral',   pitch: 'one turtle walk repeated as a three-blade rotor around a shared heart', standalone: true },
+  { key: 'knot',         label: 'lissajous knot', pitch: 'the 3D knot, now built by long-tailed light over a whisper path', standalone: true },
 ];
 
 function makeDims(def: FormDef, curveType: CurveType, emotionIndex: number, seedHint: string): SpiroDimensions {
