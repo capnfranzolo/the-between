@@ -63,6 +63,13 @@ export interface CosmosSceneHandle {
    * written once along the orbit they now share, then it is gone.
    */
   bondFinale: (fromId: string, toId: string, reason: string) => void;
+  /**
+   * Arrival beat — when the scene mounted with `arrivalHold`, ends the hold:
+   * the thought stars fade in and drift begins. The sky, terrain, clouds and
+   * ambient background starfield were live the whole time; only the thought
+   * stars and the camera were waiting. No-op if the hold already ended.
+   */
+  releaseArrival: () => void;
 }
 
 // Crossfade timing — exported so callers can guard re-entrancy for exactly
@@ -85,6 +92,10 @@ interface CosmosSceneProps {
    *  DEFAULT_ATMOSPHERE. Subsequent world switches go through the
    *  `crossfadeToWorld` imperative handle, not this prop. */
   initialAtmosphere?: AtmosphereConfig;
+  /** Arrival beat — mount with the thought stars hidden and drift paused
+   *  (sky/terrain/clouds render normally) until `releaseArrival()` is called.
+   *  Read once at mount; used by the pages' centered-question title card. */
+  arrivalHold?: boolean;
 }
 
 interface StarSpiro {
@@ -149,8 +160,10 @@ const SELECTED_SCALE_MULT = 1.75; // ~30 % of viewport height when focused at st
 const SUN_DIRECTION = new THREE.Vector3(0, -0.15, -1).normalize();
 
 const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
-  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell, initialAtmosphere }, ref) {
+  function CosmosScene({ thoughts, bonds, activeStar, userStar, onThoughtClick, onBackgroundClick, onModeChange, onDwell, initialAtmosphere, arrivalHold }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
+    // Mount-time only, like initialAtmosphere — the hold ends via the handle.
+    const arrivalHoldRef = useRef(arrivalHold ?? false);
     const perfOverlayRef = useRef<HTMLPreElement>(null);
 
     const addThoughtFnRef = useRef<((t: ThoughtData) => void) | null>(null);
@@ -162,6 +175,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
     const bloomStarFnRef = useRef<((id: string) => void) | null>(null);
     const bondFinaleFnRef = useRef<((fromId: string, toId: string, reason: string) => void) | null>(null);
+    const releaseArrivalFnRef = useRef<(() => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
     const activeBondIds = useRef<Set<string>>(new Set());
 
@@ -208,6 +222,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       bloomStar: (id: string) => bloomStarFnRef.current?.(id),
       bondFinale: (fromId: string, toId: string, reason: string) =>
         bondFinaleFnRef.current?.(fromId, toId, reason),
+      releaseArrival: () => releaseArrivalFnRef.current?.(),
     }), []);
 
     // ─── SCENE SETUP (runs once) ───────────────────────────────────────────
@@ -533,6 +548,12 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       // groups start fully transparent and are marked userData.fadingIn so
       // the fade-in tick in animate() ramps them 0→1 over CROSSFADE_IN_MS.
       let fadeInPendingStars = false;
+
+      // Arrival beat: mount with thought stars hidden (they reuse the
+      // crossfade fade-in path) and drift's camera paused until the pages'
+      // title card calls releaseArrival(). Sky/terrain/clouds are unaffected.
+      let arrivalHoldActive = arrivalHoldRef.current;
+      if (arrivalHoldActive) fadeInPendingStars = true;
 
       function setGroupOpacity(g: THREE.Group, o: number) {
         g.children.forEach(child => {
@@ -1179,6 +1200,16 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       }
       crossfadeFnRef.current = crossfadeToWorld;
 
+      // Arrival beat — end the mount hold: thought stars ride the same
+      // fade-in tick the world crossfade uses, and drift wakes up.
+      function releaseArrival() {
+        if (!arrivalHoldActive) return;
+        arrivalHoldActive = false;
+        fadeInActive = true;
+        fadeInT = 0;
+      }
+      releaseArrivalFnRef.current = releaseArrival;
+
       // ─── INPUT ───
       // Any deliberate input (pointer down, wheel, touch, key) pauses drift
       // instantly and hands the camera to manual controls mid-flight — the
@@ -1728,7 +1759,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
         // ── CAMERA — exactly one mode owns position/orientation per frame ────
         if (camMode === 'drift') {
-          runDrift(dt);
+          // Arrival beat: the camera waits with the title card — an empty
+          // glide before the stars exist would read as a broken drift.
+          if (!arrivalHoldActive) runDrift(dt);
         } else if (camMode === 'focused') {
           // Glide toward the framing point, easing out into the stop
           if (flyTargetXZ) {

@@ -11,6 +11,7 @@ import AddToHomeScreen from '@/components/AddToHomeScreen';
 import LivenessCounter from '@/components/LivenessCounter';
 import SoundControl from '@/components/SoundControl';
 import ShareButton from '@/components/ShareButton';
+import ArrivalTitle from '@/components/ArrivalTitle';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
@@ -69,6 +70,21 @@ function LandingPageInner() {
   const [showAbout, setShowAbout] = useState(false);
   const [sceneMode, setSceneMode] = useState<CamMode>('drift');
   const sceneRef = useRef<CosmosSceneHandle>(null);
+
+  // ── Arrival beat — the question alone over an empty sky, then it rises ──
+  // Every fresh entry gets it except an explicit "+" navigation (they came
+  // to type, not to arrive).
+  const [arrivalDone, setArrivalDone] = useState(cameToContribute);
+  const finishArrival = useCallback(() => {
+    sceneRef.current?.releaseArrival();
+    setArrivalDone(true);
+  }, []);
+  // If the question never arrives (fetch failure), never leave the sky held.
+  useEffect(() => {
+    if (arrivalDone) return;
+    const t = setTimeout(() => { if (!data?.question?.text) finishArrival(); }, 6000);
+    return () => clearTimeout(t);
+  }, [arrivalDone, data?.question?.text, finishArrival]);
 
   // ── First-visit scripted intro ──────────────────────────────────────────
   const [introActive, setIntroActive] = useState(false);
@@ -384,7 +400,16 @@ function LandingPageInner() {
         onBackgroundClick={clearSelection}
         onModeChange={setSceneMode}
         onDwell={handleDwell}
+        arrivalHold={!cameToContribute}
       />
+
+      {!arrivalDone && data?.question?.text && (
+        <ArrivalTitle
+          text={data.question.text}
+          onRelease={() => sceneRef.current?.releaseArrival()}
+          onDone={() => setArrivalDone(true)}
+        />
+      )}
 
       <SoundControl />
 
@@ -441,8 +466,8 @@ function LandingPageInner() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Top chrome — the question, quiet */}
-        {data?.question?.text && (
+        {/* Top chrome — the question, quiet (the arrival card lands here) */}
+        {arrivalDone && data?.question?.text && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
             padding: '22px 30px 18px',

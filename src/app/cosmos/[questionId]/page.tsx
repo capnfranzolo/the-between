@@ -12,6 +12,7 @@ import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import SkyRail from '@/components/SkyRail';
 import SoundControl from '@/components/SoundControl';
+import ArrivalTitle from '@/components/ArrivalTitle';
 import LivenessCounter from '@/components/LivenessCounter';
 import ShareButton from '@/components/ShareButton';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -301,6 +302,20 @@ export default function CosmosPage() {
   const [sceneMode, setSceneMode] = useState<CamMode>('drift');
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
+
+  // ── Arrival beat — the question alone over an empty sky, then it rises.
+  // Deep links (?star=: shared /s/ visits and post-submit births) skip it:
+  // the visitor came for a specific star, not an arrival. ──
+  const [arrivalDone, setArrivalDone] = useState(!!starParam);
+  const finishArrival = useCallback(() => {
+    sceneRef.current?.releaseArrival();
+    setArrivalDone(true);
+  }, []);
+  useEffect(() => {
+    if (arrivalDone) return;
+    const t = setTimeout(() => { if (!data?.question?.text) finishArrival(); }, 6000);
+    return () => clearTimeout(t);
+  }, [arrivalDone, data?.question?.text, finishArrival]);
 
   // ── "Add yours" composer overlay (Phase 6 — also the defect #5 CTA target) ──
   const [showComposer, setShowComposer] = useState(false);
@@ -641,7 +656,16 @@ export default function CosmosPage() {
         onBackgroundClick={clearSelection}
         onModeChange={setSceneMode}
         initialAtmosphere={getAtmosphere(questionId)}
+        arrivalHold={!starParam}
       />
+
+      {!arrivalDone && data?.question?.text && (
+        <ArrivalTitle
+          text={data.question.text}
+          onRelease={() => sceneRef.current?.releaseArrival()}
+          onDone={() => setArrivalDone(true)}
+        />
+      )}
 
       <SkyRail
         questions={railQuestions}
@@ -669,7 +693,7 @@ export default function CosmosPage() {
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           pointerEvents: 'none',
         }}>
-          {data?.question?.text && (
+          {arrivalDone && data?.question?.text && (
             <div style={{
               fontFamily: SERIF, fontStyle: 'italic',
               fontSize: 'clamp(22px, 3.2vw, 36px)',
