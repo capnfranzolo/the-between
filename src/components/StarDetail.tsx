@@ -266,6 +266,7 @@ export default function StarDetail({
   return (
     <div
       ref={panelRef}
+      className="btw-panel-cap"
       onClick={e => e.stopPropagation()}
       style={{
         position: 'absolute',
@@ -274,8 +275,8 @@ export default function StarDetail({
         transform: 'translateX(-50%)',
         width: 'min(560px, 100%)',
         // Use flex column so the footer is always visible — only the
-        // content area scrolls. Cap at 52vh so the star stays visible.
-        maxHeight: '56vh',
+        // content area scrolls. Height cap lives in .btw-panel-cap (dvh with
+        // vh fallback) so the footer clears iOS Safari's toolbar.
         display: 'flex',
         flexDirection: 'column',
         background: 'rgba(20,14,40,0.82)',

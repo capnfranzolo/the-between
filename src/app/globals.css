@@ -35,3 +35,24 @@ canvas {
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .safe-left   { padding-left:   env(safe-area-inset-left,  0px); }
 .safe-right  { padding-right:  env(safe-area-inset-right, 0px); }
+
+
+/* The full *visible* viewport on iOS Safari: 100vh is defined as the
+   toolbar-hidden height, and this app never scrolls, so the toolbar never
+   hides — anything anchored to a 100vh layer's bottom sits under the URL
+   bar. dvh tracks the real visible height; the vh line is the fallback for
+   pre-2022 browsers. */
+.btw-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Same fallback pattern for bottom-anchored surfaces' height caps. */
+.btw-panel-cap {
+  max-height: 56vh;
+  max-height: 56dvh;
+}
+.btw-drawer-cap {
+  max-height: min(76vh, 660px);
+  max-height: min(76dvh, 660px);
+}

@@ -108,6 +108,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
 
   return (
     <div
+      className="btw-drawer-cap"
       onClick={e => e.stopPropagation()}
       style={{
         position: 'absolute',
@@ -128,7 +129,7 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
         pointerEvents: 'auto',
         // The pair takes room; on a phone with the keyboard up the drawer
         // scrolls rather than pushing the CTA off-screen.
-        maxHeight: 'min(76vh, 660px)',
+        // Height cap lives in .btw-drawer-cap (dvh with vh fallback).
         overflowY: 'auto',
         WebkitOverflowScrolling: 'touch' as React.CSSProperties['WebkitOverflowScrolling'],
         transition: 'bottom .15s ease-out',

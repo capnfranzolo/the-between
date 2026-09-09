@@ -715,8 +715,9 @@ export default function CosmosPage() {
       />
 
       <div
+        className="btw-viewport"
         style={{
-          position: 'relative', zIndex: 1, height: '100vh', overflow: 'hidden',
+          position: 'relative', zIndex: 1, overflow: 'hidden',
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
