@@ -4,9 +4,14 @@
  * connection, temporality) and sort into families.
  *
  * Run from thebetween/:   npx tsx scripts/backfill-dimensions.mts [flags]
- *   --dry-run   extract + print the would-be family table, write nothing
- *   --force     re-extract stars that already have the new axes
- *   --limit N   stop after N extractions (for smoke tests)
+ *   --dry-run     extract + print the would-be family table, write nothing
+ *   --force       re-extract stars that already have the new axes
+ *   --limit N     stop after N extractions (for smoke tests)
+ *   --production  use .env.local.bak (the real Supabase project) instead of
+ *                 the mock pointed at by .env.local
+ *   --check       connectivity/schema probe only: verifies the questions
+ *                 table has display_order, counts stars, samples dimension
+ *                 keys. No extraction, no writes, no secrets printed.
  *
  * Guarantees:
  *   - NEVER touches status or re-runs moderation verdicts: an approved star
@@ -26,10 +31,16 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Load .env.local before importing anything that reads process.env.
-for (const line of readFileSync(join(root, '.env.local'), 'utf8').split('\n')) {
+const PROD = process.argv.includes('--production');
+const CHECK = process.argv.includes('--check');
+
+// Load env before importing anything that reads process.env. --production
+// reads the real project's values (.env.local.bak); secrets are used
+// in-process only and never printed.
+const envFile = PROD ? '.env.local.bak' : '.env.local';
+for (const line of readFileSync(join(root, envFile), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-  if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].trim();
+  if (m && (PROD || process.env[m[1]] === undefined)) process.env[m[1]] = m[2].trim();
 }
 
 const { extractDimensions, visualDimensions } = await import('../src/lib/dimensions/extract');
@@ -55,6 +66,27 @@ interface StarRow {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+console.log(`target: ${new URL(SUPA).host}${PROD ? ' (PRODUCTION)' : ' (mock)'}`);
+
+if (CHECK) {
+  const q = await fetch(`${SUPA}/rest/v1/questions?select=slug,display_order&order=display_order`, { headers: HEADERS });
+  console.log('questions query (display_order):', q.status);
+  if (q.ok) {
+    const rows: { slug: string; display_order: number }[] = await q.json();
+    console.log('questions:', rows.map(r => `${r.slug}:${r.display_order}`).join(', '));
+  } else {
+    console.log('body:', (await q.text()).slice(0, 200));
+  }
+  const c = await fetch(`${SUPA}/rest/v1/stars?select=id&limit=1`, { headers: { ...HEADERS, Prefer: 'count=exact' } });
+  console.log('stars count:', c.headers.get('content-range'));
+  const d = await fetch(`${SUPA}/rest/v1/stars?select=dimensions,status&limit=3`, { headers: HEADERS });
+  if (d.ok) {
+    const rows: { dimensions: Record<string, unknown> | null; status: string }[] = await d.json();
+    for (const r of rows) console.log('sample star:', r.status, '| dim keys:', Object.keys(r.dimensions ?? {}).join(','));
+  }
+  process.exit(0);
+}
 
 const res = await fetch(`${SUPA}/rest/v1/stars?select=id,shortcode,answer,dimensions,status`, { headers: HEADERS });
 if (!res.ok) throw new Error(`stars fetch failed: ${res.status}`);
