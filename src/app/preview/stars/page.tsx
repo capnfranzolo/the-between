@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSpirograph, CURVE_TYPES, type SpiroDimensions, type CurveType } from '@/lib/spirograph/renderer';
 import { resolveArchetype } from '@/lib/spirograph/archetypes';
-import { PROPOSAL_KINDS } from '@/lib/spirograph/proposals';
 import { BTW, SANS, SERIF } from '@/lib/btw';
 
 // ── /preview/stars — unlisted archetype gallery ───────────────────────────────
@@ -49,7 +48,15 @@ const FORMS: FormDef[] = [
 // proposals.ts over a plain base form. Not in the product; the ones the owner
 // picks graduate into archetypes.ts with real dimension triggers. ?exp=<key>
 // renders one large. ──────────────────────────────────────────────────────────
-const PROPOSALS: { key: (typeof PROPOSAL_KINDS)[number]; label: string; pitch: string }[] = [
+interface ProposalDef {
+  key: string;
+  label: string;
+  pitch: string;
+  /** Standalone geometries replace the spirograph entirely (round 2). */
+  standalone?: boolean;
+}
+
+const PROPOSALS: ProposalDef[] = [
   { key: 'shatter',       label: 'shatter',       pitch: 'the crystal taken all the way — the tangle caged in hard facets and shard spikes' },
   { key: 'saturn',        label: 'saturn',        pitch: 'the halo as a planet’s ring system — broad bright bands with a dark Cassini gap' },
   { key: 'constellation', label: 'constellation', pitch: 'the thought as a star chart — bright nodes joined by survey lines' },
@@ -57,6 +64,18 @@ const PROPOSALS: { key: (typeof PROPOSAL_KINDS)[number]; label: string; pitch: s
   { key: 'eclipse',       label: 'eclipse',       pitch: 'negative space — a dark disk swallows the heart, only a burning rim survives' },
   { key: 'vortex',        label: 'vortex',        pitch: 'the tangle unwound — three spiral arms trailing light to the edge' },
   { key: 'corona',        label: 'corona',        pitch: 'a sun — long and short spikes radiating from the whole form' },
+  // Round 2 — whole different curve families, not overlays.
+  { key: 'geode',        label: 'geode',         pitch: 'a crystal rock — an irregular luminous polyhedron, facets lit by depth, light caught inside', standalone: true },
+  { key: 'harmonograph', label: 'harmonograph',  pitch: 'damped double-pendulum Lissajous — the decay makes it look hand-drawn', standalone: true },
+  { key: 'maurer',       label: 'maurer rose',   pitch: 'a rose sampled at a huge angular step, dots connected — an angular web', standalone: true },
+  { key: 'superformula', label: 'superformula',  pitch: 'Gielis star/polygon outlines, two nested shells breathing against each other', standalone: true },
+  { key: 'mystery',      label: 'mystery curve', pitch: 'Farris sums of three exponentials — perfect n-fold symmetry no trochoid can make', standalone: true },
+  { key: 'phyllotaxis',  label: 'phyllotaxis',   pitch: 'a sunflower seed head on the golden angle, domed, with a bloom wave', standalone: true },
+  { key: 'clothoid',     label: 'clothoid',      pitch: 'Euler-spiral arms — straight from the heart, each winding into its own focus', standalone: true },
+  { key: 'attractor',    label: 'attractor',     pitch: 'Gumowski–Mira dust — thousands of points organizing into a shimmering nebula', standalone: true },
+  { key: 'stringart',    label: 'string art',    pitch: 'times-tables on a circle — chords whose envelope is a breathing cardioid', standalone: true },
+  { key: 'spirolateral', label: 'spirolateral',  pitch: 'turtle geometry: forward, turn, repeat — angular and architectural', standalone: true },
+  { key: 'knot',         label: 'lissajous knot', pitch: 'a true 3D knot; the world’s slow turn is what reveals it', standalone: true },
 ];
 
 function makeDims(def: FormDef, curveType: CurveType, emotionIndex: number, seedHint: string): SpiroDimensions {
@@ -178,34 +197,43 @@ function PreviewInner() {
             </div>
           ))}
 
-          <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginTop: 64, marginBottom: 4 }}>
-            proposals
-          </div>
-          <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
-            dramatic candidates, not in the product — ?exp=&lt;key&gt; for one form, large
-          </div>
-          {PROPOSALS.map(prop => (
-            <div key={prop.key} style={{ marginBottom: 44 }}>
-              <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
-                {prop.label}
-                <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{prop.pitch}</span>
-                <a href={`?exp=${prop.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
+          {([
+            ['proposals · overlays', 'dressings on the familiar form — ?exp=<key> for one form, large', PROPOSALS.filter(p => !p.standalone)],
+            ['proposals · new geometries', 'whole different curve families — these replace the spirograph entirely', PROPOSALS.filter(p => p.standalone)],
+          ] as const).map(([heading, sub, list]) => (
+            <div key={heading}>
+              <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 24, opacity: 0.8, marginTop: 64, marginBottom: 4 }}>
+                {heading}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {([1, 3, 5] as const).map((emo, i) => {
-                  const curveType = CURVE_TYPES[(PROPOSALS.indexOf(prop) + i * 2) % CURVE_TYPES.length];
-                  const dims = {
-                    ...makeDims({ key: prop.key, label: prop.label, rule: '', dims: {} }, curveType, emo, `exp-${prop.key}-${i}`),
-                    experiment: prop.key,
-                  };
-                  return (
-                    <div key={i} style={{ textAlign: 'center' }}>
-                      <StarCell dims={dims} size={190} animate={false} />
-                      <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>{curveType}</div>
-                    </div>
-                  );
-                })}
+              <div style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 32 }}>
+                {sub}
               </div>
+              {list.map(prop => (
+                <div key={prop.key} style={{ marginBottom: 44 }}>
+                  <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: BTW.textDim, marginBottom: 4 }}>
+                    {prop.label}
+                    <span style={{ opacity: 0.55, textTransform: 'none', letterSpacing: '0.04em', marginLeft: 10 }}>{prop.pitch}</span>
+                    <a href={`?exp=${prop.key}`} style={{ color: BTW.textDim, marginLeft: 10, opacity: 0.7 }}>enlarge →</a>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {([1, 3, 5] as const).map((emo, i) => {
+                      const curveType = CURVE_TYPES[(PROPOSALS.indexOf(prop) + i * 2) % CURVE_TYPES.length];
+                      const dims = {
+                        ...makeDims({ key: prop.key, label: prop.label, rule: '', dims: {} }, curveType, emo, `exp-${prop.key}-${i}`),
+                        experiment: prop.key,
+                      };
+                      return (
+                        <div key={i} style={{ textAlign: 'center' }}>
+                          <StarCell dims={dims} size={190} animate={false} />
+                          <div style={{ fontSize: 10, color: BTW.textDim, opacity: 0.7, marginTop: -8 }}>
+                            {prop.standalone ? `variant ${i + 1}` : curveType}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </>

@@ -10,7 +10,7 @@ import {
   CRYSTAL_TIGHTEN, CRYSTAL_SLOW,
   type ArchetypeSpec, type Projector, type RGB,
 } from './archetypes';
-import { drawProposal } from './proposals';
+import { drawProposal, isStandaloneProposal } from './proposals';
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -314,6 +314,17 @@ function renderFrame(
   // pulled-in curve.
   const archR = CONFIG.outerRadius;
   const projector: Projector = (x, y, z) => project(x, y, z, cam);
+
+  // Standalone proposal geometries (/preview/stars only) replace the base
+  // form entirely — the star is a different curve family, not an overlay.
+  // They share `projector`, so the same slow world-turn animates them.
+  if (geo.experiment && isStandaloneProposal(geo.experiment)) {
+    drawProposal(geo.experiment, ctx, projector, archR, baseRGB as RGB, time, {
+      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+    });
+    return;
+  }
+
   drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
 
   // Ghost trace
@@ -421,7 +432,7 @@ function renderFrame(
   // dimensions. Drawn last so a proposal can restyle or occlude the base form.
   if (geo.experiment) {
     drawProposal(geo.experiment, ctx, projector, archR, baseRGB as RGB, time, {
-      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed,
+      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
     });
   }
 }
