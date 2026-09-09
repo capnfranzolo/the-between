@@ -32,9 +32,9 @@ for (const line of readFileSync(join(root, '.env.local'), 'utf8').split('\n')) {
   if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].trim();
 }
 
-const { extractDimensions, visualDimensions } = await import('../src/lib/dimensions/extract.ts');
-const { resolveFamily, familyLabel } = await import('../src/lib/spirograph/families.ts');
-const { hashString } = await import('../src/lib/btw.ts');
+const { extractDimensions, visualDimensions } = await import('../src/lib/dimensions/extract');
+const { resolveFamily, familyLabel } = await import('../src/lib/spirograph/families');
+const { hashString } = await import('../src/lib/btw');
 
 const SUPA = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;

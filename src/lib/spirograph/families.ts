@@ -81,13 +81,17 @@ export interface FamilySpec {
  *  6. tangle    everything else: the inward default.
  */
 export const FAMILY_THRESHOLDS = {
-  voidVulnerability: 0.75, // above this (with sadness + stillness) → void
-  voidCharge: 0.30,        // below this
-  radianceCharge: 0.72,    // above this → radiance
-  fieldConnection: 0.72,   // above this → field
-  latticeResolve: 0.70,    // above this → lattice
-  currentsResolve: 0.38,   // below this → currents
-  currentsMemory: 0.28,    // temporality below this → currents
+  // Calibrated 2026-09-09 against the real extraction distribution (103 mock
+  // stars): Haiku's resolve clusters at 0.62-0.81 and charge at 0.28-0.58, so
+  // the cuts sit at the observed tails, not at intuition. Resulting sky:
+  // tangle 29% / field 20% / lattice 19% / radiance 17% / currents 8% / void 7%.
+  voidVulnerability: 0.70, // above this (with sadness + stillness) → void
+  voidCharge: 0.40,        // below this
+  radianceCharge: 0.55,    // above this → radiance
+  fieldConnection: 0.89,   // above this → field
+  latticeResolve: 0.78,    // above this → lattice
+  currentsResolve: 0.68,   // below this → currents
+  currentsMemory: 0.24,    // temporality below this → currents
 } as const;
 
 export function resolveFamily(dims: FamilySource, seed: number): FamilySpec {
