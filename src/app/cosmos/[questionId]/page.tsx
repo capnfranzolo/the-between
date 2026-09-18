@@ -10,7 +10,6 @@ import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
-import SkyRail from '@/components/SkyRail';
 import ArrivalTitle from '@/components/ArrivalTitle';
 import ShareButton from '@/components/ShareButton';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
@@ -319,9 +318,9 @@ export default function CosmosPage() {
   // lets the confirmation panel offer a real "share this pair" link.
   const [connectedBondId, setConnectedBondId] = useState<string | null>(null);
 
-  // ── Phase 4 — sky rail: the world currently shown (may differ from the
-  // route param after a rail switch; the URL is kept in sync via pushState
-  // without a real navigation). ──
+  // ── Phase 4 — world switching: the world currently shown (may differ from
+  // the route param after a lozenge switch; the URL is kept in sync via
+  // pushState without a real navigation). ──
   const [currentQuestionId, setCurrentQuestionId] = useState(questionId);
   const [railQuestions, setRailQuestions] = useState<{ id: string; text: string; starCount: number }[]>([]);
   const [switching, setSwitching] = useState(false);
@@ -331,7 +330,7 @@ export default function CosmosPage() {
   // performSwitch referencing itself inside its own useCallback.
   const performSwitchRef = useRef<(newId: string, pushHistory: boolean) => void>(() => {});
 
-  // Fetch all active questions (+ star counts) for the sky rail
+  // Fetch all active questions so the 'next question' lozenge can cycle
   useEffect(() => {
     fetch('/api/questions')
       .then(r => r.json())
@@ -365,7 +364,7 @@ export default function CosmosPage() {
 
   // ── Phase 4 — crossfade to a different question's world. Camera stays;
   // drift continues in the new world. Ignores same-world / mid-switch
-  // requests (the rail and popstate both funnel through here). ──
+  // requests (the lozenge and popstate both funnel through here). ──
   const performSwitch = useCallback((newId: string, pushHistory: boolean) => {
     if (newId === currentQuestionId || switchingRef.current) return;
     switchingRef.current = true;
@@ -404,8 +403,8 @@ export default function CosmosPage() {
   }, [currentQuestionId, myShortcode]);
   useEffect(() => { performSwitchRef.current = performSwitch; }, [performSwitch]);
 
-  // Back/forward: the rail's pushState calls only touch the URL, so browser
-  // navigation between worlds needs its own listener.
+  // Back/forward: the lozenge's pushState calls only touch the URL, so
+  // browser navigation between worlds needs its own listener.
   useEffect(() => {
     const onPop = () => {
       const m = window.location.pathname.match(/^\/cosmos\/([^/]+)/);
@@ -417,6 +416,36 @@ export default function CosmosPage() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [currentQuestionId, performSwitch]);
+
+  // The 'next question' lozenge hides until the visitor lingers on the title
+  // for a beat (or taps it, on touch); it then fades in beneath, centered,
+  // and lingers a few seconds after they roll off. Same presentation as the
+  // landing page — this route is just the deep-linked entry to the same sky.
+  const [lozengeVisible, setLozengeVisible] = useState(false);
+  const lozShowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lozHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleEnter = useCallback(() => {
+    if (lozHideTimer.current) { clearTimeout(lozHideTimer.current); lozHideTimer.current = null; }
+    if (!lozShowTimer.current) {
+      lozShowTimer.current = setTimeout(() => { lozShowTimer.current = null; setLozengeVisible(true); }, 600);
+    }
+  }, []);
+  const titleLeave = useCallback(() => {
+    if (lozShowTimer.current) { clearTimeout(lozShowTimer.current); lozShowTimer.current = null; }
+    if (lozHideTimer.current) clearTimeout(lozHideTimer.current);
+    lozHideTimer.current = setTimeout(() => { lozHideTimer.current = null; setLozengeVisible(false); }, 3500);
+  }, []);
+  const titleTap = useCallback(() => {
+    if (lozShowTimer.current) { clearTimeout(lozShowTimer.current); lozShowTimer.current = null; }
+    if (lozHideTimer.current) { clearTimeout(lozHideTimer.current); lozHideTimer.current = null; }
+    setLozengeVisible(true);
+  }, []);
+
+  const nextQuestion = useCallback(() => {
+    if (railQuestions.length < 2) return;
+    const idx = railQuestions.findIndex(q => q.id === currentQuestionId);
+    performSwitch(railQuestions[(idx + 1) % railQuestions.length].id, true);
+  }, [currentQuestionId, railQuestions, performSwitch]);
 
   // Phase 7 — keep the ambient bed pointed at the world on screen (mount, and
   // as a no-op backstop after a rail switch, which already called setWorld).
@@ -707,13 +736,6 @@ export default function CosmosPage() {
         />
       )}
 
-      <SkyRail
-        questions={railQuestions}
-        currentId={currentQuestionId}
-        onSelect={id => performSwitch(id, true)}
-        disabled={switching}
-      />
-
       <div
         className="btw-viewport"
         style={{
@@ -721,29 +743,74 @@ export default function CosmosPage() {
           fontFamily: SANS, color: BTW.textPri, pointerEvents: 'none',
         }}
       >
-        {/* Top chrome — the question, quiet */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0,
-          padding: '22px 30px 18px',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-          pointerEvents: 'none',
-        }}>
-          {arrivalDone && data?.question?.text && (
-            <div style={{
-              fontFamily: SERIF, fontStyle: 'italic',
-              fontSize: 'clamp(22px, 3.2vw, 36px)',
-              color: BTW.textPri,
-              letterSpacing: '0.01em',
-              textAlign: 'center',
-              maxWidth: 900,
-              lineHeight: 1.2,
-              opacity: 0.35,
-              pointerEvents: 'none',
-            }}>
+        {/* Top chrome — the question, quiet and centered. Lingering on it
+            reveals a 'next question' lozenge beneath, which stays a few
+            seconds after rolling off — same as the landing page. */}
+        {arrivalDone && data?.question?.text && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0,
+            padding: '22px 30px 0',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            pointerEvents: 'none',
+          }}>
+            <div
+              onPointerEnter={titleEnter}
+              onPointerLeave={titleLeave}
+              onPointerDown={titleTap}
+              style={{
+                fontFamily: SERIF, fontStyle: 'italic',
+                fontSize: 'clamp(22px, 3.2vw, 36px)',
+                color: BTW.textPri,
+                letterSpacing: '0.01em',
+                textAlign: 'center',
+                maxWidth: 900,
+                lineHeight: 1.2,
+                opacity: 0.35,
+                pointerEvents: 'auto',
+              }}
+            >
               {data.question.text}
             </div>
-          )}
-        </div>
+            {railQuestions.length > 1 && (
+              <div
+                onPointerEnter={titleEnter}
+                onPointerLeave={titleLeave}
+                style={{
+                  height: 40, display: 'flex', alignItems: 'center',
+                  opacity: lozengeVisible ? 1 : 0,
+                  transition: 'opacity 0.6s ease',
+                  pointerEvents: lozengeVisible ? 'auto' : 'none',
+                }}
+              >
+                <button
+                  onClick={nextQuestion}
+                  disabled={switching}
+                  tabIndex={lozengeVisible ? 0 : -1}
+                  aria-hidden={!lozengeVisible}
+                  aria-label="Travel to the next question's sky"
+                  style={{
+                    background: 'transparent',
+                    border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
+                    borderRadius: 999,
+                    color: BTW.textDim,
+                    padding: '5px 12px',
+                    fontFamily: SANS, fontSize: 10,
+                    letterSpacing: '0.18em', textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                    cursor: switching ? 'default' : 'pointer',
+                    opacity: switching ? 0.4 : 0.8,
+                    touchAction: 'manipulation',
+                    transition: 'color .2s, border-color .2s, opacity .2s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
+                  onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
+                >
+                  next question →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Star detail panel */}
         {selectedStar && !connecting && !connectConfirmed && (
@@ -849,19 +916,6 @@ export default function CosmosPage() {
           @keyframes btwRise {
             from { opacity: 0; transform: translateX(-50%) translateY(20px); }
             to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-          }
-          /* Desktop: next-question floats upper-right, mobile version hidden */
-          .btw-next-q-desktop {
-            position: absolute;
-            top: calc(env(safe-area-inset-top, 0px) + 24px);
-            right: 20px;
-          }
-          .btw-next-q-mobile { display: none !important; }
-
-          /* Mobile: width breakpoint OR touch-only device */
-          @media (max-width: 768px), (hover: none) and (pointer: coarse) {
-            .btw-next-q-desktop { display: none !important; }
-            .btw-next-q-mobile  { display: block !important; }
           }
         `}</style>
       </div>
