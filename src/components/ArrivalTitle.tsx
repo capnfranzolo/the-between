@@ -110,7 +110,9 @@ export default function ArrivalTitle({
           // Centered: the answers' white, fully present. Risen: the header's
           // quiet transparency.
           color: risen ? BTW.textPri : '#F0E8E0',
-          opacity: phase === 'enter' ? 0 : risen ? 0.35 : 1,
+          // R3 — the header's resting opacity went 0.35 → 0.5 (it vanished
+          // over a bright sky); the landing must match it exactly.
+          opacity: phase === 'enter' ? 0 : risen ? 0.5 : 1,
           textShadow: '0 1px 24px rgba(10,6,24,0.6)',
           transition: risen
             ? `top ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${RISE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity ${RISE_MS}ms ease, color ${RISE_MS}ms ease`

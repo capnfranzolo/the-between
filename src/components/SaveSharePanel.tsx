@@ -432,7 +432,7 @@ export default function SaveSharePanel({ shortcode, questionText, onClose }: Sav
             {/* eslint-disable-next-line @next/next/no-img-element -- server-rendered PNG, not a Next-optimizable static asset */}
             <img
               src={posterUrl}
-              alt="Your star's story"
+              alt="The star's story"
               style={{
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%', objectFit: 'cover',
@@ -487,7 +487,7 @@ export default function SaveSharePanel({ shortcode, questionText, onClose }: Sav
             readOnly
             value={url}
             onFocus={e => e.currentTarget.select()}
-            aria-label="Your star's link"
+            aria-label="The star's link"
             style={{
               flex: 1, minWidth: 0,
               background: 'rgba(240,232,224,0.06)',

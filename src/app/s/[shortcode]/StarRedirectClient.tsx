@@ -10,19 +10,18 @@ interface Props {
 }
 
 /**
- * Renders a brief star-card landing page, then navigates to the cosmos view.
- * Keeping actual content here (not just a redirect) lets social crawlers
- * (Facebook, Twitter, etc.) read the og: meta tags without following a JS
- * redirect to a page that has no og:image.
+ * A /s/ link goes STRAIGHT into the star's sky (R3): the card below is
+ * crawler fodder and a noscript fallback, never a stop on the way. Social
+ * crawlers (Facebook, Twitter, …) still read the og: meta tags and the
+ * rendered answer without following the JS navigation; a person sees the
+ * world, because the card read as "an input box with my answer" (owner
+ * review, 2026-09-19) rather than as an arrival.
  */
 export default function StarRedirectClient({ to, answer, question }: Props) {
-  // Delayed navigation — give crawlers time to read the page, and let users
-  // see the card before being whisked away.
+  // Immediate — no interstitial beat. `replace` so Back leaves The Between
+  // rather than bouncing through this page again.
   useEffect(() => {
-    const t = setTimeout(() => {
-      window.location.replace(to);
-    }, 2200);
-    return () => clearTimeout(t);
+    window.location.replace(to);
   }, [to]);
 
   return (

@@ -8,18 +8,16 @@ import CosmosScene, {
 } from '@/components/cosmos/CosmosScene';
 import StarDetail, { StarMini, type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
-import SaveStarPanel from '@/components/SaveStarPanel';
-import SharePanel from '@/components/SharePanel';
+import SaveSharePanel from '@/components/SaveSharePanel';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import ArrivalTitle from '@/components/ArrivalTitle';
-import ShareButton from '@/components/ShareButton';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
-import { SITE_URL, BIRTH_FLAG_KEY, BOND_QUEST_FLAG_KEY } from '@/lib/constants';
+import { BIRTH_FLAG_KEY, BOND_QUEST_FLAG_KEY } from '@/lib/constants';
 
 const DIM_DEFAULTS = { certainty: 0.5, warmth: 0.5, tension: 0.5, vulnerability: 0.5, scope: 0.5, rootedness: 0.5, emotionIndex: 3, curveType: 'hypotrochoid' as const, reasoning: '' };
 
@@ -295,9 +293,9 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
-  // Stage A — the keepsake and the artifact share, for your own star only.
-  const [savePanel, setSavePanel] = useState(false);
-  const [sharePanel, setSharePanel] = useState(false);
+  // R3 — ONE unified save/share surface, for whichever star is on screen
+  // (your own, or a stranger's via the footer icon).
+  const [saveSharePanel, setSaveSharePanel] = useState(false);
   // Stage A — the bond quest line, risen once when the newborn's visitor
   // leaves their own star (sessionStorage-scoped; see BOND_QUEST_FLAG_KEY).
   const [questLine, setQuestLine] = useState(false);
@@ -322,10 +320,6 @@ export default function CosmosPage() {
   // ── "Add yours" composer overlay (Phase 6 — also the defect #5 CTA target) ──
   const [showComposer, setShowComposer] = useState(false);
   const [pending, setPending] = useState<ValidatedPayload | null>(null);
-
-  // Real connection id for the bond just formed, once /api/connect confirms —
-  // lets the confirmation panel offer a real "share this pair" link.
-  const [connectedBondId, setConnectedBondId] = useState<string | null>(null);
 
   // ── Phase 4 — world switching: the world currently shown (may differ from
   // the route param after a lozenge switch; the URL is kept in sync via
@@ -357,19 +351,8 @@ export default function CosmosPage() {
       .catch(() => {});
   }, []);
 
-  // Follow CTA — social handles for the quiet whisper line beneath the
-  // lozenge reveal; only the ones an admin has filled in ever render.
-  const [social, setSocial] = useState<Record<string, string>>({});
-  useEffect(() => {
-    fetch('/api/content')
-      .then(r => r.json())
-      .then(d => setSocial(d.social ?? {}))
-      .catch(() => {});
-  }, []);
-  const socialEntries = useMemo(
-    () => Object.entries(social).filter(([, v]) => v && v.trim() !== ''),
-    [social],
-  );
+  // R3 — the follow-CTA whisper under the lozenges is gone (the About modal
+  // keeps its version), and with it the /api/content social fetch.
 
   // Initial load — keyed on the route param, which never changes without a
   // real navigation (the rail updates `currentQuestionId` + the URL via
@@ -648,7 +631,6 @@ export default function CosmosPage() {
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
     sceneRef.current?.flyToThought(id);
   };
@@ -664,7 +646,6 @@ export default function CosmosPage() {
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
     sceneRef.current?.flyToThought(id);
   }, [data, myShortcode]);
@@ -684,7 +665,6 @@ export default function CosmosPage() {
     setReason('');
     setConnecting(false);
     setConnectConfirmed(true);
-    setConnectedBondId(null);
     // …and the sky performs it: both stars bloom, and the reason is written
     // once along the orbit they now share.
     sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
@@ -703,11 +683,10 @@ export default function CosmosPage() {
       const payload = await res.json();
       if (payload.ok) {
         const realId: string = payload.connection?.id ?? tempId;
-        // Swap the optimistic temp id for the real one so "share this pair"
-        // (here and on any future visit to either star's panel) points at a
-        // working /b/[connectionId] + OG image.
+        // Swap the optimistic temp id for the real one so the bond matches
+        // the server's row on the next fetch (the /b/ route and its OG image
+        // still exist — R3 only retired the UI entry points to them).
         setLocalBonds(b => b.map(bd => bd.id === tempId ? { ...bd, id: realId } : bd));
-        setConnectedBondId(realId);
         localStorage.setItem(PENDING_BOND_KEY(userStarId), JSON.stringify({
           id: realId, fromStarId: userStarId, toStarId: targetId, reason: savedReason,
         }));
@@ -738,8 +717,8 @@ export default function CosmosPage() {
   // The countdown: one timer, restarted whenever the stop or a gating overlay
   // changes; the ring animates in CSS keyed the same way, so they stay in step.
   const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching
-    && !savePanel && !sharePanel;
-  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${savePanel}|${sharePanel}`;
+    && !saveSharePanel;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${saveSharePanel}`;
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
@@ -769,7 +748,6 @@ export default function CosmosPage() {
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
   };
 
@@ -824,8 +802,14 @@ export default function CosmosPage() {
       >
         {/* Top chrome — the question, quiet and centered. Lingering on it
             reveals backward-travel lozenges beneath, which stay a few
-            seconds after rolling off — same as the landing page. */}
-        {arrivalDone && data?.question?.text && (
+            seconds after rolling off — same as the landing page.
+
+            R3 — the question title is ALWAYS present once its text exists.
+            The only thing it waits for is the arrival card, which is the same
+            line in motion (showing both would double-render it); every
+            ?star= entry — a shared /s/ link, a birth — skips that card, so
+            the title is up from the first frame. */}
+        {data?.question?.text && (arrivalDone || !!starParam) && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
             padding: '22px 30px 0',
@@ -856,7 +840,8 @@ export default function CosmosPage() {
                 textAlign: 'center',
                 maxWidth: 900,
                 lineHeight: 1.2,
-                opacity: 0.35,
+                // R3 — was 0.35, which vanished over a bright sky.
+                opacity: 0.5,
                 pointerEvents: 'auto',
               }}
             >
@@ -927,33 +912,6 @@ export default function CosmosPage() {
                     </button>
                   )}
                 </div>
-                <div style={{ marginTop: 2, textAlign: 'center' }}>
-                  <div style={{
-                    fontFamily: SANS, fontSize: 9, letterSpacing: '0.02em',
-                    color: BTW.textDim, opacity: 0.5,
-                  }}>
-                    A new question opens every week. Follow The Between for the next one.
-                  </div>
-                  {socialEntries.length > 0 && (
-                    <div style={{ marginTop: 6, display: 'flex', justifyContent: 'center', gap: 14 }}>
-                      {socialEntries.map(([key, url]) => (
-                        <a
-                          key={key}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          style={{
-                            fontFamily: SANS, fontSize: 9, letterSpacing: '0.16em',
-                            textTransform: 'uppercase', color: BTW.textDim,
-                            opacity: 0.6, textDecoration: 'none',
-                          }}
-                        >
-                          {key}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -969,15 +927,13 @@ export default function CosmosPage() {
             connections={selectedConnections}
             onConnectionClick={handleThoughtClick}
             onDismiss={clearSelection}
-            nudge={hashString(selectedStar.shortcode) % 5 === 0}
             userStar={userStarId && byId[userStarId] && !selectedStar.mine
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
             justBorn={!!bornShortcode && selectedStar.shortcode === bornShortcode}
             onExplore={exploreFromPanel}
-            onSave={selectedStar.mine ? () => setSavePanel(true) : undefined}
-            onShare={selectedStar.mine ? () => setSharePanel(true) : undefined}
+            onSaveShare={() => setSaveSharePanel(true)}
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
@@ -1036,19 +992,6 @@ export default function CosmosPage() {
             <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
             </div>
-            {connectedBondId && (
-              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontFamily: SANS, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim }}>
-                  share this pair
-                </span>
-                <ShareButton
-                  url={`https://${SITE_URL}/b/${connectedBondId}`}
-                  ogImageUrl={`https://${SITE_URL}/api/og/bond/${connectedBondId}`}
-                  shareText="Two strangers' thoughts, bound on The Between"
-                  ariaLabel="Share this pair"
-                />
-              </div>
-            )}
             <button
               onClick={clearSelection}
               style={{
@@ -1171,20 +1114,13 @@ export default function CosmosPage() {
         />
       )}
 
-      {/* Stage A — your own star's keepsake and artifact share */}
-      {savePanel && selectedStar?.mine && (
-        <SaveStarPanel
-          shortcode={selectedStar.shortcode}
-          star={selectedStar}
-          onClose={() => setSavePanel(false)}
-        />
-      )}
-      {sharePanel && selectedStar?.mine && (
-        <SharePanel
+      {/* R3 — the ONE save/share surface, for whichever star is on screen */}
+      {saveSharePanel && selectedStar && (
+        <SaveSharePanel
           shortcode={selectedStar.shortcode}
           star={selectedStar}
           questionText={data?.question?.text}
-          onClose={() => setSharePanel(false)}
+          onClose={() => setSaveSharePanel(false)}
         />
       )}
 

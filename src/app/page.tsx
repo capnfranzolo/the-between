@@ -4,19 +4,16 @@ import { useSearchParams } from 'next/navigation';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, CROSSFADE_IN_MS } from '@/components/cosmos/CosmosScene';
 import StarDetail, { StarMini, type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
-import SaveStarPanel from '@/components/SaveStarPanel';
-import SharePanel from '@/components/SharePanel';
+import SaveSharePanel from '@/components/SaveSharePanel';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
-import ShareButton from '@/components/ShareButton';
 import ArrivalTitle from '@/components/ArrivalTitle';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
 import { withSeed } from '@/lib/spirograph/renderer';
-import { SITE_URL } from '@/lib/constants';
 
 // The landing cosmos is always question 1 unless a specific question is
 // requested (e.g. the "+" affordance on another cosmos page linking back
@@ -75,10 +72,9 @@ function LandingPageInner() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
-  // Stage A — the keepsake and the artifact share, for your own star only.
-  // (Births land on /cosmos; here these are the later-visit doors.)
-  const [savePanel, setSavePanel] = useState(false);
-  const [sharePanel, setSharePanel] = useState(false);
+  // R3 — ONE unified save/share surface, for whichever star is on screen.
+  // (Births land on /cosmos; here this is the later-visit door.)
+  const [saveSharePanel, setSaveSharePanel] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
 
   // ── Arrival beat — the question alone over an empty sky, then it rises ──
@@ -108,10 +104,6 @@ function LandingPageInner() {
   const [showComposer, setShowComposer] = useState(cameToContribute);
   const [pending, setPending] = useState<ValidatedPayload | null>(null);
 
-  // Real connection id for the bond just formed, once /api/connect confirms —
-  // lets the confirmation panel offer a real "share this pair" link.
-  const [connectedBondId, setConnectedBondId] = useState<string | null>(null);
-
   // ── The tour (drift v2) — arrival opens the REAL focused view: panel at the
   // bottom, full live star animation, and a quiet ring counting down to the
   // next star. Waiting is drifting; clicking the ring pauses on this star. ──
@@ -138,20 +130,8 @@ function LandingPageInner() {
       .catch(() => setCurrentQuestionId(prev => prev ?? LANDING_QUESTION_ID));
   }, []);
 
-  // Follow CTA — social handles for the quiet "follow The Between" whisper
-  // line beneath the lozenge reveal; only ever renders the ones an admin has
-  // filled in (all four are empty by default, so the line must stand alone).
-  const [social, setSocial] = useState<Record<string, string>>({});
-  useEffect(() => {
-    fetch('/api/content')
-      .then(r => r.json())
-      .then(d => setSocial(d.social ?? {}))
-      .catch(() => {});
-  }, []);
-  const socialEntries = useMemo(
-    () => Object.entries(social).filter(([, v]) => v && v.trim() !== ''),
-    [social],
-  );
+  // R3 — the follow-CTA whisper under the lozenges is gone (the About modal
+  // keeps its version), and with it the /api/content social fetch.
 
   const handleDriftArrive = useCallback((id: string) => {
     setDwellCount(c => c + 1);
@@ -373,7 +353,6 @@ function LandingPageInner() {
     setSelected(id);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
     sceneRef.current?.flyToThought(id);
   };
@@ -381,8 +360,8 @@ function LandingPageInner() {
   // The countdown: one timer, restarted whenever the stop or a gating overlay
   // changes; the ring animates in CSS keyed the same way, so they stay in step.
   const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching
-    && !savePanel && !sharePanel;
-  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${savePanel}|${sharePanel}`;
+    && !saveSharePanel;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${saveSharePanel}`;
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
@@ -405,7 +384,6 @@ function LandingPageInner() {
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
   };
 
@@ -424,7 +402,6 @@ function LandingPageInner() {
     setReason('');
     setConnecting(false);
     setConnectConfirmed(true);
-    setConnectedBondId(null);
     // …and the sky performs it: both stars bloom, and the reason is written
     // once along the orbit they now share.
     sceneRef.current?.bondFinale(userStarId, targetId, savedReason);
@@ -444,7 +421,6 @@ function LandingPageInner() {
       if (payload.ok) {
         const realId: string = payload.connection?.id ?? tempId;
         setLocalBonds(b => b.map(bd => bd.id === tempId ? { ...bd, id: realId } : bd));
-        setConnectedBondId(realId);
         localStorage.setItem(PENDING_BOND_KEY(userStarId), JSON.stringify({
           id: realId, fromStarId: userStarId, toStarId: targetId, reason: savedReason,
         }));
@@ -463,7 +439,6 @@ function LandingPageInner() {
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
-    setConnectedBondId(null);
     setReason('');
 
     const qs = myShortcode ? `?mine=${encodeURIComponent(myShortcode)}` : '';
@@ -639,7 +614,7 @@ function LandingPageInner() {
         {/* Top chrome — the question, quiet and centered (the arrival card
             lands here). Lingering on it reveals backward-travel lozenges
             beneath, which stay a few seconds after rolling off. */}
-        {arrivalDone && data?.question?.text && (
+        {data?.question?.text && (arrivalDone || cameToContribute) && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
             padding: '22px 30px 0',
@@ -670,7 +645,8 @@ function LandingPageInner() {
                 textAlign: 'center',
                 maxWidth: 900,
                 lineHeight: 1.2,
-                opacity: 0.35,
+                // R3 — was 0.35, which vanished over a bright sky.
+                opacity: 0.5,
                 pointerEvents: 'auto',
               }}
             >
@@ -741,33 +717,6 @@ function LandingPageInner() {
                     </button>
                   )}
                 </div>
-                <div style={{ marginTop: 2, textAlign: 'center' }}>
-                  <div style={{
-                    fontFamily: SANS, fontSize: 9, letterSpacing: '0.02em',
-                    color: BTW.textDim, opacity: 0.5,
-                  }}>
-                    A new question opens every week. Follow The Between for the next one.
-                  </div>
-                  {socialEntries.length > 0 && (
-                    <div style={{ marginTop: 6, display: 'flex', justifyContent: 'center', gap: 14 }}>
-                      {socialEntries.map(([key, url]) => (
-                        <a
-                          key={key}
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          style={{
-                            fontFamily: SANS, fontSize: 9, letterSpacing: '0.16em',
-                            textTransform: 'uppercase', color: BTW.textDim,
-                            opacity: 0.6, textDecoration: 'none',
-                          }}
-                        >
-                          {key}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </div>
@@ -783,13 +732,11 @@ function LandingPageInner() {
             connections={selectedConnections}
             onConnectionClick={handleThoughtClick}
             onDismiss={clearSelection}
-            nudge={hashString(selectedStar.shortcode) % 5 === 0}
             userStar={userStarId && byId[userStarId] && !selectedStar.mine
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
-            onSave={selectedStar.mine ? () => setSavePanel(true) : undefined}
-            onShare={selectedStar.mine ? () => setSharePanel(true) : undefined}
+            onSaveShare={() => setSaveSharePanel(true)}
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
@@ -848,19 +795,6 @@ function LandingPageInner() {
             <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
             </div>
-            {connectedBondId && (
-              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontFamily: SANS, fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase', color: BTW.textDim }}>
-                  share this pair
-                </span>
-                <ShareButton
-                  url={`https://${SITE_URL}/b/${connectedBondId}`}
-                  ogImageUrl={`https://${SITE_URL}/api/og/bond/${connectedBondId}`}
-                  shareText="Two strangers' thoughts, bound on The Between"
-                  ariaLabel="Share this pair"
-                />
-              </div>
-            )}
             <button
               onClick={clearSelection}
               style={{
@@ -966,20 +900,13 @@ function LandingPageInner() {
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
 
-      {/* Stage A — your own star's keepsake and artifact share */}
-      {savePanel && selectedStar?.mine && (
-        <SaveStarPanel
-          shortcode={selectedStar.shortcode}
-          star={selectedStar}
-          onClose={() => setSavePanel(false)}
-        />
-      )}
-      {sharePanel && selectedStar?.mine && (
-        <SharePanel
+      {/* R3 — the ONE save/share surface, for whichever star is on screen */}
+      {saveSharePanel && selectedStar && (
+        <SaveSharePanel
           shortcode={selectedStar.shortcode}
           star={selectedStar}
           questionText={data?.question?.text}
-          onClose={() => setSharePanel(false)}
+          onClose={() => setSaveSharePanel(false)}
         />
       )}
 

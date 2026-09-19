@@ -1,8 +1,6 @@
 'use client';
 import { useRef, useEffect, useCallback } from 'react';
 import { BTW, SERIF, SANS, withAlpha } from '@/lib/btw';
-import ShareButton from './ShareButton';
-import { SITE_URL } from '@/lib/constants';
 import { createSpirograph, withSeed } from '@/lib/spirograph/renderer';
 import type { DimensionResult } from '@/lib/dimensions/prompt';
 import type { CurveType } from '@/lib/spirograph/renderer';
@@ -34,7 +32,6 @@ interface StarDetailProps {
   connections?: Array<{ id?: string; reason: string; relatedStarId?: string }>;
   onConnectionClick?: (id: string) => void;
   onDismiss?: () => void;
-  nudge?: boolean;
   userStar?: UserStarContext | null;
   /** Defect #5 — visitor has no star of their own in this cosmos. */
   onAnswerCTA?: () => void;
@@ -44,12 +41,13 @@ interface StarDetailProps {
   tour?: { running: boolean; paused: boolean; durationMs: number; restartKey: string; onToggle: () => void };
   /** Phase 8 — this panel opened on the star that was just born. */
   justBorn?: boolean;
-  /** Stage A — the born panel's action trio. "Explore nearby stars" dismisses
-   *  this panel and hands the sky back to the tour; Save and Share open the
-   *  keepsake / story panels. Only ever wired on the visitor's own star. */
+  /** R3 — the born panel's "→": dismisses this panel and hands the sky back
+   *  to the tour (the old "Explore nearby stars" behaviour, unlabelled). */
   onExplore?: () => void;
-  onSave?: () => void;
-  onShare?: () => void;
+  /** R3 — the ONE door to the unified SaveSharePanel. Wired for every star:
+   *  your own (a labelled "Save & share") and a stranger's (the share icon in
+   *  the footer, which now opens the same panel for THAT star). */
+  onSaveShare?: () => void;
   /** Defect #9 — this is the star the visitor's own star already orbits. */
   isBondTarget?: boolean;
   /** The LLM gate spec: never say "flagged"/"pending"/"moderation" — the
@@ -221,12 +219,10 @@ export function StarMini({ dims, size, text, animVariant = 'rise' }: {
 
 export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
-  connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
+  connections, onConnectionClick, onDismiss, userStar, onAnswerCTA,
   justBorn, isBondTarget, pendingRise, myStarPending, tour,
-  onExplore, onSave, onShare,
+  onExplore, onSaveShare,
 }: StarDetailProps) {
-  const url = `https://${SITE_URL}/s/${star.shortcode}`;
-  const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, startY: 0, startScrollTop: 0 });
 
@@ -270,17 +266,15 @@ export default function StarDetail({
   const spentOnAnother = hasMystar && !star.mine && !!userHasOutgoingBond && !isBondTarget;
   const spentOnThis    = hasMystar && !star.mine && !!userHasOutgoingBond && !!isBondTarget;
 
-  // ── Stage A — your own star's actions ───────────────────────────────────
-  // A star that hasn't cleared the queue can't be shared (the story/keepsake
-  // routes only ever serve approved stars, and a not-yet-public star isn't
-  // anyone else's to see yet) — but it can always be *kept*: the URL and QR
-  // are the only way back, and SaveStarPanel says so in as many words.
-  const canSave  = !!star.mine && !!onSave;
-  const canShare = !!star.mine && !!onShare && !pendingRise;
-  // The born moment: one whisper, three labeled doors, no countdown ring.
+  // ── R3 — one door, for every star ───────────────────────────────────────
+  // Save and Share merged: the unified panel carries the link + QR (the only
+  // way back to a star) and the story video, so it opens for a star that
+  // hasn't cleared the queue too — the video simply isn't there yet.
+  const canSaveShare = !!onSaveShare;
+  // The born moment: one line, one invitation, an arrow, one door.
   const bornPanel = !!justBorn && !!star.mine;
-  // Any later visit to your own star: the same two doors, quieter.
-  const ownActions = !bornPanel && (canSave || canShare);
+  // Any later visit to your own star: the same door, quieter and labeled.
+  const ownActions = !bornPanel && !!star.mine && canSaveShare;
 
   const footerFrame: React.CSSProperties = {
     flexShrink: 0,
@@ -292,8 +286,7 @@ export default function StarDetail({
     paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
     borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
   };
-  // The born trio's shape: full-width primary, then the two keepsake doors
-  // side by side — labeled, never corner icons, and legible at 390px.
+  // The born panel's one action: a full-width pill, legible at 390px.
   const bornBtn: React.CSSProperties = {
     background: 'transparent',
     borderRadius: 999,
@@ -434,14 +427,9 @@ export default function StarDetail({
                   >
                     {c.reason}
                   </div>
-                  {c.id && (
-                    <ShareButton
-                      url={`https://${SITE_URL}/b/${c.id}`}
-                      ogImageUrl={`https://${SITE_URL}/api/og/bond/${c.id}`}
-                      shareText="A bond formed on The Between"
-                      ariaLabel="Share this pair"
-                    />
-                  )}
+                  {/* R3 — "share this pair" retires everywhere; bond sharing
+                      is parked until single-star sharing is right. The /b/
+                      route and its OG image stay, just with no entry point. */}
                 </div>
               ))}
             </div>
@@ -450,9 +438,10 @@ export default function StarDetail({
 
       </div>
 
-      {/* ── Stage A — the born footer: the moment, one whisper, three doors.
-          No tour ring: the tour is already paused on your own star, and a
-          countdown ring would rush the one beat that shouldn't be rushed. ── */}
+      {/* ── R3 — the born footer: "Here is your star.", the invitation to
+          explore, the arrow that takes you there, and one door to Save &
+          share. No tour ring: the tour is already paused on your own star,
+          and a countdown ring would rush the one beat that shouldn't be. ── */}
       {bornPanel ? (
       <div style={{
         ...footerFrame,
@@ -464,76 +453,76 @@ export default function StarDetail({
         gap: 12,
       }}>
         <div style={{
-          fontFamily: SANS, fontSize: 12, color: BTW.horizon[3],
-          letterSpacing: '0.12em', textTransform: 'uppercase',
-          textAlign: 'center', lineHeight: 1.5,
+          fontFamily: SERIF, fontSize: 20, lineHeight: 1.35,
+          color: BTW.textPri, textAlign: 'center',
         }}>
-          your star lives here.
+          Here is your star.
         </div>
         <div style={{
-          fontFamily: SERIF, fontStyle: 'italic', fontSize: 14,
+          fontFamily: SERIF, fontStyle: 'italic', fontSize: 17,
           lineHeight: 1.5, color: BTW.textDim, textAlign: 'center',
         }}>
-          {pendingRise
-            ? 'it will rise into the shared sky once it’s seen.'
-            : 'We don’t know who you are — save this if you want to come back.'}
+          Explore the other stars, and you can pick one for your star to orbit.
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {onExplore && (
+        {/* The one line that survives from the old pile: a star still in the
+            queue is told, quietly, that it will rise. */}
+        {pendingRise && (
+          <div style={{
+            fontFamily: SERIF, fontStyle: 'italic', fontSize: 13,
+            lineHeight: 1.5, color: BTW.textDim, opacity: 0.75,
+            textAlign: 'center',
+          }}>
+            it will rise into the shared sky once it’s seen.
+          </div>
+        )}
+        {onExplore && (
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
             <button
               onClick={onExplore}
+              aria-label="Explore the other stars"
+              title="Explore the other stars"
               style={{
-                ...bornBtn,
-                border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+                width: 40, height: 40, borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent',
+                border: `1px solid ${withAlpha(BTW.horizon[3], 0.6)}`,
                 color: BTW.horizon[3],
-                fontSize: 13,
+                fontFamily: SANS, fontSize: 15, lineHeight: 1,
+                cursor: 'pointer',
+                touchAction: 'manipulation',
+                transition: 'background .2s, border-color .2s',
               }}
               onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12); }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
             >
-              Explore nearby stars →
+              →
             </button>
-          )}
-          {(canSave || canShare) && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {canSave && (
-                <button
-                  onClick={onSave}
-                  style={{
-                    ...bornBtn, flex: '1 1 140px',
-                    border: `1px solid ${withAlpha(BTW.textPri, 0.24)}`,
-                    color: BTW.textSec,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  Save this star
-                </button>
-              )}
-              {canShare && (
-                <button
-                  onClick={onShare}
-                  style={{
-                    ...bornBtn, flex: '1 1 140px',
-                    border: `1px solid ${withAlpha(BTW.textPri, 0.24)}`,
-                    color: BTW.textSec,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  Share this star
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+        {canSaveShare && (
+          <button
+            onClick={onSaveShare}
+            style={{
+              ...bornBtn,
+              border: `1px solid ${withAlpha(BTW.textPri, 0.24)}`,
+              color: BTW.textSec,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            Save &amp; share
+          </button>
+        )}
       </div>
       ) : (
-      /* ── Sticky footer: share | centered action | tour ring ── */
+      /* ── Sticky footer: save & share | centered action | tour ring ── */
       <div style={footerFrame}>
-        {/* Your own star's share is the labeled action on the right — the
-            small corner button would only say the same thing twice. */}
-        {!ownActions && <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />}
+        {/* R3 — a stranger's star gets the same icon it always had, but it
+            now opens the unified panel for THAT star. Your own star's door is
+            the labeled action on the right; the icon would say it twice. */}
+        {!ownActions && canSaveShare && (
+          <SaveShareIconButton onClick={onSaveShare!} />
+        )}
 
         <div style={{
           flex: 1, minWidth: 0, display: 'flex',
@@ -608,36 +597,28 @@ export default function StarDetail({
           }}>
           <div style={{
             fontSize: 12, color: BTW.horizon[3],
-            letterSpacing: pendingRise ? '0.08em' : justBorn ? '0.12em' : '0.18em',
+            letterSpacing: pendingRise ? '0.08em' : '0.18em',
             textTransform: pendingRise ? 'none' : 'uppercase', textAlign: 'right', lineHeight: 1.5,
             maxWidth: pendingRise ? 200 : undefined,
             whiteSpace: pendingRise ? 'normal' : undefined,
             fontStyle: pendingRise ? 'italic' : undefined,
             fontFamily: pendingRise ? SERIF : undefined,
           }}>
+            {/* The born moment has its own footer now (see bornPanel), so
+                this label only ever speaks for a later visit. */}
             {pendingRise
               ? 'it will rise into the shared sky once it’s seen.'
-              : justBorn ? 'your star lives here.' : 'your star'}
+              : 'your star'}
           </div>
-          {/* Stage A — Save and Share, labeled, on every later visit */}
-          {canSave && (
+          {/* R3 — one labeled door on every later visit */}
+          {canSaveShare && (
             <button
-              onClick={onSave}
+              onClick={onSaveShare}
               style={ownBtn}
               onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); e.currentTarget.style.color = BTW.textPri; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = BTW.textSec; }}
             >
-              Save
-            </button>
-          )}
-          {canShare && (
-            <button
-              onClick={onShare}
-              style={ownBtn}
-              onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); e.currentTarget.style.color = BTW.textPri; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = BTW.textSec; }}
-            >
-              Share
+              Save &amp; share
             </button>
           )}
           </div>
@@ -671,6 +652,54 @@ export default function StarDetail({
       </div>
       )}
     </div>
+  );
+}
+
+// ── R3 — the save/share door on a stranger's panel. The same 34px icon the
+// retired ShareButton used, so nothing moves in the footer; it now opens the
+// unified SaveSharePanel for the star on screen instead of a share tray. ────
+const ShareIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
+function SaveShareIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Save & share this star"
+      aria-label="Save & share this star"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 34,
+        height: 34,
+        borderRadius: '50%',
+        background: 'transparent',
+        border: `1px solid ${withAlpha(BTW.textPri, 0.18)}`,
+        color: BTW.textDim,
+        cursor: 'pointer',
+        transition: 'color .2s, border-color .2s, background .2s',
+        flexShrink: 0,
+        touchAction: 'manipulation',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.color = BTW.textPri;
+        e.currentTarget.style.borderColor = withAlpha(BTW.horizon[3], 0.6);
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.color = BTW.textDim;
+        e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.18);
+      }}
+    >
+      <ShareIcon />
+    </button>
   );
 }
 
