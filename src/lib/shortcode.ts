@@ -1,6 +1,6 @@
 const CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-export function generateShortcode(length = 4): string {
+export function generateShortcode(length = 10): string {
   let result = '';
   const array = new Uint8Array(length);
   crypto.getRandomValues(array);

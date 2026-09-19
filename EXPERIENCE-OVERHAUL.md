@@ -45,6 +45,10 @@ something already alive.
 11. **Phone and desktop must both be excellent.** Every phase's acceptance criteria run on both
     a ~390×844 viewport and a ~1280×720+ viewport.
 
+**2026-09-19 — superseded:** decision 2's "no daily/weekly cadence" clause is superseded by the
+Question-of-the-Week model (admin-set `featured_at`, one question featured at a time) —
+owner decision, see `WEEKLY-SHARE-PLAN.md`.
+
 ## Sacred — never touch
 
 The creative direction is locked:

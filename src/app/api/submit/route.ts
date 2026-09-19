@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     'unknown';
   const ipHash = hashString(rawIp).toString(16);
 
-  const shortcode = generateShortcode(4);
+  const shortcode = generateShortcode();
   // The publish gate always runs server-side — client-provided dimensions are
   // trusted for visuals only (so the star matches its pre-submit preview), never
   // for the publishability verdict.
