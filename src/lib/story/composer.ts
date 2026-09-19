@@ -513,6 +513,9 @@ export function outroCard(
     duration?: number;
     follow?: string[];
     line?: string;
+    /** A quieter second line beneath the main one — when the reel puts the
+     *  featured question in `line`, the weekly invitation lives here. */
+    subline?: string;
   } = {},
 ): Segment {
   const duration = opts.duration ?? CARD_SECONDS;
@@ -523,7 +526,14 @@ export function outroCard(
   const block = layoutBlock(m, line, {
     face: 'serifItalic', size: 64, maxWidth: CONTENT_W, maxLines: 3, lineHeightFactor: 1.32, minSize: 44,
   });
-  const top = STORY_H / 2 - (block.lines.length * block.lineHeight) / 2;
+  const subBlock = opts.subline
+    ? layoutBlock(m, opts.subline, {
+        face: 'serifItalic', size: 40, maxWidth: CONTENT_W, maxLines: 2, lineHeightFactor: 1.35, minSize: 32,
+      })
+    : null;
+  const subGap = subBlock ? 72 : 0;
+  const subHeight = subBlock ? subBlock.lines.length * subBlock.lineHeight : 0;
+  const top = STORY_H / 2 - (block.lines.length * block.lineHeight + subGap + subHeight) / 2;
 
   return {
     duration,
@@ -540,7 +550,14 @@ export function outroCard(
         perLineRise: i => (1 - easeOut(ramp(t, 0.3 + i * 0.2, 1.5 + i * 0.2))) * 22,
       });
 
-      const bottom = top + block.lines.length * block.lineHeight;
+      let bottom = top + block.lines.length * block.lineHeight;
+      if (subBlock) {
+        drawBlock(ctx, subBlock, STORY_W / 2, bottom + subGap, () => 'rgba(240,232,224,0.62)', {
+          perLineAlpha: i => easeOut(ramp(t, 0.9 + i * 0.2, 2.1 + i * 0.2)),
+          perLineRise: i => (1 - easeOut(ramp(t, 0.9 + i * 0.2, 2.1 + i * 0.2))) * 16,
+        });
+        bottom += subGap + subHeight;
+      }
       ctx.textAlign = 'center';
       ctx.globalAlpha = easeOut(ramp(t, 1.2, 2.4));
       ctx.font = font('sansLight', 30);

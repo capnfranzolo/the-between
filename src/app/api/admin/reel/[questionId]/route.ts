@@ -160,7 +160,7 @@ export async function GET(
       const reel = sequence([
         introCard(question.text, questionId),
         ...starSegs,
-        outroCard({ questionId: featured?.id ?? questionId, follow, line: featured?.text }),
+        outroCard({ questionId: featured?.id ?? questionId, follow, line: featured?.text, subline: 'A new question opens every week.' }),
       ]);
 
       const result = await encodeSegment(reel, tmpPath);

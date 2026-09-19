@@ -743,20 +743,25 @@ export default function CosmosPage() {
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
+      // Auto-advancing away from the just-born star is as much a "first
+      // leave" as a dismissal — the quest line must not depend on HOW the
+      // visitor departs.
+      if (selected && selected === userStarId) riseQuestLine();
       setSelected(null);
       sceneRef.current?.tourNext();
     }, TOUR_MS);
     return () => clearTimeout(t);
-  }, [tourKey, tourPaused, tourEligible]);
+  }, [tourKey, tourPaused, tourEligible, selected, userStarId, riseQuestLine]);
 
   const tourToggle = useCallback(() => {
     setTourPaused(p => {
       if (!p) return true;             // stay with this star
+      if (selected && selected === userStarId) riseQuestLine();
       setSelected(null);               // → next star, right now
       sceneRef.current?.tourNext();
       return false;
     });
-  }, []);
+  }, [selected, userStarId, riseQuestLine]);
 
   const clearSelection = () => {
     // Leaving the star that was just born is the moment the quest is set.
