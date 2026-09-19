@@ -52,10 +52,15 @@ function LandingPageInner() {
   // ?question= pins the world (lozenge switches mirror it via replaceState so
   // refresh keeps you where you were); ?compose=1 is the explicit "I came to
   // type" intent — straight to the composer, no arrival theatre.
-  // The landing world: an explicit ?question= wins; otherwise a RANDOM active
-  // question is drawn once the list arrives, so the first question doesn't
-  // absorb all the traffic and returning visitors land somewhere new.
+  // The landing world: an explicit ?question= wins; otherwise the currently
+  // FEATURED question (admin-set "this week's question") once the list
+  // arrives — /api/questions already orders featured-first.
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(requestedQuestionId);
+  // The featured question's id, independent of whatever world is currently
+  // displayed (travel via the lozenge changes currentQuestionId but never
+  // this) — drives the "this week's question" eyebrow and the "this week →"
+  // return affordance.
+  const [featuredQuestionId, setFeaturedQuestionId] = useState<string | null>(null);
   const cameToContribute = searchParams.get('compose') === '1';
 
   const [data, setData] = useState<CosmosData | null>(null);
@@ -120,11 +125,27 @@ function LandingPageInner() {
           id: q.id, text: q.text, starCount: q.starCount ?? 0,
         }));
         setRailQuestions(qs);
-        setCurrentQuestionId(prev =>
-          prev ?? (qs.length ? qs[Math.floor(Math.random() * qs.length)].id : LANDING_QUESTION_ID));
+        // Featured-first ordering — qs[0] is this week's question.
+        setFeaturedQuestionId(qs.length ? qs[0].id : null);
+        setCurrentQuestionId(prev => prev ?? (qs.length ? qs[0].id : LANDING_QUESTION_ID));
       })
       .catch(() => setCurrentQuestionId(prev => prev ?? LANDING_QUESTION_ID));
   }, []);
+
+  // Follow CTA — social handles for the quiet "follow The Between" whisper
+  // line beneath the lozenge reveal; only ever renders the ones an admin has
+  // filled in (all four are empty by default, so the line must stand alone).
+  const [social, setSocial] = useState<Record<string, string>>({});
+  useEffect(() => {
+    fetch('/api/content')
+      .then(r => r.json())
+      .then(d => setSocial(d.social ?? {}))
+      .catch(() => {});
+  }, []);
+  const socialEntries = useMemo(
+    () => Object.entries(social).filter(([, v]) => v && v.trim() !== ''),
+    [social],
+  );
 
   const handleDriftArrive = useCallback((id: string) => {
     setDwellCount(c => c + 1);
@@ -498,11 +519,23 @@ function LandingPageInner() {
     setLozengeVisible(true);
   }, []);
 
-  const nextQuestion = useCallback(() => {
+  // The rail is ordered featured-first, then previously-featured (most
+  // recent first), then never-featured — so walking forward through it is
+  // walking BACKWARD through featured history, wrapping from the oldest
+  // question back to this week's. That's exactly "previous question" travel.
+  const previousQuestion = useCallback(() => {
     if (!currentQuestionId || railQuestions.length < 2) return;
     const idx = railQuestions.findIndex(q => q.id === currentQuestionId);
+    if (idx === -1) return;
     performSwitch(railQuestions[(idx + 1) % railQuestions.length].id);
   }, [currentQuestionId, railQuestions, performSwitch]);
+
+  // Direct return to this week's question — only ever shown when the
+  // visitor has traveled away from it.
+  const goToFeatured = useCallback(() => {
+    if (!featuredQuestionId) return;
+    performSwitch(featuredQuestionId);
+  }, [featuredQuestionId, performSwitch]);
 
   // "Add yours" — small "+" always available; grows into a labeled
   // invitation once the visitor has seen ~3 thoughts (or the scripted
@@ -597,8 +630,8 @@ function LandingPageInner() {
         }}
       >
         {/* Top chrome — the question, quiet and centered (the arrival card
-            lands here). Lingering on it reveals a 'next question' lozenge
-            beneath, which stays a few seconds after rolling off. */}
+            lands here). Lingering on it reveals backward-travel lozenges
+            beneath, which stay a few seconds after rolling off. */}
         {arrivalDone && data?.question?.text && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0,
@@ -606,6 +639,18 @@ function LandingPageInner() {
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             pointerEvents: 'none',
           }}>
+            {currentQuestionId && currentQuestionId === featuredQuestionId && (
+              <div
+                aria-hidden
+                style={{
+                  fontFamily: SANS, fontSize: 10, letterSpacing: '0.3em',
+                  textTransform: 'uppercase', color: BTW.textDim,
+                  opacity: 0.45, marginBottom: 8, textAlign: 'center',
+                }}
+              >
+                this week&rsquo;s question
+              </div>
+            )}
             <div
               onPointerEnter={titleEnter}
               onPointerLeave={titleLeave}
@@ -629,37 +674,93 @@ function LandingPageInner() {
                 onPointerEnter={titleEnter}
                 onPointerLeave={titleLeave}
                 style={{
-                  height: 40, display: 'flex', alignItems: 'center',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
                   opacity: lozengeVisible ? 1 : 0,
                   transition: 'opacity 0.6s ease',
                   pointerEvents: lozengeVisible ? 'auto' : 'none',
                 }}
               >
-                <button
-                  onClick={nextQuestion}
-                  disabled={switching}
-                  tabIndex={lozengeVisible ? 0 : -1}
-                  aria-hidden={!lozengeVisible}
-                  aria-label="Travel to the next question's sky"
-                  style={{
-                    background: 'transparent',
-                    border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
-                    borderRadius: 999,
-                    color: BTW.textDim,
-                    padding: '5px 12px',
-                    fontFamily: SANS, fontSize: 10,
-                    letterSpacing: '0.18em', textTransform: 'uppercase',
-                    whiteSpace: 'nowrap',
-                    cursor: switching ? 'default' : 'pointer',
-                    opacity: switching ? 0.4 : 0.8,
-                    touchAction: 'manipulation',
-                    transition: 'color .2s, border-color .2s, opacity .2s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
-                  onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
-                >
-                  next question →
-                </button>
+                <div style={{ height: 40, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    onClick={previousQuestion}
+                    disabled={switching}
+                    tabIndex={lozengeVisible ? 0 : -1}
+                    aria-hidden={!lozengeVisible}
+                    aria-label="Travel to the previous question's sky"
+                    style={{
+                      background: 'transparent',
+                      border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
+                      borderRadius: 999,
+                      color: BTW.textDim,
+                      padding: '5px 12px',
+                      fontFamily: SANS, fontSize: 10,
+                      letterSpacing: '0.18em', textTransform: 'uppercase',
+                      whiteSpace: 'nowrap',
+                      cursor: switching ? 'default' : 'pointer',
+                      opacity: switching ? 0.4 : 0.8,
+                      touchAction: 'manipulation',
+                      transition: 'color .2s, border-color .2s, opacity .2s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
+                    onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
+                  >
+                    ← previous question
+                  </button>
+                  {currentQuestionId !== featuredQuestionId && (
+                    <button
+                      onClick={goToFeatured}
+                      disabled={switching}
+                      tabIndex={lozengeVisible ? 0 : -1}
+                      aria-hidden={!lozengeVisible}
+                      aria-label="Return to this week's question"
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${withAlpha(BTW.textPri, 0.16)}`,
+                        borderRadius: 999,
+                        color: BTW.textDim,
+                        padding: '5px 12px',
+                        fontFamily: SANS, fontSize: 10,
+                        letterSpacing: '0.18em', textTransform: 'uppercase',
+                        whiteSpace: 'nowrap',
+                        cursor: switching ? 'default' : 'pointer',
+                        opacity: switching ? 0.4 : 0.8,
+                        touchAction: 'manipulation',
+                        transition: 'color .2s, border-color .2s, opacity .2s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = BTW.textPri; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.34); }}
+                      onMouseLeave={e => { e.currentTarget.style.color = BTW.textDim; e.currentTarget.style.borderColor = withAlpha(BTW.textPri, 0.16); }}
+                    >
+                      this week →
+                    </button>
+                  )}
+                </div>
+                <div style={{ marginTop: 2, textAlign: 'center' }}>
+                  <div style={{
+                    fontFamily: SANS, fontSize: 9, letterSpacing: '0.02em',
+                    color: BTW.textDim, opacity: 0.5,
+                  }}>
+                    A new question opens every week. Follow The Between for the next one.
+                  </div>
+                  {socialEntries.length > 0 && (
+                    <div style={{ marginTop: 6, display: 'flex', justifyContent: 'center', gap: 14 }}>
+                      {socialEntries.map(([key, url]) => (
+                        <a
+                          key={key}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          style={{
+                            fontFamily: SANS, fontSize: 9, letterSpacing: '0.16em',
+                            textTransform: 'uppercase', color: BTW.textDim,
+                            opacity: 0.6, textDecoration: 'none',
+                          }}
+                        >
+                          {key}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

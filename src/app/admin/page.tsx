@@ -1113,6 +1113,7 @@ interface AdminQuestion {
   active: boolean;
   display_order: number;
   created_at: string;
+  featured_at?: string | null;
   stars: { total: number; approved: number; pending: number; rejected: number };
   connections: { total: number; approved: number; pending: number };
 }
@@ -1128,6 +1129,7 @@ function QuestionsTab() {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [featuring, setFeaturing] = useState<string | null>(null);
 
   // Edit state per question
   const [editText, setEditText] = useState('');
@@ -1185,6 +1187,25 @@ function QuestionsTab() {
     }
   }
 
+  async function featureQuestion(id: string) {
+    setFeaturing(id);
+    const res = await fetch(`/api/admin/questions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature: true }),
+    });
+    const d = await res.json();
+    setFeaturing(null);
+    if (d.ok) {
+      // Reload rather than merge d.question in place — the "featured" badge
+      // depends on comparing every row's featured_at, so a full refresh is
+      // simplest and keeps the whole list's ordering info correct.
+      load();
+    } else {
+      setError(d.error ?? 'Feature failed');
+    }
+  }
+
   async function createQuestion() {
     if (!newText.trim() || !newSlug.trim()) return;
     setSaving(true);
@@ -1203,6 +1224,13 @@ function QuestionsTab() {
       setError(d.error ?? 'Create failed');
     }
   }
+
+  // "This week's question" is the row with the greatest featured_at.
+  const currentFeaturedId = questions.reduce<{ id: string; at: string } | null>((best, q) => {
+    if (!q.featured_at) return best;
+    if (!best || q.featured_at > best.at) return { id: q.id, at: q.featured_at };
+    return best;
+  }, null)?.id ?? null;
 
   const totalStars = questions.reduce((s, q) => s + q.stars.total, 0);
   const totalConns = questions.reduce((s, q) => s + q.connections.total, 0);
@@ -1286,6 +1314,11 @@ function QuestionsTab() {
               <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: q.active ? '#002200' : '#220000', color: q.active ? '#00cc44' : '#cc4444', fontFamily: 'monospace' }}>
                 {q.active ? 'live' : 'off'}
               </span>
+              {q.id === currentFeaturedId && (
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: '#2a2200', color: '#ffcc44', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  featured · this week
+                </span>
+              )}
               <span style={{ color: '#ddd', flex: 1, fontSize: 13, lineHeight: 1.4 }}>{q.text}</span>
               <span style={{ ...S.mono, color: '#555', fontSize: 11 }}>{q.slug}</span>
               {/* Per-question mini stats */}
@@ -1336,6 +1369,15 @@ function QuestionsTab() {
                   <button onClick={() => saveEdit(q.id)} disabled={editSaving} style={S.btn('primary')}>
                     {editSaving ? 'Saving…' : 'Save changes'}
                   </button>
+                  {q.id === currentFeaturedId ? (
+                    <span style={{ color: '#ffcc44', fontSize: 12, fontFamily: 'monospace' }}>
+                      ★ featured this week
+                    </span>
+                  ) : (
+                    <button onClick={() => featureQuestion(q.id)} disabled={featuring === q.id} style={S.btn()}>
+                      {featuring === q.id ? 'Featuring…' : '★ Feature this week'}
+                    </button>
+                  )}
                   <a
                     href={`/cosmos/${q.id}`}
                     target="_blank" rel="noreferrer"

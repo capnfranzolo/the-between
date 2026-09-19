@@ -39,15 +39,22 @@ interface AboutModalProps {
   onClose: () => void;
 }
 
+const SOCIAL_LABELS: Record<string, string> = {
+  instagram: 'instagram', tiktok: 'tiktok', x: 'x', facebook: 'facebook',
+};
+
 export default function AboutModal({ onClose }: AboutModalProps) {
   const [content, setContent] = useState<string | null>(null);
+  const [social, setSocial] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetch('/api/content')
       .then(r => r.json())
-      .then(d => setContent(d.content ?? ''))
+      .then(d => { setContent(d.content ?? ''); setSocial(d.social ?? {}); })
       .catch(() => setContent(''));
   }, []);
+
+  const socialEntries = Object.entries(social).filter(([, v]) => v && v.trim() !== '');
 
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') onClose();
@@ -103,6 +110,39 @@ export default function AboutModal({ onClose }: AboutModalProps) {
             renderContent(content)
           )}
         </div>
+
+        {content !== null && (
+          <div style={{
+            marginTop: 28, paddingTop: 20,
+            borderTop: `1px solid ${withAlpha(BTW.textPri, 0.08)}`,
+          }}>
+            <div style={{
+              fontFamily: SANS, fontSize: 11, letterSpacing: '0.02em',
+              color: BTW.textDim, opacity: 0.7, lineHeight: 1.6,
+            }}>
+              A new question opens every week. Follow The Between for the next one.
+            </div>
+            {socialEntries.length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '8px 16px' }}>
+                {socialEntries.map(([key, url]) => (
+                  <a
+                    key={key}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    style={{
+                      fontFamily: SANS, fontSize: 10, letterSpacing: '0.18em',
+                      textTransform: 'uppercase', color: BTW.textDim,
+                      opacity: 0.8, textDecoration: 'none',
+                    }}
+                  >
+                    {SOCIAL_LABELS[key] ?? key}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <button
           onClick={onClose}

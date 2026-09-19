@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
   const { data: questions, error } = await supabaseServer
     .from('questions')
-    .select('id, slug, text, active, display_order, created_at')
+    .select('id, slug, text, active, display_order, created_at, featured_at')
     .order('display_order', { ascending: true });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });

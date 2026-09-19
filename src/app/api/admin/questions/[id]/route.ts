@@ -5,7 +5,12 @@ function isAuthed(req: NextRequest) {
   return req.cookies.get('admin_session')?.value === '1';
 }
 
-/** PATCH /api/admin/questions/[id] — update text, slug, active, display_order */
+/**
+ * PATCH /api/admin/questions/[id] — update text, slug, active, display_order,
+ * or the Question-of-the-Week `featured_at` timestamp. Pass `{ feature: true }`
+ * to set it to now() server-side ("Feature this week"); pass `featured_at`
+ * directly (an ISO string, or null) to set an explicit value or un-feature.
+ */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -19,6 +24,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (typeof body.active === 'boolean') updates.active = body.active;
   if (typeof body.display_order === 'number') updates.display_order = body.display_order;
+  if (body.feature === true) {
+    updates.featured_at = new Date().toISOString();
+  } else if (typeof body.featured_at === 'string' || body.featured_at === null) {
+    updates.featured_at = body.featured_at;
+  }
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: 'No fields to update' }, { status: 400 });
