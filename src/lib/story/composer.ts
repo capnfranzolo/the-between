@@ -12,17 +12,43 @@
  * cheap enough to run 240 times inside an ffmpeg pipe (~22 ms/frame at
  * 1080×1920; see `encode.ts`).
  *
- * The star segment's timeline (the plan's spec, in seconds of an 8 s story):
+ * ── The single-star story (`storySegment`, 10.2 s) ──
+ *
+ * Revision 1 turned the story inside out. It used to open on the star and
+ * close on the question, which buried the question — the one thing that makes
+ * a stranger's answer mean anything — under eight seconds of spirograph. It now
+ * opens on the question and closes on a way in:
+ *
+ *   0.0 – 3.6   THE QUESTION, large, while the sky builds out of darkness
+ *               behind it; it recedes as…
+ *   3.0 – 8.4   …THE STAR draws itself and the answer rises. The answer is the
+ *               emotional centre and gets the longest hold.
+ *   7.8 – 10.2  THE WAY IN: a scannable QR for this star's URL, the short URL
+ *               in plain text, and the site's name kept to a whisper.
+ *
+ * The three beats are `questionOpening`, `starSegment` and `qrCard`, joined by
+ * `sequence()` with a 0.6 s crossfade. Every beat draws the *same* sky (same
+ * question atmosphere, same seeded star field), so the crossfades read as one
+ * continuous frame rather than three cards.
+ *
+ * ── The star beat alone (`starSegment`) ──
+ *
+ * Still a self-contained unit, and still what the weekly reel sequences between
+ * its own intro and outro cards. Its timeline, in seconds of an 8 s beat
+ * (shorter beats keep the proportions):
  *
  *   0.0 – 1.2   darkness; the question's sky and its star field breathe in
+ *               (`skyIn: false` when a preceding beat already raised that sky)
  *   1.0 – 3.5   the star draws itself — its real curve, traced progressively
  *   2.6 – 4.0   the living star (fireflies, archetype) crossfades over the trace
  *   2.5 – 6.0   the answer rises line by line in Cormorant italic, then holds
  *   4.5 – 6.5   real neighbour stars from the same question drift faintly in
  *   6.4 – 8.0   thebetween.world · the question as an invitation ·
- *               "A new question opens every week."
+ *               "A new question opens every week." (`close: false` in the
+ *               story, which ends on the QR instead)
  *
  * Nothing here is a button, a logo or a call to action. Branding is a whisper.
+ * The QR is the one exception, and it is a door, not an advertisement.
  */
 
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
@@ -32,6 +58,8 @@ import { BTW, mulberry32, hashString } from '../btw';
 import { SITE_URL } from '../constants';
 import { font } from './fonts';
 import { captureCurvePath, fitScale, tracePartial, type CurvePath } from './curve';
+import { defaultOrigin, originHost, starUrlOn } from './origin';
+import { renderQrTile } from './qr';
 import {
   STORY_W, STORY_H, renderSkyLayer, renderMiniStar, skyGradient,
   starCentreInCanvas, STAR_LOGICAL_BOX, STAR_LOGICAL_DIAMETER,
@@ -42,10 +70,24 @@ import {
 
 export { STORY_W, STORY_H };
 
-/** Default story length, in seconds. */
+/** Default length of the star beat on its own, in seconds. The whole timeline
+ *  is authored against this number; a shorter beat scales proportionally. */
 export const STAR_SEGMENT_SECONDS = 8;
 /** Default intro/outro card length for the weekly reel. */
 export const CARD_SECONDS = 4;
+
+// ── The single-star story's three beats ───────────────────────────────────────
+/** The question, alone, while the sky builds. */
+export const STORY_OPEN_SECONDS = 3.6;
+/** The star and the answer — the longest beat, and the point of the piece. */
+export const STORY_STAR_SECONDS = 5.4;
+/** The QR and the short URL. Held perfectly still so it can be scanned. */
+export const STORY_QR_SECONDS = 2.4;
+/** Seam length between beats. */
+export const STORY_CROSSFADE = 0.6;
+/** The whole single-star story, in seconds. */
+export const STORY_SECONDS =
+  STORY_OPEN_SECONDS + STORY_STAR_SECONDS + STORY_QR_SECONDS - 2 * STORY_CROSSFADE;
 
 /** Camera time the star is frozen at while it draws itself. Matches the OG
  *  route's `renderStatic(3.0)`, so a poster and an unfurl show the same pose. */
@@ -317,11 +359,32 @@ function drawNeighbours(
 // THE STAR SEGMENT
 // ══════════════════════════════════════════════════════════════════════════════
 
+export interface StarSegmentOptions {
+  duration?: number;
+  /**
+   * Fade the sky up from black over the first beat (default). Set false when a
+   * preceding segment has already raised the *same* sky — the story's question
+   * opening does, and a second fade-from-black there would read as a stutter.
+   */
+  skyIn?: boolean;
+  /**
+   * Draw the quiet tail — the question as an invitation, thebetween.world, and
+   * the weekly line (default). The single-star story ends on the QR card
+   * instead, and sets this false.
+   */
+  close?: boolean;
+  /** Let the neighbour stars drift in (default). */
+  neighbours?: boolean;
+}
+
 export function starSegment(
   input: StoryInput,
-  opts: { duration?: number } = {},
+  opts: StarSegmentOptions = {},
 ): Segment {
   const duration = opts.duration ?? STAR_SEGMENT_SECONDS;
+  const wantSkyIn = opts.skyIn ?? true;
+  const wantClose = opts.close ?? true;
+  const wantNeighbours = opts.neighbours ?? true;
   // The timeline is authored against 8 s; a reel's shorter star beats keep the
   // same proportions rather than truncating the ending.
   const k = duration / STAR_SEGMENT_SECONDS;
@@ -335,7 +398,7 @@ export function starSegment(
   // Curve families differ hugely in reach; normalise so every star holds the
   // frame (clamped, so a compact thought still reads as compact).
   const fit = fitScale(curve);
-  const neighbours = buildNeighbours(input);
+  const neighbours = wantNeighbours ? buildNeighbours(input) : [];
 
   // The live star gets one offscreen, re-rendered per frame.
   const starCanvas = createCanvas(STAR_BOX.px, STAR_BOX.px);
@@ -380,7 +443,7 @@ export function starSegment(
       // 1 ── darkness, then the question's sky breathes in
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, STORY_W, STORY_H);
-      const skyIn = easeInOut(ramp(t, 0, at(1.35)));
+      const skyIn = wantSkyIn ? easeInOut(ramp(t, 0, at(1.35))) : 1;
       ctx.globalAlpha = skyIn;
       ctx.drawImage(sky, 0, 0);
       ctx.globalAlpha = 1;
@@ -426,7 +489,7 @@ export function starSegment(
       }
 
       // 5 ── the quiet close
-      const closeIn = easeInOut(ramp(t, at(6.4), at(7.4)));
+      const closeIn = wantClose ? easeInOut(ramp(t, at(6.4), at(7.4))) : 0;
       if (closeIn > 0.004) {
         drawBlock(ctx, question, STORY_W / 2, closeTop, () => 'rgba(240,232,224,0.66)', {
           perLineAlpha: i => easeOut(ramp(t, at(6.4 + i * 0.12), at(7.3 + i * 0.12))),
@@ -454,6 +517,184 @@ export function starSegment(
       ctx.restore();
     },
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE STORY'S OPENING AND CLOSING BEATS
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * The story's first beat: the question, large, read before anything else.
+ *
+ * The sky builds out of darkness behind it over ~1.4 s — the opening the piece
+ * has always had — but the words arrive *first*, at a quarter-second, so the
+ * very first thing a scrolling viewer resolves is what was asked. The block
+ * then recedes (drifts up, dims) through the last second, handing the frame to
+ * the star; `sequence()`'s crossfade completes the dissolve.
+ *
+ * `seed` must match the star beat's, so both raise the identical star field and
+ * the seam between them is invisible.
+ */
+export function questionOpening(
+  questionText: string,
+  questionId: string | null,
+  seed: string,
+  opts: { duration?: number } = {},
+): Segment {
+  const duration = opts.duration ?? STORY_OPEN_SECONDS;
+  const sky = renderSkyLayer(questionId, seed);
+  const m = scratchCtx();
+  const block = layoutBlock(m, questionText, {
+    face: 'serifItalic', size: 82, maxWidth: CONTENT_W, maxLines: 5,
+    lineHeightFactor: 1.3, minSize: 50,
+  });
+  const top = STORY_H / 2 - (block.lines.length * block.lineHeight) / 2 - 30;
+  // The recede: the last second of the beat, finished off by the crossfade.
+  const RECEDE = 1.0;
+
+  return {
+    duration,
+    draw(ctx, t) {
+      ctx.save();
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, STORY_W, STORY_H);
+      ctx.globalAlpha = easeInOut(ramp(t, 0, 1.4));
+      ctx.drawImage(sky, 0, 0);
+      ctx.globalAlpha = 1;
+
+      const out = easeInOut(ramp(t, duration - RECEDE, duration));
+      drawBlock(ctx, block, STORY_W / 2, top, () => BTW.textPri, {
+        perLineAlpha: i =>
+          easeOut(ramp(t, 0.25 + i * 0.16, 1.15 + i * 0.16)) * (1 - 0.78 * out),
+        perLineRise: i =>
+          (1 - easeOut(ramp(t, 0.25 + i * 0.16, 1.15 + i * 0.16))) * 26 - 38 * out,
+      });
+      ctx.restore();
+    },
+  };
+}
+
+/**
+ * The story's last beat: a door.
+ *
+ * A viewer watching this on someone else's phone has no way to type a URL they
+ * saw for two seconds — so the final frames hold a genuinely scannable code for
+ * *this star's* page, with the short URL spelled out beneath it for anyone who
+ * would rather read it. The star itself sits above the code, small, so the card
+ * is still this star's card and not a generic end slate.
+ *
+ * Everything is drawn opaque and perfectly still once it has arrived: a code
+ * that is still moving, or still fading, is a code nobody can scan.
+ */
+export function qrCard(opts: {
+  /** The URL the code encodes — already origin-aware. */
+  url: string;
+  /** The same URL as a human reads it, e.g. `thebetween.world/s/4xh8`. */
+  label: string;
+  seed: string;
+  questionId?: string | null;
+  /** Draws this star small above the code. */
+  dimensions?: SpiroDimensions;
+  duration?: number;
+}): Segment {
+  const duration = opts.duration ?? STORY_QR_SECONDS;
+  const sky = renderSkyLayer(opts.questionId ?? null, opts.seed);
+  // ~440 px asked for; the tile rounds down to a whole number of module pixels
+  // (comfortably past the ~260 px a phone needs to scan off another screen).
+  const tile = renderQrTile(opts.url, { size: 440 });
+
+  // The plate and its shadow never change, so they are composited once here
+  // rather than re-blurring a 400 px shadow on all 72 frames of the beat. The
+  // shadow is what lifts the card off the sky instead of pasting it on.
+  const SHADOW_PAD = 80;
+  const plate = createCanvas(tile.px + SHADOW_PAD * 2, tile.px + SHADOW_PAD * 2);
+  {
+    const p = plate.getContext('2d');
+    p.shadowColor = 'rgba(0,0,0,0.5)';
+    p.shadowBlur = 44;
+    p.shadowOffsetY = 10;
+    p.drawImage(tile.canvas, SHADOW_PAD, SHADOW_PAD);
+  }
+
+  const star = opts.dimensions ? renderMiniStar(opts.dimensions, 200) : null;
+  const STAR_CY = 640;
+  const tileTop = 780;
+  const plateX = (STORY_W - plate.width) / 2;
+  const labelY = tileTop + tile.px + 96;
+  // In production the label already *is* the site — saying it twice is noise.
+  const brand = opts.label.startsWith(SITE_URL) ? null : SITE_URL;
+
+  return {
+    duration,
+    draw(ctx, t) {
+      ctx.save();
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, STORY_W, STORY_H);
+      ctx.drawImage(sky, 0, 0);
+
+      const inA = easeOut(ramp(t, 0.12, 0.72));
+      if (inA <= 0.004) { ctx.restore(); return; }
+
+      if (star) {
+        ctx.globalAlpha = inA * 0.9;
+        ctx.drawImage(star, (STORY_W - star.width) / 2, STAR_CY - star.height / 2);
+      }
+
+      ctx.globalAlpha = inA;
+      ctx.drawImage(plate, plateX, tileTop - SHADOW_PAD);
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = font('sans', 46);
+      ctx.fillStyle = BTW.textPri;
+      drawTracked(ctx, opts.label, STORY_W / 2, labelY, 2.2);
+
+      if (brand) {
+        ctx.font = font('sansLight', 26);
+        ctx.fillStyle = 'rgba(240,232,224,0.40)';
+        drawTracked(ctx, brand, STORY_W / 2, labelY + 68, 7);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    },
+  };
+}
+
+/**
+ * THE single-star story: question → star → way in.
+ *
+ * `origin` is the host the request arrived on, so a staging render carries a
+ * staging QR. It defaults to the canonical site for renders with no request
+ * behind them. Because it is baked into the pixels, every cache that holds the
+ * result must key on it too (see `origin.ts`).
+ */
+export function storySegment(
+  input: StoryInput,
+  opts: { origin?: string } = {},
+): Segment {
+  const origin = opts.origin ?? defaultOrigin();
+  const seed = input.star.shortcode;
+  return sequence(
+    [
+      questionOpening(input.questionText, input.questionId, seed, {
+        duration: STORY_OPEN_SECONDS,
+      }),
+      starSegment(input, {
+        duration: STORY_STAR_SECONDS,
+        skyIn: false,
+        close: false,
+      }),
+      qrCard({
+        url: starUrlOn(origin, seed),
+        label: `${originHost(origin)}/s/${seed}`,
+        seed,
+        questionId: input.questionId,
+        dimensions: input.star.dimensions,
+        duration: STORY_QR_SECONDS,
+      }),
+    ],
+    STORY_CROSSFADE,
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -630,8 +871,13 @@ export function renderSegmentFrame(segment: Segment, t: number): Buffer {
   return canvas.toBuffer('image/png');
 }
 
-/** The poster moment: everything present, nothing mid-animation. */
-export const POSTER_T = 7.6;
+/**
+ * The poster moment, in seconds of a `storySegment`: the star is drawn, the
+ * answer is fully up and holding, the question has handed over and the QR beat
+ * has not begun. Anything later lands mid-crossfade and posters a half-faded
+ * frame.
+ */
+export const POSTER_T = 7.2;
 
 // Re-exported so the keepsake can build a matching background without reaching
 // into the layer module itself.

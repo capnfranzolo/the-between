@@ -5,6 +5,11 @@
  * disk (see `src/lib/story/cache.ts`). Approved stars only — the same guard as
  * `api/og/[shortcode]`, for the same reason.
  *
+ * The story ends on a scannable QR for the star's own page, built from the
+ * origin *this request* arrived on — so a staging render carries a staging
+ * link. That makes the origin part of the rendered bytes, which is why it is
+ * folded into both the cache key and the ETag.
+ *
  * Range requests are honoured: iOS Safari refuses to play a `<video>` whose
  * source ignores `Range`, and the share panel plays this inline.
  *
@@ -16,7 +21,8 @@
 import { NextRequest } from 'next/server';
 import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
-import { starSegment } from '@/lib/story/composer';
+import { storySegment } from '@/lib/story/composer';
+import { originFromRequest, originTag } from '@/lib/story/origin';
 import { encodeSegment, ffmpegAvailable } from '@/lib/story/encode';
 import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
 
@@ -60,18 +66,23 @@ export async function GET(
     );
   }
 
-  const etag = `"story-${shortcode}-v${STORY_VERSION}"`;
+  // The story's closing beat renders a QR for *this* host, so the origin is
+  // part of the bytes — and therefore of the cache key and the ETag.
+  const origin = originFromRequest(req);
+  const tag = originTag(origin);
+
+  const etag = `"story-${shortcode}-v${STORY_VERSION}-${tag}"`;
   if (req.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
   let artefact;
   try {
-    artefact = await getOrProduce(`story-${shortcode}`, 'mp4', async tmpPath => {
-      const segment = starSegment(input);
+    artefact = await getOrProduce(`story-${shortcode}-${tag}`, 'mp4', async tmpPath => {
+      const segment = storySegment(input, { origin });
       const result = await encodeSegment(segment, tmpPath);
       console.log(
-        `[story] rendered ${shortcode} — ${result.frames} frames in ${result.ms} ms`,
+        `[story] rendered ${shortcode} @ ${origin} — ${result.frames} frames in ${result.ms} ms`,
       );
     });
   } catch (err) {

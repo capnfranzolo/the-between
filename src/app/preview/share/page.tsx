@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import SharePanel from '@/components/SharePanel';
+import SaveSharePanel from '@/components/SaveSharePanel';
 import { BTW, SANS, SERIF } from '@/lib/btw';
 import type { CosmosStarData } from '@/components/StarDetail';
 
-// ── /preview/share — unlisted dev preview for SharePanel (Stage D) ─────────
+// ── /preview/share — unlisted dev preview for SaveSharePanel (R2) ──────────
 // Fetches the seeded star from the mock supabase (via /api/stars/[shortcode])
 // plus its question's text (via /api/questions), and mounts the panel
 // standalone so it can be verified without going through the full cosmos
@@ -66,7 +66,7 @@ function PreviewShareInner() {
               const q = (payload.questions ?? []).find((x: { id: string }) => x.id === data.question_id);
               if (q) setQuestionText(q.text);
             })
-            .catch(() => { /* questionText stays undefined — SharePanel treats it as optional */ });
+            .catch(() => { /* questionText stays undefined — SaveSharePanel treats it as optional */ });
         }
       })
       .catch(() => {
@@ -108,7 +108,7 @@ function PreviewShareInner() {
       )}
 
       {!closed && star && (
-        <SharePanel
+        <SaveSharePanel
           shortcode={shortcode}
           star={star}
           questionText={questionText}

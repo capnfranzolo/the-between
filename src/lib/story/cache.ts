@@ -10,7 +10,9 @@
  * Two guards matter:
  *   · **Version key.** Every cached file is keyed `{id}-v{STORY_VERSION}`. Bump
  *     STORY_VERSION whenever the compositor changes or dev serves yesterday's
- *     video forever.
+ *     video forever. The caller's `id` carries anything *else* that changes the
+ *     bytes — notably the request origin, which is rendered into the QR code
+ *     (see `origin.ts`), so two hosts never share one file.
  *   · **In-flight dedup.** A share panel opens, the poster and the MP4 are both
  *     requested, the user reloads — without dedup that is three concurrent
  *     encodes of the same frames.
@@ -28,7 +30,7 @@ import crypto from 'node:crypto';
  * Bump on every change to the compositor, the timeline, or the encode profile.
  * Without it, a dev server happily serves a video rendered by older code.
  */
-export const STORY_VERSION = 2;
+export const STORY_VERSION = 3;
 
 export function storyCacheDir(): string {
   return process.env.STORY_CACHE_DIR || path.join(os.tmpdir(), 'thebetween-story');

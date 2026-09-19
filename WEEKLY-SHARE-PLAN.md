@@ -200,6 +200,52 @@ dimensions; it flows QuestionCycler → UniqueOverlay (preview via withSeed) →
 which validates and uses it (server regenerates only on the ~impossible collision). Renderer
 gains an optional forming-progress input (extend, never replace).
 
+## Revision round 1 (owner review, 2026-09-19)
+
+Owner feedback, grouped. Fewer words everywhere; one unified save/share experience.
+
+**R1 — UniqueOverlay ("leave a trace" step):**
+- Star preview 2× bigger (160 → ~320) above the copy.
+- Copy becomes: large serif title "Make your mark" · line "Leave a trace beside your star
+  today." · small explanation "An anonymous byline." Remove "Something only you would say.
+  Strangers will see it beside your words." and the "anonymous, and yours" hint under the
+  textarea (keep the char counter). Placeholder becomes ONE example: "an adventurer…".
+
+**R2 — ONE unified Save & Share panel** (SaveStarPanel + SharePanel merge):
+- Content: the 9:16 video preview (NO "your star's story" title, NO answer caption — the
+  video speaks), then link + Copy Link + QR (owner likes these), Save image, Share video,
+  platform icons.
+- "Save this image" on DESKTOP must plain-download (owner got the macOS share sheet — wrong);
+  share-sheet only on mobile/touch.
+- ALL user-facing links/QR derive from window.location.origin (staging links must point at
+  staging; SITE_URL stays only for server-side OG/meta absolute URLs).
+- Platform icons must share the star's own /s/ URL (its OG unfurl), and pass the video where
+  a platform allows.
+
+**R3 — Born panel + integration:**
+- Born panel copy: "Here is your star." + slightly larger dim text "Explore the other stars,
+  and you can pick one for your star to orbit." + a small button with just "→" (the
+  Explore-nearby labeled button retires). ONE action button: "Save & share" (no "the star").
+  The "your star lives here / we don't know who you are…" pile goes away.
+- Own-star panel: same single "Save & share".
+- Stranger panels: the share icon opens the SAME unified panel (for that star).
+- "Share this pair" retires everywhere (finale + connection rows) — bond sharing is parked
+  until single-star sharing is right.
+- /s/ links go DIRECTLY to the star in the world — the interstitial card stays only as
+  crawler fodder (immediate replace, no 2.2s delay; owner saw "an input box with my answer").
+- The question title must stay at the top ALWAYS — after adding a star, after following a
+  share link (?star= deep links) — with the previous/this-week lozenge working there too.
+  Diagnose why it vanishes in those states.
+- The follow-CTA whisper ("A new question opens every week. Follow The Between…") is removed
+  from the lozenge reveal on both pages (About modal keeps its version).
+
+**R4 — Video + keepsake restructure:**
+- Video timeline: START with the question in a big font while the sky builds → the star
+  (forms, answer) → END with the QR code (+ short URL) so a viewer can follow it. QR/URL from
+  the REQUEST origin (staging renders staging links).
+- Keepsake image MUST include the question.
+- Bump STORY_VERSION.
+
 ## Stage V — Verification (sonnet)
 
 Full walkthrough on 390×844 and 1280×720 with Playwright against the real dev stack (mock

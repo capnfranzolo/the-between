@@ -12,6 +12,26 @@ export const MAX_REASON_LENGTH = 100;
 export const SITE_URL = 'thebetween.world';
 
 /**
+ * The public URL of a single star, built from the **request origin**.
+ *
+ * Every user-facing link must go through this: the link shown in the
+ * save/share panel, Copy Link, the QR code, and the platform share URLs.
+ * Hardcoding `SITE_URL` there sends staging visitors to production, where
+ * their star does not exist — a Facebook share from staging unfurled the
+ * wrong page because of exactly that (owner review, 2026-09-19).
+ *
+ * `SITE_URL` stays the right answer for *server-side* absolute URLs
+ * (OG/meta tags), which is all the SSR fallback here is for.
+ */
+export function starUrl(shortcode: string): string {
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : `https://${SITE_URL}`;
+  return `${origin}/s/${shortcode}`;
+}
+
+/**
  * sessionStorage key carrying the shortcode of a star that was *just* born.
  * Submitting navigates to the cosmos, so the birth moment has to survive one
  * document boundary: UniqueOverlay sets it, the cosmos page consumes it once

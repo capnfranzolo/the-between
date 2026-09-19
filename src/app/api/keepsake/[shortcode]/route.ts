@@ -14,6 +14,7 @@ import { NextRequest } from 'next/server';
 import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
 import { renderKeepsakePng } from '@/lib/story/keepsake';
+import { originFromRequest, originTag } from '@/lib/story/origin';
 import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
 
 export const runtime = 'nodejs';
@@ -28,14 +29,19 @@ export async function GET(
   const input = await loadStoryInput(shortcode);
   if (!input) return new Response('Not found', { status: 404 });
 
-  const etag = `"keepsake-${shortcode}-v${STORY_VERSION}"`;
+  // The QR and the URL text are built from the host this request arrived on, so
+  // the origin is part of the rendered bytes — hence of the key and the ETag.
+  const origin = originFromRequest(req);
+  const tag = originTag(origin);
+
+  const etag = `"keepsake-${shortcode}-v${STORY_VERSION}-${tag}"`;
   if (req.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
   let artefact;
   try {
-    artefact = await getOrProduce(`keepsake-${shortcode}`, 'png', async tmpPath => {
+    artefact = await getOrProduce(`keepsake-${shortcode}-${tag}`, 'png', async tmpPath => {
       const png = await renderKeepsakePng({
         shortcode,
         answer: input.star.answer,
@@ -43,6 +49,7 @@ export async function GET(
         dimensions: input.star.dimensions,
         questionText: input.questionText,
         questionId: input.questionId,
+        origin,
       });
       await fs.writeFile(tmpPath, png);
     });

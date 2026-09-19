@@ -10,7 +10,8 @@
 import { NextRequest } from 'next/server';
 import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
-import { starSegment, renderSegmentFrame, POSTER_T } from '@/lib/story/composer';
+import { storySegment, renderSegmentFrame, POSTER_T } from '@/lib/story/composer';
+import { originFromRequest, originTag } from '@/lib/story/origin';
 import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
 
 export const runtime = 'nodejs';
@@ -25,15 +26,21 @@ export async function GET(
   const input = await loadStoryInput(shortcode);
   if (!input) return new Response('Not found', { status: 404 });
 
-  const etag = `"poster-${shortcode}-v${STORY_VERSION}"`;
+  // The poster is a frame of the story, and the story is origin-aware — so the
+  // poster keys on the origin too, and stays correct if POSTER_T ever moves
+  // into the closing QR beat.
+  const origin = originFromRequest(req);
+  const tag = originTag(origin);
+
+  const etag = `"poster-${shortcode}-v${STORY_VERSION}-${tag}"`;
   if (req.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
   let artefact;
   try {
-    artefact = await getOrProduce(`poster-${shortcode}`, 'png', async tmpPath => {
-      const png = renderSegmentFrame(starSegment(input), POSTER_T);
+    artefact = await getOrProduce(`poster-${shortcode}-${tag}`, 'png', async tmpPath => {
+      const png = renderSegmentFrame(storySegment(input, { origin }), POSTER_T);
       await fs.writeFile(tmpPath, png);
     });
   } catch (err) {

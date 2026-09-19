@@ -86,26 +86,27 @@ export default function UniqueOverlay({ answer, questionId, dimensions, shortcod
         animation: 'btwFade .4s ease',
       }}
     >
-      <div style={{ width: '100%', maxWidth: 520, textAlign: 'center' }}>
-        {/* Star preview */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
-          <Spirograph dimensions={dimensions} seed={seed} size={160} animate={true} forming={true} />
+      <div style={{ width: '100%', maxWidth: 560, textAlign: 'center' }}>
+        {/* Star preview — the forming animation itself reads as "your star is
+            forming"; a redundant eyebrow label was dropped (R1: fewer words). */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <Spirograph dimensions={dimensions} seed={seed} size={320} animate={true} forming={true} />
         </div>
 
-        <div style={{
-          fontFamily: SANS, fontSize: 11, letterSpacing: '0.32em',
-          textTransform: 'uppercase', color: BTW.horizon[3], opacity: 0.85, marginBottom: 16,
-        }}>
-          Your star is forming
-        </div>
         <h2 style={{
-          fontFamily: SERIF, fontWeight: 400, fontSize: 26, lineHeight: 1.22,
-          margin: '0 0 8px', color: BTW.textPri,
+          fontFamily: SERIF, fontWeight: 400, fontSize: 33, lineHeight: 1.2,
+          margin: '0 0 10px', color: BTW.textPri,
         }}>
-          Leave a trace beside your star.
+          Make your mark
         </h2>
-        <div style={{ fontSize: 13, color: BTW.textDim, marginBottom: 24, lineHeight: 1.5 }}>
-          Something only you would say. Strangers will see it beside your words.
+        <div style={{
+          fontFamily: SERIF, fontStyle: 'italic', fontWeight: 400, fontSize: 16,
+          lineHeight: 1.4, color: BTW.textDim, marginBottom: 10,
+        }}>
+          Leave a trace beside your star today.
+        </div>
+        <div style={{ fontFamily: SANS, fontSize: 12, color: BTW.textDim, letterSpacing: '0.02em', marginBottom: 22 }}>
+          An anonymous byline.
         </div>
 
         <textarea
@@ -113,7 +114,7 @@ export default function UniqueOverlay({ answer, questionId, dimensions, shortcod
           onChange={e => { setText(e.target.value.slice(0, MAX_UNIQUE_LENGTH + 20)); setError(null); }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="I collect rainwater… / I hum without noticing…"
+          placeholder="an adventurer…"
           rows={2}
           style={{
             width: '100%',
@@ -129,13 +130,10 @@ export default function UniqueOverlay({ answer, questionId, dimensions, shortcod
           }}
         />
         <div style={{
-          display: 'flex', justifyContent: 'space-between',
+          display: 'flex', justifyContent: 'flex-end',
           alignItems: 'center', marginTop: 8,
           fontSize: 12, color: tooLong ? '#F0B878' : BTW.textDim, letterSpacing: '0.04em',
         }}>
-          <span style={{ opacity: 0.9, transition: 'opacity .3s' }}>
-            {tooLong ? 'a little shorter' : 'anonymous, and yours'}
-          </span>
           <span>{text.length} / {MAX_UNIQUE_LENGTH}</span>
         </div>
 

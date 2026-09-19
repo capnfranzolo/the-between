@@ -5,7 +5,11 @@
  * the segment API and the encoder. Both should import from here rather than
  * reaching into individual modules.
  *
- * Building a reel is:
+ * The single-star story is one call:
+ *
+ *   await encodeSegment(storySegment(input, { origin }), outPath);
+ *
+ * …and a reel sequences the star beat between its own cards:
  *
  *   const reel = sequence([
  *     introCard(question.text, question.id),
@@ -17,9 +21,18 @@
 
 export {
   STORY_W, STORY_H, STAR_SEGMENT_SECONDS, CARD_SECONDS, POSTER_T,
-  starSegment, introCard, outroCard, sequence, renderSegmentFrame,
-  type Segment, type StoryInput, type StoryStar, type StoryNeighbour,
+  STORY_SECONDS, STORY_OPEN_SECONDS, STORY_STAR_SECONDS, STORY_QR_SECONDS,
+  STORY_CROSSFADE,
+  starSegment, storySegment, questionOpening, qrCard,
+  introCard, outroCard, sequence, renderSegmentFrame,
+  type Segment, type StarSegmentOptions,
+  type StoryInput, type StoryStar, type StoryNeighbour,
 } from './composer';
+
+export {
+  defaultOrigin, originFromRequest, originHost, originTag, starUrlOn,
+} from './origin';
+export { renderQrTile, type QrTile, type QrTileOptions } from './qr';
 
 export { STORY_FPS, encodeMp4, encodeSegment, ffmpegAvailable, FfmpegUnavailableError } from './encode';
 export { STORY_VERSION, getOrProduce, storyCacheDir, cacheKey, inFlightCount } from './cache';
