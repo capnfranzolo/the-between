@@ -18,6 +18,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (status !== undefined) updates.status = status;
   if (uniqueFact !== undefined) updates.unique_fact = uniqueFact;
 
+  // Weekly reel picker — `reel_order` 1-5, approved stars only. `null` removes
+  // a star from the reel and is always allowed.
+  if (body.reel_order !== undefined) {
+    const reelOrder = body.reel_order;
+    if (reelOrder !== null) {
+      if (typeof reelOrder !== 'number' || reelOrder < 1 || reelOrder > 5) {
+        return Response.json({ error: 'reel_order must be between 1 and 5' }, { status: 400 });
+      }
+      const effectiveStatus = status ?? (await supabaseServer
+        .from('stars')
+        .select('status')
+        .eq('id', id)
+        .single()).data?.status;
+      if (effectiveStatus !== 'approved') {
+        return Response.json({ error: 'Only approved stars can be added to the reel' }, { status: 400 });
+      }
+    }
+    updates.reel_order = reelOrder;
+  }
+
   if (answer !== undefined) {
     updates.answer = answer;
     updates.answer_hash = hashString(answer.trim().toLowerCase()).toString(16);

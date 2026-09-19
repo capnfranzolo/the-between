@@ -24,6 +24,7 @@ interface AdminStar {
   approved_at: string | null;
   dimensions: (DimensionResult & { curveType: CurveType; reasoning: string }) | null;
   questions?: { id: string; slug: string; text: string } | null;
+  reel_order: number | null;
 }
 
 interface AdminConnection {
@@ -593,6 +594,157 @@ function ConnectModal({
   );
 }
 
+// ─── ReelStrip ───────────────────────────────────────────────────────────────
+// The compact "Weekly reel" strip for one question: the picked stars in
+// order, reorder/remove, and a "Generate reel" button that downloads the MP4.
+// Utilitarian admin styling only — no art direction here.
+
+function trunc4(s: string) { return trunc(s, 46); }
+
+function ReelStrip({ questionId, refreshToken }: { questionId: string; refreshToken: number }) {
+  const [picks, setPicks] = useState<AdminStar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoName, setVideoName] = useState<string>('the-between-reel.mp4');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/stars?questionId=${questionId}&status=approved&limit=200`);
+      const data = await res.json();
+      const rows: AdminStar[] = (data.stars ?? []).filter((s: AdminStar) => s.reel_order != null);
+      rows.sort((a, b) => (a.reel_order ?? 0) - (b.reel_order ?? 0));
+      setPicks(rows);
+    } finally {
+      setLoading(false);
+    }
+  }, [questionId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- (re)loads the picks whenever the question or a pick changes elsewhere on the page
+    load();
+    // A freshly generated video belongs to the pick set it was built from —
+    // once the picks change (including from the row toggles elsewhere on the
+    // page), the stale blob is no longer trustworthy.
+    setVideoUrl(null);
+    setGenError(null);
+  }, [load, refreshToken]);
+
+  async function move(id: string, dir: -1 | 1) {
+    const idx = picks.findIndex(p => p.id === id);
+    const otherIdx = idx + dir;
+    if (idx < 0 || otherIdx < 0 || otherIdx >= picks.length) return;
+    const a = picks[idx];
+    const b = picks[otherIdx];
+    setBusyId(id);
+    try {
+      await Promise.all([
+        fetch(`/api/admin/stars/${a.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reel_order: b.reel_order }),
+        }),
+        fetch(`/api/admin/stars/${b.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reel_order: a.reel_order }),
+        }),
+      ]);
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusyId(id);
+    try {
+      await fetch(`/api/admin/stars/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reel_order: null }),
+      });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function generate() {
+    setGenerating(true);
+    setGenError(null);
+    setVideoUrl(null);
+    try {
+      const res = await fetch(`/api/admin/reel/${questionId}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setGenError(data.error === 'video_unavailable'
+          ? 'Video rendering is unavailable in this environment.'
+          : (data.error ?? `Failed (${res.status})`));
+        return;
+      }
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const m = /filename="([^"]+)"/.exec(disposition);
+      const blob = await res.blob();
+      setVideoUrl(URL.createObjectURL(blob));
+      setVideoName(m?.[1] ?? 'the-between-reel.mp4');
+    } catch {
+      setGenError('Network error');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div style={{ background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', padding: '10px 20px 14px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' as const }}>
+        <span style={{ color: '#666', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>
+          Weekly reel
+        </span>
+        <span style={{ color: '#444', fontSize: 11 }}>{picks.length}/5 picked</span>
+        <button
+          onClick={generate}
+          disabled={generating || picks.length === 0}
+          style={{ ...S.btn('primary'), marginLeft: 8 }}
+        >
+          {generating ? 'Rendering… this can take a minute or two' : 'Generate reel'}
+        </button>
+        {videoUrl && (
+          <a
+            href={videoUrl}
+            download={videoName}
+            style={{ ...S.btn(), textDecoration: 'none', display: 'inline-block' }}
+          >
+            ⬇ Download {videoName}
+          </a>
+        )}
+        {genError && <span style={{ color: '#ff6666', fontSize: 12 }}>⚠ {genError}</span>}
+      </div>
+
+      {loading ? (
+        <div style={{ color: '#555', fontSize: 12 }}>Loading…</div>
+      ) : picks.length === 0 ? (
+        <div style={{ color: '#444', fontSize: 12 }}>No stars picked yet — use the 🎬 toggle on an approved star below.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {picks.map((p, i) => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#141414', border: '1px solid #222', borderRadius: 4, padding: '5px 10px' }}>
+              <span style={{ ...S.mono, color: '#ffcc44', fontSize: 11, width: 16 }}>#{p.reel_order}</span>
+              <span style={{ ...S.mono, color: '#6af', fontSize: 12 }}>{p.shortcode}</span>
+              <span style={{ color: '#aaa', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {trunc4(p.answer)}
+              </span>
+              <button title="move up" disabled={i === 0 || busyId === p.id} onClick={() => move(p.id, -1)} style={S.iconBtn}>↑</button>
+              <button title="move down" disabled={i === picks.length - 1 || busyId === p.id} onClick={() => move(p.id, 1)} style={S.iconBtn}>↓</button>
+              <button title="remove from reel" disabled={busyId === p.id} onClick={() => remove(p.id)} style={{ ...S.iconBtn, color: '#844' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── StarsTab ────────────────────────────────────────────────────────────────
 
 function StarsTab({ questionFilter }: { questionFilter: string }) {
@@ -607,6 +759,58 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadingRef = useRef(false); // guard against concurrent fetches
+
+  // Weekly reel picker — a star row's 🎬 toggle assigns/clears its reel_order.
+  // reelRefresh bumps whenever a pick changes so the ReelStrip (below, scoped
+  // to the selected question) reloads.
+  const [reelBusy, setReelBusy] = useState<string | null>(null);
+  const [reelNotice, setReelNotice] = useState<string | null>(null);
+  const [reelRefresh, setReelRefresh] = useState(0);
+
+  async function toggleReel(star: AdminStar) {
+    if (star.status !== 'approved' || reelBusy) return;
+    setReelBusy(star.id);
+    try {
+      if (star.reel_order != null) {
+        const res = await fetch(`/api/admin/stars/${star.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reel_order: null }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStars(prev => prev.map(s => s.id === star.id ? { ...s, reel_order: null } : s));
+          setReelRefresh(k => k + 1);
+        }
+        return;
+      }
+      // Find the next free slot (1-5) for this star's own question.
+      const res = await fetch(`/api/admin/stars?questionId=${star.question_id}&status=approved&limit=200`);
+      const data = await res.json();
+      const occupied = new Set(((data.stars ?? []) as AdminStar[])
+        .map(s => s.reel_order).filter((n): n is number => n != null));
+      let next: number | null = null;
+      for (let i = 1; i <= 5; i++) { if (!occupied.has(i)) { next = i; break; } }
+      if (next == null) {
+        setReelNotice('Reel is full — 5 stars already picked for this question.');
+        setTimeout(() => setReelNotice(null), 4000);
+        return;
+      }
+      const patchRes = await fetch(`/api/admin/stars/${star.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reel_order: next }),
+      });
+      const patchData = await patchRes.json();
+      if (patchData.ok) {
+        setStars(prev => prev.map(s => s.id === star.id ? { ...s, reel_order: next } : s));
+        setReelRefresh(k => k + 1);
+      } else {
+        setReelNotice(patchData.error ?? 'Could not add to reel');
+        setTimeout(() => setReelNotice(null), 4000);
+      }
+    } finally {
+      setReelBusy(null);
+    }
+  }
 
   // Drag-to-connect state
   const [draggedStar, setDraggedStar] = useState<AdminStar | null>(null);
@@ -787,6 +991,13 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
           <button onClick={() => setError(null)} style={{ ...S.iconBtn, color: '#ff6666', fontSize: 16 }}>×</button>
         </div>
       )}
+      {reelNotice && (
+        <div style={{ background: '#1a1400', color: '#ffaa00', padding: '8px 16px', fontSize: 12 }}>
+          ⚠ {reelNotice}
+        </div>
+      )}
+
+      {questionFilter && <ReelStrip questionId={questionFilter} refreshToken={reelRefresh} />}
 
       <div className="btw-admin-filters" style={{ display: 'flex', gap: 8, padding: '10px 20px 10px 12px', background: '#0d0d0d', borderBottom: '1px solid #1a1a1a', flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {(['pending', 'approved', 'rejected', 'all'] as const).map(s => (
@@ -816,9 +1027,9 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
         </div>
       )}
 
-      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
+      <div className="btw-admin-desktop" style={{ ...S.row, gridTemplateColumns: '24px 72px 56px 80px 1fr 180px 64px 40px 70px 110px', background: '#0d0d0d', color: '#555', fontSize: 11, borderBottom: '1px solid #222' }}>
         <input type="checkbox" checked={allChecked} onChange={e => setSelected(e.target.checked ? new Set(stars.map(s => s.id)) : new Set())} />
-        <span>status</span><span>code</span><span>answer</span><span>byline</span><span>question</span><span>ips</span><span>age</span><span>actions</span>
+        <span>status</span><span>reel</span><span>code</span><span>answer</span><span>byline</span><span>question</span><span>ips</span><span>age</span><span>actions</span>
       </div>
 
       {loading && <div style={{ padding: 24, color: '#555', textAlign: 'center' }}>Loading…</div>}
@@ -840,7 +1051,7 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
             onDragOver={e => onDragOver(e, star.id)}
             onDragLeave={() => setDragOverId(null)}
             onDrop={e => onDrop(e, star)}
-            style={{ ...S.row, ...dropStyle, gridTemplateColumns: '24px 72px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'grab', background: expanded === star.id ? '#181818' : 'transparent' }}
+            style={{ ...S.row, ...dropStyle, gridTemplateColumns: '24px 72px 56px 80px 1fr 180px 64px 40px 70px 110px', borderBottom: 'none', cursor: 'grab', background: expanded === star.id ? '#181818' : 'transparent' }}
             onClick={() => setExpanded(e => e === star.id ? null : star.id)}
           >
             <input
@@ -850,6 +1061,18 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
               onChange={e => { const s = new Set(selected); if (e.target.checked) s.add(star.id); else s.delete(star.id); setSelected(s); }}
             />
             <StatusBadge status={star.status} />
+            <span onClick={e => e.stopPropagation()}>
+              {star.status === 'approved' ? (
+                <button
+                  title={star.reel_order != null ? 'Remove from weekly reel' : 'Add to weekly reel'}
+                  onClick={() => toggleReel(star)}
+                  disabled={reelBusy === star.id}
+                  style={{ ...S.iconBtn, fontSize: 11, fontFamily: 'monospace', color: star.reel_order != null ? '#ffcc44' : '#555' }}
+                >
+                  {star.reel_order != null ? `🎬#${star.reel_order}` : '🎬'}
+                </button>
+              ) : <span style={{ color: '#333' }}>—</span>}
+            </span>
             <a
               href={`/cosmos/${star.question_id}?star=${star.shortcode}`}
               target="_blank" rel="noreferrer"
@@ -891,6 +1114,16 @@ function StarsTab({ questionFilter }: { questionFilter: string }) {
                 style={{ ...S.mono, color: '#6af', textDecoration: 'none', fontSize: 12 }}
                 onClick={e => e.stopPropagation()}
               >{star.shortcode}</a>
+              {star.status === 'approved' && (
+                <button
+                  title={star.reel_order != null ? 'Remove from weekly reel' : 'Add to weekly reel'}
+                  onClick={e => { e.stopPropagation(); toggleReel(star); }}
+                  disabled={reelBusy === star.id}
+                  style={{ ...S.iconBtn, fontSize: 11, fontFamily: 'monospace', padding: '2px 4px', color: star.reel_order != null ? '#ffcc44' : '#555' }}
+                >
+                  {star.reel_order != null ? `🎬#${star.reel_order}` : '🎬'}
+                </button>
+              )}
               <span style={{ ...S.mono, color: '#555', fontSize: 11, marginLeft: 'auto' }}>{relTime(star.created_at)}</span>
             </div>
             <div style={{ color: '#ddd', fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{trunc(star.answer, 120)}</div>

@@ -5,7 +5,7 @@ import { EMOTIONS, createSpirograph, type SpiroDimensions, type SpirographInstan
 import { DEFAULT_ATMOSPHERE, type AtmosphereConfig, type SkyStop } from '@/lib/atmosphere';
 import {
   BloomChoreographer, OrbitInscription, orderRingForReading,
-  NEAR_SIDE, GLYPH_EM, PREFERRED_FONT, type ScreenPoint,
+  NEAR_SIDE, GLYPH_EM, PREFERRED_FONT, BLOOM_DURATION, type ScreenPoint,
 } from './moments';
 
 export interface ThoughtData {
@@ -63,6 +63,15 @@ export interface CosmosSceneHandle {
    * never heard before it is seen.
    */
   bloomStar: (id: string) => void;
+  /**
+   * Stage A — the birth reveal. Once the newborn has bloomed (and the focused
+   * approach has landed), the camera eases back and a little higher so the new
+   * star is seen *among* strangers' stars, holds there a beat, then settles
+   * back into the normal focused framing. No new camera mode: it is the
+   * focused framing geometry, further out, with its own gentle easing. A no-op
+   * if the visitor leaves that star — the moment belongs to it alone.
+   */
+  birthReveal: (id: string) => void;
   /**
    * Phase 8 — the bond finale. Both stars bloom together and the reason is
    * written once along the orbit they now share, then it is gone.
@@ -181,6 +190,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
     const removeBondFnRef = useRef<((id: string) => void) | null>(null);
     const crossfadeFnRef = useRef<((atmosphere: AtmosphereConfig, onMidpoint: () => void) => void) | null>(null);
     const bloomStarFnRef = useRef<((id: string) => void) | null>(null);
+    const birthRevealFnRef = useRef<((id: string) => void) | null>(null);
     const bondFinaleFnRef = useRef<((fromId: string, toId: string, reason: string) => void) | null>(null);
     const releaseArrivalFnRef = useRef<(() => void) | null>(null);
     const activeThoughtIds = useRef<Set<string>>(new Set());
@@ -227,6 +237,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       crossfadeToWorld: (atmosphere: AtmosphereConfig, onMidpoint: () => void) =>
         crossfadeFnRef.current?.(atmosphere, onMidpoint),
       bloomStar: (id: string) => bloomStarFnRef.current?.(id),
+      birthReveal: (id: string) => birthRevealFnRef.current?.(id),
       bondFinale: (fromId: string, toId: string, reason: string) =>
         bondFinaleFnRef.current?.(fromId, toId, reason),
       releaseArrival: () => releaseArrivalFnRef.current?.(),
@@ -960,6 +971,26 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       let lastUserSelectAt = -Infinity;
       let focusWasAuto = false;
 
+      // ── Stage A — the birth reveal ──────────────────────────────────────
+      // After the newborn has bloomed, the sky says "you joined something":
+      // the camera eases back along the very line the focused framing already
+      // uses (and a touch higher), holds among the neighbouring stars, then
+      // settles back to the focused framing. It borrows the focused mode — no
+      // new mode, no new orientation logic (faceStar keeps the star framed
+      // throughout) — and yields the camera back the instant it is done.
+      const BIRTH_WAIT_SEC  = BLOOM_DURATION + 2.0; // let the bloom finish first
+      const BIRTH_OUT_SEC   = 3.4;
+      const BIRTH_HOLD_SEC  = 1.8;
+      const BIRTH_BACK_SEC  = 2.8;
+      const BIRTH_REVEAL_DIST = 172;  // vs FOCUS_STOP_DIST — neighbours in frame
+      const BIRTH_LIFT = 22;          // units of extra altitude at the far point
+      let birthReveal: {
+        id: string; phase: 'wait' | 'out' | 'hold' | 'in'; t: number;
+        from: THREE.Vector3; to: THREE.Vector3;
+      } | null = null;
+      let birthLift = 0;
+      const endBirthReveal = () => { birthReveal = null; birthLift = 0; };
+
       const IDLE_RESUME_SEC = 10;   // manual → drift after this much idle
       // Arrival framing: look slightly below the star so it rides the upper
       // third of the viewport — clear of the bottom panel / dwell text.
@@ -1020,6 +1051,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
 
       function setMode(m: CamMode) {
         if (camMode === m) return;
+        // Leaving the focused view ends any birth reveal with it — it never
+        // lingers to resume on some later focus.
+        if (camMode === 'focused') endBirthReveal();
         if (camMode === 'drift') {
           driftPhase = 'seek';
           driftTargetId = null;
@@ -1175,6 +1209,86 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           flyTargetXZ = null;
         }
       };
+
+      birthRevealFnRef.current = (id: string) => {
+        birthReveal = { id, phase: 'wait', t: 0, from: new THREE.Vector3(), to: new THREE.Vector3() };
+        birthLift = 0;
+      };
+
+      // Ticked only from the focused branch of the camera state machine.
+      // Returns true while the reveal owns camera position (the normal
+      // focused approach stands down for exactly that long).
+      function runBirthReveal(dt: number): boolean {
+        const br = birthReveal;
+        if (!br) return false;
+        // The moment belongs to the newborn: any other star taking focus ends it.
+        if (activeStarRef.current !== br.id) { endBirthReveal(); return false; }
+        const g = thoughtGroups.get(br.id);
+        if (!g) { endBirthReveal(); return false; }
+
+        if (br.phase === 'wait') {
+          // The wait starts when the focused approach lands, so the bloom is
+          // always seen from the framing it was born into.
+          if (flyTargetXZ) { br.t = 0; return false; }
+          br.t += dt;
+          if (br.t < BIRTH_WAIT_SEC) return false;
+          const dx = camera.position.x - g.position.x;
+          const dz = camera.position.z - g.position.z;
+          const hd = Math.hypot(dx, dz) || 1;
+          br.from.set(camera.position.x, 0, camera.position.z);
+          br.to.set(
+            g.position.x + (dx / hd) * BIRTH_REVEAL_DIST,
+            0,
+            g.position.z + (dz / hd) * BIRTH_REVEAL_DIST,
+          );
+          br.phase = 'out';
+          br.t = 0;
+          flyTargetXZ = null; // the reveal owns the camera from here
+          return true;
+        }
+
+        br.t += dt;
+        // Quintic smootherstep — the same ease the drift glide uses, so the
+        // pull-back breathes rather than lurches.
+        const ease = (u: number) => u * u * u * (u * (u * 6 - 15) + 10);
+
+        if (br.phase === 'out') {
+          const u = Math.min(br.t / BIRTH_OUT_SEC, 1);
+          const e = ease(u);
+          camera.position.x = br.from.x + (br.to.x - br.from.x) * e;
+          camera.position.z = br.from.z + (br.to.z - br.from.z) * e;
+          birthLift = BIRTH_LIFT * e;
+          if (u >= 1) { br.phase = 'hold'; br.t = 0; }
+          return true;
+        }
+
+        if (br.phase === 'hold') {
+          birthLift = BIRTH_LIFT;
+          if (br.t >= BIRTH_HOLD_SEC) {
+            // Settle back onto the ordinary focused framing distance.
+            const dx = camera.position.x - g.position.x;
+            const dz = camera.position.z - g.position.z;
+            const hd = Math.hypot(dx, dz) || 1;
+            br.from.set(camera.position.x, 0, camera.position.z);
+            br.to.set(
+              g.position.x + (dx / hd) * FOCUS_STOP_DIST,
+              0,
+              g.position.z + (dz / hd) * FOCUS_STOP_DIST,
+            );
+            br.phase = 'in';
+            br.t = 0;
+          }
+          return true;
+        }
+
+        const u = Math.min(br.t / BIRTH_BACK_SEC, 1);
+        const e = ease(u);
+        camera.position.x = br.from.x + (br.to.x - br.from.x) * e;
+        camera.position.z = br.from.z + (br.to.z - br.from.z) * e;
+        birthLift = BIRTH_LIFT * (1 - e);
+        if (u >= 1) endBirthReveal();
+        return true;
+      }
 
       tourNextFnRef.current = () => {
         // The star being departed (imperatively, before the prop round-trip
@@ -1683,6 +1797,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           } else if (camMode === 'focused') {
             // Panel dismissed — back to manual; the idle timer restarts.
             flyTargetXZ = null;
+            endBirthReveal();
             if (prevActiveStar) driftVisited.add(prevActiveStar); // tour moves on, not back
             setMode('manual');
             // Deep-link / autofocus dismissal: the tour resumes after a short beat
@@ -1740,8 +1855,10 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
           // glide before the stars exist would read as a broken drift.
           if (!arrivalHoldActive) runDrift(dt);
         } else if (camMode === 'focused') {
+          // Stage A — while the birth reveal is dollying, it owns position.
+          const revealing = runBirthReveal(dt);
           // Glide toward the framing point, easing out into the stop
-          if (flyTargetXZ) {
+          if (!revealing && flyTargetXZ) {
             const fdx = flyTargetXZ.x - camera.position.x;
             const fdz = flyTargetXZ.z - camera.position.z;
             const fdist = Math.sqrt(fdx * fdx + fdz * fdz);
@@ -1845,7 +1962,9 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         // Camera Y — cruise altitude, floored by terrain; stars (y=80-140) sit
         // above so we always look up
         const terrainFloor = Math.max(getHeight(camera.position.x, camera.position.z) + 40, 55);
-        camTargetY = Math.max(BASE_CAM_Y, terrainFloor);
+        // birthLift is 0 except during the Stage A birth reveal, where it
+        // lifts the cruise altitude a touch as the camera eases back.
+        camTargetY = Math.max(BASE_CAM_Y + birthLift, terrainFloor);
         camera.position.y += (camTargetY - camera.position.y) * Math.min(dt * 2.5, 1);
 
         const cosP = Math.cos(pitch);
@@ -2055,6 +2174,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         removeBondFnRef.current = null;
         crossfadeFnRef.current = null;
         bloomStarFnRef.current = null;
+        birthRevealFnRef.current = null;
         bondFinaleFnRef.current = null;
         blooms.clear();
         inscription.dispose();

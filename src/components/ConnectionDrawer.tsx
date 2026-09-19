@@ -46,8 +46,24 @@ function StarMini({ dims, size }: { dims: SpiroDimensions; size: number }) {
   );
 }
 
-// One side of the pair — a thought and the star it belongs to, side by side
-// with the other so the reason is written with both of them in view.
+// The thread — a short luminous line running between the two thoughts and
+// through the reason field, so the pair reads as one thing being joined
+// rather than two cards that happen to share a drawer.
+function Thread({ height = 16 }: { height?: number }) {
+  return (
+    <div aria-hidden style={{ display: 'flex', justifyContent: 'center', height }}>
+      <div style={{
+        width: 1,
+        height: '100%',
+        background: `linear-gradient(to bottom, ${withAlpha(BTW.horizon[3], 0.1)}, ${withAlpha(BTW.horizon[3], 0.5)})`,
+      }} />
+    </div>
+  );
+}
+
+// One side of the pair — a thought and the star it belongs to, with the
+// other directly across the thread so the reason is written with both of
+// them in view.
 function PairSide({ label, star }: { label: string; star: DrawerStar }) {
   return (
     <div style={{ flex: '1 1 236px', minWidth: 0 }}>
@@ -148,15 +164,13 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
         You orbit one star. Choose with care.
       </div>
 
-      {/* Defect #8 — both thoughts, side by side, before the reason is written */}
-      {(userStar || targetStar) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
-          {userStar && <PairSide label="yours" star={userStar} />}
-          {targetStar && <PairSide label="theirs" star={targetStar} />}
-        </div>
-      )}
+      {/* Defect #8 / Stage A — both thoughts, with the reason written on the
+          thread that runs between them: yours above, theirs below, and the
+          sentence that binds them literally in the middle. */}
+      {userStar && <PairSide label="yours" star={userStar} />}
+      {userStar && <Thread />}
 
-      {/* Textarea */}
+      {/* Textarea — the thread itself, lit once there's something on it */}
       <textarea
         ref={inputRef}
         value={reason}
@@ -168,7 +182,8 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
         style={{
           width: '100%',
           background: 'rgba(240,232,224,0.06)',
-          border: `1px solid ${withAlpha(BTW.textPri, 0.25)}`,
+          border: `1px solid ${withAlpha(BTW.horizon[3], ready ? 0.5 : 0.28)}`,
+          boxShadow: ready ? `0 0 24px ${withAlpha(BTW.horizon[3], 0.1)}` : 'none',
           borderRadius: 12,
           color: BTW.textPri,
           fontFamily: SERIF,
@@ -179,12 +194,16 @@ export default function ConnectionDrawer({ reason, onChange, onCancel, onSubmit,
           boxSizing: 'border-box',
           resize: 'none',
           minHeight: 52,
+          transition: 'border-color .3s, box-shadow .3s',
         }}
       />
 
       <div style={{ fontSize: 12, color: BTW.textDim, letterSpacing: '0.1em', marginTop: 6, textAlign: 'right' }}>
         {reason.length}/{MAX_REASON_LENGTH}
       </div>
+
+      {targetStar && <Thread />}
+      {targetStar && <PairSide label="theirs" star={targetStar} />}
 
       {/* CTA */}
       <button

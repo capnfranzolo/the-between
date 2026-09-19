@@ -44,6 +44,12 @@ interface StarDetailProps {
   tour?: { running: boolean; paused: boolean; durationMs: number; restartKey: string; onToggle: () => void };
   /** Phase 8 — this panel opened on the star that was just born. */
   justBorn?: boolean;
+  /** Stage A — the born panel's action trio. "Explore nearby stars" dismisses
+   *  this panel and hands the sky back to the tour; Save and Share open the
+   *  keepsake / story panels. Only ever wired on the visitor's own star. */
+  onExplore?: () => void;
+  onSave?: () => void;
+  onShare?: () => void;
   /** Defect #9 — this is the star the visitor's own star already orbits. */
   isBondTarget?: boolean;
   /** The LLM gate spec: never say "flagged"/"pending"/"moderation" — the
@@ -87,7 +93,7 @@ function ensureSmokeCSSDetail() {
 
 // animVariant='slideRight' — smoke exits to the right from the star's right edge
 // (used when star is inside the connect button so text flies into the cosmos).
-function StarMini({ dims, size, text, animVariant = 'rise' }: {
+export function StarMini({ dims, size, text, animVariant = 'rise' }: {
   dims: CosmosStarData['dimensions'];
   size: number;
   text?: string;
@@ -217,6 +223,7 @@ export default function StarDetail({
   star, hasMystar, userHasOutgoingBond, onConnect,
   connections, onConnectionClick, onDismiss, nudge, userStar, onAnswerCTA,
   justBorn, isBondTarget, pendingRise, myStarPending, tour,
+  onExplore, onSave, onShare,
 }: StarDetailProps) {
   const url = `https://${SITE_URL}/s/${star.shortcode}`;
   const ogImageUrl = `https://${SITE_URL}/api/og/${star.shortcode}`;
@@ -262,6 +269,58 @@ export default function StarDetail({
   // not a refusal but a fact.
   const spentOnAnother = hasMystar && !star.mine && !!userHasOutgoingBond && !isBondTarget;
   const spentOnThis    = hasMystar && !star.mine && !!userHasOutgoingBond && !!isBondTarget;
+
+  // ── Stage A — your own star's actions ───────────────────────────────────
+  // A star that hasn't cleared the queue can't be shared (the story/keepsake
+  // routes only ever serve approved stars, and a not-yet-public star isn't
+  // anyone else's to see yet) — but it can always be *kept*: the URL and QR
+  // are the only way back, and SaveStarPanel says so in as many words.
+  const canSave  = !!star.mine && !!onSave;
+  const canShare = !!star.mine && !!onShare && !pendingRise;
+  // The born moment: one whisper, three labeled doors, no countdown ring.
+  const bornPanel = !!justBorn && !!star.mine;
+  // Any later visit to your own star: the same two doors, quieter.
+  const ownActions = !bornPanel && (canSave || canShare);
+
+  const footerFrame: React.CSSProperties = {
+    flexShrink: 0,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+    padding: '12px 16px 12px 20px',
+    paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
+    borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
+  };
+  // The born trio's shape: full-width primary, then the two keepsake doors
+  // side by side — labeled, never corner icons, and legible at 390px.
+  const bornBtn: React.CSSProperties = {
+    background: 'transparent',
+    borderRadius: 999,
+    padding: '13px 18px',
+    minHeight: 46,
+    fontFamily: SANS, fontSize: 12, fontWeight: 500,
+    letterSpacing: '0.1em', textTransform: 'uppercase',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    touchAction: 'manipulation',
+    transition: 'background .2s, border-color .2s',
+  };
+  // The same doors on a later visit — smaller, still labeled.
+  const ownBtn: React.CSSProperties = {
+    background: 'transparent',
+    border: `1px solid ${withAlpha(BTW.textPri, 0.22)}`,
+    color: BTW.textSec,
+    borderRadius: 999,
+    padding: '9px 14px',
+    minHeight: 40,
+    fontFamily: SANS, fontSize: 11, fontWeight: 500,
+    letterSpacing: '0.12em', textTransform: 'uppercase',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    touchAction: 'manipulation',
+    transition: 'background .2s, border-color .2s, color .2s',
+  };
 
   return (
     <div
@@ -391,18 +450,90 @@ export default function StarDetail({
 
       </div>
 
-      {/* ── Sticky footer: share | centered action | tour ring ── */}
+      {/* ── Stage A — the born footer: the moment, one whisper, three doors.
+          No tour ring: the tour is already paused on your own star, and a
+          countdown ring would rush the one beat that shouldn't be rushed. ── */}
+      {bornPanel ? (
       <div style={{
-        flexShrink: 0,
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 10,
-        padding: '12px 16px 12px 20px',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)',
-        borderTop: `1px solid ${withAlpha(BTW.textPri, 0.07)}`,
+        ...footerFrame,
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
+        padding: '14px 20px',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+        gap: 12,
       }}>
-        <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />
+        <div style={{
+          fontFamily: SANS, fontSize: 12, color: BTW.horizon[3],
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+          textAlign: 'center', lineHeight: 1.5,
+        }}>
+          your star lives here.
+        </div>
+        <div style={{
+          fontFamily: SERIF, fontStyle: 'italic', fontSize: 14,
+          lineHeight: 1.5, color: BTW.textDim, textAlign: 'center',
+        }}>
+          {pendingRise
+            ? 'it will rise into the shared sky once it’s seen.'
+            : 'We don’t know who you are — save this if you want to come back.'}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {onExplore && (
+            <button
+              onClick={onExplore}
+              style={{
+                ...bornBtn,
+                border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+                color: BTW.horizon[3],
+                fontSize: 13,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12); }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              Explore nearby stars →
+            </button>
+          )}
+          {(canSave || canShare) && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {canSave && (
+                <button
+                  onClick={onSave}
+                  style={{
+                    ...bornBtn, flex: '1 1 140px',
+                    border: `1px solid ${withAlpha(BTW.textPri, 0.24)}`,
+                    color: BTW.textSec,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  Save this star
+                </button>
+              )}
+              {canShare && (
+                <button
+                  onClick={onShare}
+                  style={{
+                    ...bornBtn, flex: '1 1 140px',
+                    border: `1px solid ${withAlpha(BTW.textPri, 0.24)}`,
+                    color: BTW.textSec,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  Share this star
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      ) : (
+      /* ── Sticky footer: share | centered action | tour ring ── */
+      <div style={footerFrame}>
+        {/* Your own star's share is the labeled action on the right — the
+            small corner button would only say the same thing twice. */}
+        {!ownActions && <ShareButton url={url} ogImageUrl={ogImageUrl} nudge={nudge} />}
 
         <div style={{
           flex: 1, minWidth: 0, display: 'flex',
@@ -416,8 +547,11 @@ export default function StarDetail({
               display: 'flex',
               alignItems: 'center',
               gap: showUserStar ? 12 : 0,
-              background: 'transparent',
-              border: `1px solid ${withAlpha(BTW.horizon[3], 0.7)}`,
+              // Stage A — a shade more presence for a visitor who has a star
+              // and hasn't spent its one orbit yet: the same quiet pill, lit.
+              background: withAlpha(BTW.horizon[3], 0.10),
+              border: `1px solid ${withAlpha(BTW.horizon[3], 0.85)}`,
+              boxShadow: `0 0 20px ${withAlpha(BTW.horizon[3], 0.13)}`,
               color: BTW.horizon[3],
               padding: showUserStar ? '10px 18px 10px 10px' : '10px 18px',
               borderRadius: 999,
@@ -426,8 +560,8 @@ export default function StarDetail({
               cursor: 'pointer', fontFamily: SANS,
               touchAction: 'manipulation',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.12)}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            onMouseEnter={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.2)}
+            onMouseLeave={e => e.currentTarget.style.background = withAlpha(BTW.horizon[3], 0.1)}
           >
             {showUserStar && (
               <StarMini dims={withSeed(userStar!.dimensions, userStar!.shortcode)} size={36} />
@@ -469,6 +603,10 @@ export default function StarDetail({
 
         {star.mine && (
           <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+            gap: 10, flexWrap: 'wrap',
+          }}>
+          <div style={{
             fontSize: 12, color: BTW.horizon[3],
             letterSpacing: pendingRise ? '0.08em' : justBorn ? '0.12em' : '0.18em',
             textTransform: pendingRise ? 'none' : 'uppercase', textAlign: 'right', lineHeight: 1.5,
@@ -480,6 +618,28 @@ export default function StarDetail({
             {pendingRise
               ? 'it will rise into the shared sky once it’s seen.'
               : justBorn ? 'your star lives here.' : 'your star'}
+          </div>
+          {/* Stage A — Save and Share, labeled, on every later visit */}
+          {canSave && (
+            <button
+              onClick={onSave}
+              style={ownBtn}
+              onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); e.currentTarget.style.color = BTW.textPri; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = BTW.textSec; }}
+            >
+              Save
+            </button>
+          )}
+          {canShare && (
+            <button
+              onClick={onShare}
+              style={ownBtn}
+              onMouseEnter={e => { e.currentTarget.style.background = withAlpha(BTW.textPri, 0.07); e.currentTarget.style.color = BTW.textPri; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = BTW.textSec; }}
+            >
+              Share
+            </button>
+          )}
           </div>
         )}
 
@@ -509,6 +669,7 @@ export default function StarDetail({
 
         {tour ? <TourRing tour={tour} /> : <div style={{ width: 34, flexShrink: 0 }} />}
       </div>
+      )}
     </div>
   );
 }

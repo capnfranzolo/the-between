@@ -2,8 +2,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import CosmosScene, { type ThoughtData, type BondData, type CosmosSceneHandle, CROSSFADE_IN_MS } from '@/components/cosmos/CosmosScene';
-import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
+import StarDetail, { StarMini, type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
+import SaveStarPanel from '@/components/SaveStarPanel';
+import SharePanel from '@/components/SharePanel';
 import QuestionCycler, { type ValidatedPayload } from '@/components/QuestionCycler';
 import UniqueOverlay from '@/components/UniqueOverlay';
 import AboutModal from '@/components/AboutModal';
@@ -73,6 +75,10 @@ function LandingPageInner() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
+  // Stage A — the keepsake and the artifact share, for your own star only.
+  // (Births land on /cosmos; here these are the later-visit doors.)
+  const [savePanel, setSavePanel] = useState(false);
+  const [sharePanel, setSharePanel] = useState(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
 
   // ── Arrival beat — the question alone over an empty sky, then it rises ──
@@ -374,8 +380,9 @@ function LandingPageInner() {
 
   // The countdown: one timer, restarted whenever the stop or a gating overlay
   // changes; the ring animates in CSS keyed the same way, so they stay in step.
-  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching;
-  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}`;
+  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching
+    && !savePanel && !sharePanel;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${savePanel}|${sharePanel}`;
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
@@ -781,6 +788,8 @@ function LandingPageInner() {
               ? { text: byId[userStarId].text, shortcode: byId[userStarId].shortcode, dimensions: byId[userStarId].dimensions }
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
+            onSave={selectedStar.mine ? () => setSavePanel(true) : undefined}
+            onShare={selectedStar.mine ? () => setSharePanel(true) : undefined}
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
@@ -815,6 +824,27 @@ function LandingPageInner() {
               animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
             }}
           >
+            {/* Stage A — the pair, before the sentence about it: your star
+                and theirs, side by side on the orbit they now share. */}
+            {userStarId && byId[userStarId] && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: 14, marginBottom: 16,
+              }}>
+                <StarMini
+                  dims={withSeed(byId[userStarId].dimensions ?? DIM_DEFAULTS, byId[userStarId].shortcode)}
+                  size={56}
+                />
+                <div aria-hidden style={{
+                  width: 34, height: 1,
+                  background: `linear-gradient(to right, ${withAlpha(BTW.horizon[3], 0.15)}, ${withAlpha(BTW.horizon[3], 0.6)}, ${withAlpha(BTW.horizon[3], 0.15)})`,
+                }} />
+                <StarMini
+                  dims={withSeed(selectedStar.dimensions ?? DIM_DEFAULTS, selectedStar.shortcode)}
+                  size={56}
+                />
+              </div>
+            )}
             <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
             </div>
@@ -935,6 +965,23 @@ function LandingPageInner() {
       <AddToHomeScreen />
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+
+      {/* Stage A — your own star's keepsake and artifact share */}
+      {savePanel && selectedStar?.mine && (
+        <SaveStarPanel
+          shortcode={selectedStar.shortcode}
+          star={selectedStar}
+          onClose={() => setSavePanel(false)}
+        />
+      )}
+      {sharePanel && selectedStar?.mine && (
+        <SharePanel
+          shortcode={selectedStar.shortcode}
+          star={selectedStar}
+          questionText={data?.question?.text}
+          onClose={() => setSharePanel(false)}
+        />
+      )}
 
       {/* "Add yours" — frosted overlay over the still-visible, still-drifting sky */}
       {showComposer && !pending && (

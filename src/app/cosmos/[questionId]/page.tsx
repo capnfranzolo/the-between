@@ -6,8 +6,10 @@ import CosmosScene, {
   type ThoughtData, type BondData, type CosmosSceneHandle,
   CROSSFADE_IN_MS,
 } from '@/components/cosmos/CosmosScene';
-import StarDetail, { type CosmosStarData } from '@/components/StarDetail';
+import StarDetail, { StarMini, type CosmosStarData } from '@/components/StarDetail';
 import ConnectionDrawer from '@/components/ConnectionDrawer';
+import SaveStarPanel from '@/components/SaveStarPanel';
+import SharePanel from '@/components/SharePanel';
 import AboutModal from '@/components/AboutModal';
 import AddToHomeScreen from '@/components/AddToHomeScreen';
 import ArrivalTitle from '@/components/ArrivalTitle';
@@ -17,7 +19,7 @@ import UniqueOverlay from '@/components/UniqueOverlay';
 import { getAtmosphere } from '@/lib/atmosphere';
 import { type CosmosBond } from '@/lib/cosmos';
 import { BTW, SANS, SERIF, mulberry32, hashString, withAlpha } from '@/lib/btw';
-import { SITE_URL, BIRTH_FLAG_KEY } from '@/lib/constants';
+import { SITE_URL, BIRTH_FLAG_KEY, BOND_QUEST_FLAG_KEY } from '@/lib/constants';
 
 const DIM_DEFAULTS = { certainty: 0.5, warmth: 0.5, tension: 0.5, vulnerability: 0.5, scope: 0.5, rootedness: 0.5, emotionIndex: 3, curveType: 'hypotrochoid' as const, reasoning: '' };
 
@@ -293,6 +295,13 @@ export default function CosmosPage() {
     typeof window !== 'undefined' ? localStorage.getItem('my_star') : null,
   );
   const [showAbout, setShowAbout] = useState(false);
+  // Stage A — the keepsake and the artifact share, for your own star only.
+  const [savePanel, setSavePanel] = useState(false);
+  const [sharePanel, setSharePanel] = useState(false);
+  // Stage A — the bond quest line, risen once when the newborn's visitor
+  // leaves their own star (sessionStorage-scoped; see BOND_QUEST_FLAG_KEY).
+  const [questLine, setQuestLine] = useState(false);
+  const questShown = useRef(false);
   const sceneRef = useRef<CosmosSceneHandle>(null);
   const autoFocused = useRef(false);
 
@@ -502,6 +511,9 @@ export default function CosmosPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes the one-shot birth flag once cosmos data arrives; ref-guarded
     setBornShortcode(born);
     sceneRef.current?.bloomStar(bornStar.id);
+    // …and once the bloom is done, the camera eases back so the newborn is
+    // seen among strangers' stars: you joined something (Stage A).
+    sceneRef.current?.birthReveal(bornStar.id);
   }, [data, starParam]);
 
   const allStars = useMemo(() => data?.stars ?? [], [data]);
@@ -609,7 +621,27 @@ export default function CosmosPage() {
   const TOUR_MS = 10000;
   const [tourPaused, setTourPaused] = useState(false);
 
+  // Stage A — the quest. The visitor whose star was just born is told, once,
+  // what the one thing their star can still do is. Never repeats (session
+  // flag), never shows to anyone who didn't just make a star here.
+  const riseQuestLine = useCallback(() => {
+    if (!bornShortcode) return;
+    // The birth arc ends here: coming back to this star later in the session
+    // gets the ordinary own-star panel, not the born trio again.
+    setBornShortcode(null);
+    if (questShown.current) return;
+    try {
+      if (sessionStorage.getItem(BOND_QUEST_FLAG_KEY)) { questShown.current = true; return; }
+      sessionStorage.setItem(BOND_QUEST_FLAG_KEY, '1');
+    } catch { /* private mode — the line simply rises this once */ }
+    questShown.current = true;
+    setQuestLine(true);
+  }, [bornShortcode]);
+
   const startTourStop = (id: string) => {
+    // Leaving the newborn for another star is leaving it — same beat as a
+    // dismiss (see clearSelection), so the quest is set here too.
+    if (selected && selected === userStarId && id !== selected) riseQuestLine();
     // Your own star starts paused so a birth moment is never cut short.
     const star = data?.stars.find(st => st.id === id);
     setTourPaused(!!myShortcode && star?.shortcode === myShortcode);
@@ -705,8 +737,9 @@ export default function CosmosPage() {
 
   // The countdown: one timer, restarted whenever the stop or a gating overlay
   // changes; the ring animates in CSS keyed the same way, so they stay in step.
-  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching;
-  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}`;
+  const tourEligible = !!selected && !connecting && !connectConfirmed && !showComposer && !showAbout && !switching
+    && !savePanel && !sharePanel;
+  const tourKey = `${selected}|${connecting}|${connectConfirmed}|${showComposer}|${showAbout}|${switching}|${savePanel}|${sharePanel}`;
   useEffect(() => {
     if (!tourEligible || tourPaused) return;
     const t = setTimeout(() => {
@@ -726,11 +759,20 @@ export default function CosmosPage() {
   }, []);
 
   const clearSelection = () => {
+    // Leaving the star that was just born is the moment the quest is set.
+    if (selected && selected === userStarId) riseQuestLine();
     setSelected(null);
     setConnecting(false);
     setConnectConfirmed(false);
     setConnectedBondId(null);
     setReason('');
+  };
+
+  // The born panel's "Explore nearby stars" — dismiss, and hand the sky back
+  // to the tour immediately rather than waiting out a countdown.
+  const exploreFromPanel = () => {
+    clearSelection();
+    sceneRef.current?.tourNext();
   };
 
   const closeComposer = useCallback(() => {
@@ -928,6 +970,9 @@ export default function CosmosPage() {
               : null}
             onAnswerCTA={!userStarId ? () => setShowComposer(true) : undefined}
             justBorn={!!bornShortcode && selectedStar.shortcode === bornShortcode}
+            onExplore={exploreFromPanel}
+            onSave={selectedStar.mine ? () => setSavePanel(true) : undefined}
+            onShare={selectedStar.mine ? () => setSharePanel(true) : undefined}
             isBondTarget={!!myBondTargetId && selectedStar.id === myBondTargetId}
             pendingRise={!!selectedStar.mine && !!selectedStar.status && selectedStar.status !== 'approved'}
             myStarPending={myStarPending}
@@ -962,6 +1007,27 @@ export default function CosmosPage() {
               animation: 'btwRise .45s cubic-bezier(.2,.7,.3,1)',
             }}
           >
+            {/* Stage A — the pair, before the sentence about it: your star
+                and theirs, side by side on the orbit they now share. */}
+            {userStarId && byId[userStarId] && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: 14, marginBottom: 16,
+              }}>
+                <StarMini
+                  dims={withSeed(byId[userStarId].dimensions ?? DIM_DEFAULTS, byId[userStarId].shortcode)}
+                  size={56}
+                />
+                <div aria-hidden style={{
+                  width: 34, height: 1,
+                  background: `linear-gradient(to right, ${withAlpha(BTW.horizon[3], 0.15)}, ${withAlpha(BTW.horizon[3], 0.6)}, ${withAlpha(BTW.horizon[3], 0.15)})`,
+                }} />
+                <StarMini
+                  dims={withSeed(selectedStar.dimensions ?? DIM_DEFAULTS, selectedStar.shortcode)}
+                  size={56}
+                />
+              </div>
+            )}
             <div style={{ fontFamily: SERIF, fontSize: 20, color: BTW.textPri, lineHeight: 1.4 }}>
               Your stars are bound.
             </div>
@@ -1088,6 +1154,32 @@ export default function CosmosPage() {
           key="connect-mode"
           text="Find a star to orbit."
           onDone={() => {/* stays until connecting changes */}}
+        />
+      )}
+
+      {/* Stage A — the quest, once, as the newborn's visitor leaves their star */}
+      {questLine && !connecting && (
+        <GhostPrompt
+          key="bond-quest"
+          text="Your star can orbit one other. Somewhere in here is a worthy stranger."
+          onDone={() => setQuestLine(false)}
+        />
+      )}
+
+      {/* Stage A — your own star's keepsake and artifact share */}
+      {savePanel && selectedStar?.mine && (
+        <SaveStarPanel
+          shortcode={selectedStar.shortcode}
+          star={selectedStar}
+          onClose={() => setSavePanel(false)}
+        />
+      )}
+      {sharePanel && selectedStar?.mine && (
+        <SharePanel
+          shortcode={selectedStar.shortcode}
+          star={selectedStar}
+          questionText={data?.question?.text}
+          onClose={() => setSharePanel(false)}
         />
       )}
 

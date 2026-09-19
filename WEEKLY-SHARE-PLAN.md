@@ -188,6 +188,18 @@ The headline UX stage; integrates B and D. On `/cosmos` after birth (BIRTH_FLAG 
 
 Landing page gets the same own-star panel treatment (shared StarDetail changes cover it).
 
+## Stage G — The forming star (owner request, 2026-09-19, opus)
+
+The UniqueOverlay preview ("Leave a trace beside your star") must (a) actually FORM over
+time — one firefly, then another, tails growing, the trace drawing itself in over ~5s before
+settling into the normal live animation — and (b) be EXACTLY the star that is born.
+Root causes of the current mismatch: Spirograph.tsx strips the four family axes
+(resolve/charge/connection/temporality) and passes no seed, and no shortcode exists pre-birth
+so the archetype reseeds at submit. Fix: /api/submit/validate mints the shortcode with the
+dimensions; it flows QuestionCycler → UniqueOverlay (preview via withSeed) → /api/submit,
+which validates and uses it (server regenerates only on the ~impossible collision). Renderer
+gains an optional forming-progress input (extend, never replace).
+
 ## Stage V — Verification (sonnet)
 
 Full walkthrough on 390×844 and 1280×720 with Playwright against the real dev stack (mock

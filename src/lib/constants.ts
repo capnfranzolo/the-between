@@ -19,3 +19,12 @@ export const SITE_URL = 'thebetween.world';
  * flag).
  */
 export const BIRTH_FLAG_KEY = 'btw_star_born';
+
+/**
+ * sessionStorage key — the bond quest line ("Your star can orbit one other…")
+ * has already risen this session. Stage A: it rises once, when the visitor
+ * whose star was just born leaves it for the first time, and never again.
+ * Session-scoped on purpose: nothing about a visitor is remembered past the
+ * tab, and a creator is never identified across visits.
+ */
+export const BOND_QUEST_FLAG_KEY = 'btw_bond_quest_seen';
