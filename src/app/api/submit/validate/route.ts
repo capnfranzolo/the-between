@@ -4,6 +4,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { hashString } from '@/lib/btw';
 import { extractDimensions, visualDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
+import { generateShortcode } from '@/lib/shortcode';
 import { verifyTurnstileToken } from '@/lib/turnstile';
 
 function shannonEntropy(text: string): number {
@@ -126,8 +127,18 @@ export async function POST(req: NextRequest) {
   }
 
   const dimResult = await extractDimensions(answer);
+  // Stage G — the star's shortcode is minted HERE, not at birth. It is the
+  // archetype seed, so a preview drawn without it resolves a different
+  // structure than the star that is actually born. Stamped onto `dimensions`
+  // as `seed` so it travels with them through the composer; `visualDimensions`
+  // strips it again before anything is stored.
+  const shortcode = generateShortcode();
   // The publish-gate verdict never reaches the client (and is re-derived
   // server-side in /api/submit, since these dimensions round-trip through it).
-  const dimensions = { ...visualDimensions(dimResult), curveType: randomCurveType() };
-  return Response.json({ valid: true, dimensions });
+  const dimensions = {
+    ...visualDimensions(dimResult),
+    curveType: randomCurveType(),
+    seed: shortcode,
+  };
+  return Response.json({ valid: true, shortcode, dimensions });
 }

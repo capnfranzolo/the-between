@@ -119,12 +119,73 @@ interface CamState {
   focal: number;
 }
 
+/**
+ * Stage G — per-frame options. Purely additive: an omitted (or completed)
+ * `forming` renders exactly the frame the renderer always rendered.
+ */
+export interface RenderOptions {
+  /**
+   * Forming progress, 0 → 1: the star assembling itself before it settles into
+   * its normal life. Fireflies arrive one at a time, the ghost trace inscribes
+   * itself, archetype dressings and family forms arrive last.
+   *
+   * `undefined` or `>= 1` is the ordinary frame — byte-for-byte the pre-Stage-G
+   * drawing, which matters because `src/lib/story/curve.ts` replays this
+   * renderer through a closed recorder and `src/lib/story` composites its output.
+   */
+  forming?: number;
+}
+
 export interface SpirographInstance {
   start: () => void;
   stop: () => void;
   update: (dims: SpiroDimensions) => void;
-  renderStatic: (time?: number) => void;
+  renderStatic: (time?: number, options?: RenderOptions) => void;
   getCanvas: () => HTMLCanvasElement;
+}
+
+// ── Stage G — forming shape ──────────────────────────────────────────────────
+// All of these are read ONLY when a forming progress is supplied; every factor
+// they produce is literally `1` on the ordinary path (see `renderFrame`).
+
+/** How long a forming reveal runs before handing off to the live animation. */
+export const FORMING_DURATION_MS = 5000;
+
+export const FORMING = {
+  /** Last firefly starts arriving at this progress — the "one, then another". */
+  fireflySpread: 0.55,
+  /** How long one firefly takes to fade in — quick: it must read as a DOT. */
+  fireflyFade: 0.14,
+  /** How long its tail takes to grow from a point to full length. Slower than
+   *  the fade, and ease-IN, so the dot arrives first and the line follows it. */
+  tailGrow: 0.50,
+  /** The ghost trace fades up over this, then inscribes itself. */
+  ghostFade: 0.08,
+  ghostStart: 0.02,
+  ghostDraw: 0.80,
+  /** Dressings and family forms arrive after the base form has established. */
+  lateStart: 0.70,
+  /** Standalone family forms can't reveal stroke-by-stroke without surgery on
+   *  proposals.ts, so they bloom: a gentle fade with a slight scale-in. */
+  standaloneScale: 0.62,
+} as const;
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function easeInOutSine(x: number): number {
+  return 0.5 - 0.5 * Math.cos(Math.PI * clamp01(x));
+}
+
+function easeOutCubic(x: number): number {
+  const u = 1 - clamp01(x);
+  return 1 - u * u * u;
+}
+
+/** The forming curve itself: elapsed milliseconds → eased progress 0..1. */
+export function formingProgress(elapsedMs: number): number {
+  return easeInOutSine(elapsedMs / FORMING_DURATION_MS);
 }
 
 
@@ -305,7 +366,14 @@ function renderFrame(
   geo: Geometry,
   baseRGB: [number, number, number],
   time: number,
+  forming?: number,
 ): void {
+  // Stage G — `null` means "not forming". On that path every factor below is
+  // the literal 1 and every statement is the one that was always executed:
+  // the ordinary frame is unchanged, down to the last float.
+  const p: number | null = forming === undefined || forming >= 1 ? null : Math.max(0, forming);
+  const lateAlpha = p === null ? 1 : easeInOutSine((p - FORMING.lateStart) / (1 - FORMING.lateStart));
+
   const cx = logW / 2;
   const cy = logH / 2;
   const c = CONFIG.camera;
@@ -327,20 +395,53 @@ function renderFrame(
   // Round 6 — standalone family forms replace the spirograph entirely. They
   // share `projector`, so the same slow world-turn animates them.
   if (geo.form !== 'spirograph' && isStandaloneProposal(geo.form)) {
-    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
-      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
-    });
+    if (p === null) {
+      drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
+        ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+      });
+    } else {
+      // These forms own their whole canvas and draw themselves all at once;
+      // revealing them stroke-by-stroke would mean rewriting proposals.ts. They
+      // bloom instead — a quiet fade with a slight swell out of the centre.
+      const grow = FORMING.standaloneScale + (1 - FORMING.standaloneScale) * easeOutCubic(p / 0.9);
+      // Slightly front-loaded so the form is present early rather than leaving
+      // the first second of the reveal blank.
+      const bloomAlpha = Math.pow(clamp01(p / 0.85), 0.8);
+      const oy = cy + c.yOffset;
+      const bloom: Projector = (x, y, z) => {
+        const s = project(x, y, z, cam);
+        return { sx: cx + (s.sx - cx) * grow, sy: oy + (s.sy - oy) * grow, scale: s.scale * grow };
+      };
+      ctx.globalAlpha = bloomAlpha;
+      drawProposal(geo.form, ctx, bloom, archR, baseRGB as RGB, time, {
+        ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+      });
+      ctx.globalAlpha = 1;
+    }
     return;
   }
 
   // Archetype dressings (satellites/binary/saturn/comet) belong to the
   // tangle family — overlay forms (pulsar, eclipse) ride a bare spirograph.
   const dressed = geo.form === 'spirograph';
-  if (dressed) drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
+  if (dressed) {
+    if (p === null) {
+      drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
+    } else if (lateAlpha > 0.004) {
+      ctx.globalAlpha = lateAlpha;
+      drawArchetypeUnder(ctx, geo.arch, projector, archR, baseRGB, time);
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // Ghost trace
   if (geo.certainty > CONFIG.ghostThreshold) {
-    const ghostAlpha = (geo.certainty - CONFIG.ghostThreshold) * CONFIG.ghostAlphaFactor;
+    // Forming: the trace fades up almost at once, then inscribes itself —
+    // theta capped by an eased ramp so the curve draws in rather than appears.
+    const ghostFade = p === null ? 1 : easeInOutSine(p / FORMING.ghostFade);
+    const ghostGrow = p === null ? 1 : easeInOutSine((p - FORMING.ghostStart) / FORMING.ghostDraw);
+    const ghostTheta = geo.totalTheta * ghostGrow;
+    const ghostAlpha = (geo.certainty - CONFIG.ghostThreshold) * CONFIG.ghostAlphaFactor * ghostFade;
     ctx.beginPath();
     ctx.strokeStyle = `rgba(${baseRGB[0]},${baseRGB[1]},${baseRGB[2]},${ghostAlpha})`;
     ctx.lineWidth = 0.5;
@@ -348,7 +449,7 @@ function renderFrame(
     ctx.lineJoin = 'round';
     let prevSx = 0, prevSy = 0, first = true;
     for (let i = 0; i <= CONFIG.ghostSteps; i++) {
-      const theta = (i / CONFIG.ghostSteps) * geo.totalTheta;
+      const theta = (i / CONFIG.ghostSteps) * ghostTheta;
       const proj = pj(ev(theta));
       if (first) { ctx.moveTo(proj.sx, proj.sy); first = false; }
       else {
@@ -363,12 +464,24 @@ function renderFrame(
   const tailThetaLen = geo.tailFraction * geo.totalTheta;
 
   for (let f = 0; f < geo.fireflyCount; f++) {
+    // Forming: first one dot, then another. Each firefly waits for its own
+    // threshold, fades in, and grows its tail from a point to full length.
+    let appear = 1, tailGrow = 1, glowGrow = 1;
+    if (p !== null) {
+      const arrives = (f / geo.fireflyCount) * FORMING.fireflySpread;
+      appear = easeInOutSine((p - arrives) / FORMING.fireflyFade);
+      if (appear <= 0) continue;
+      const g = clamp01((p - arrives) / FORMING.tailGrow);
+      tailGrow = g * g;
+      glowGrow = 0.45 + 0.55 * appear;
+    }
+    const tailLen = tailThetaLen * tailGrow;
     const headTheta = (time * geo.angularSpeed + (f / geo.fireflyCount) * geo.totalTheta) % geo.totalTheta;
 
     for (let seg = CONFIG.tailSegments - 1; seg >= 0; seg--) {
       const segFrac0 = seg / CONFIG.tailSegments;
       const segFrac1 = (seg + 1) / CONFIG.tailSegments;
-      const alpha = Math.pow(1 - segFrac1, geo.fadeExp) * 0.9;
+      const alpha = Math.pow(1 - segFrac1, geo.fadeExp) * 0.9 * appear;
       if (alpha < 0.005) continue;
 
       const sw = geo.strokeBase * (1 - segFrac1 * 0.5);
@@ -387,7 +500,7 @@ function renderFrame(
       let prevSx = 0, prevSy = 0, isFirst = true;
       for (let k = 0; k <= CONFIG.subPointsPerSegment; k++) {
         const frac = segFrac0 + (segFrac1 - segFrac0) * (k / CONFIG.subPointsPerSegment);
-        const theta = headTheta - frac * tailThetaLen;
+        const theta = headTheta - frac * tailLen;
         const proj = pj(ev(theta));
         if (isFirst) { ctx.moveTo(proj.sx, proj.sy); isFirst = false; }
         else {
@@ -400,11 +513,11 @@ function renderFrame(
 
     // Head glow — palette color at low alpha; no white boost, NormalBlending handles compositing
     const headProj = pj(ev(headTheta));
-    const glowR = 24 * headProj.scale;
+    const glowR = 24 * headProj.scale * glowGrow;
     const grad = ctx.createRadialGradient(headProj.sx, headProj.sy, 0, headProj.sx, headProj.sy, glowR);
     const [gr, gg, gb] = baseRGB;
-    grad.addColorStop(0,   `rgba(${gr},${gg},${gb},0.22)`);
-    grad.addColorStop(0.4, `rgba(${gr},${gg},${gb},0.10)`);
+    grad.addColorStop(0,   `rgba(${gr},${gg},${gb},${p === null ? '0.22' : 0.22 * appear})`);
+    grad.addColorStop(0.4, `rgba(${gr},${gg},${gb},${p === null ? '0.10' : 0.10 * appear})`);
     grad.addColorStop(1,   `rgba(${gr},${gg},${gb},0)`);
     ctx.beginPath();
     ctx.fillStyle = grad;
@@ -414,14 +527,30 @@ function renderFrame(
 
   // Phase 5 — foreground structures (binary cores, satellite motes) draw last
   // so they stay legible over the firefly tangle.
-  if (dressed) drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+  if (dressed) {
+    if (p === null) {
+      drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+    } else if (lateAlpha > 0.004) {
+      ctx.globalAlpha = lateAlpha;
+      drawArchetypeOver(ctx, geo.arch, projector, archR, baseRGB as RGB, time);
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // Overlay family forms (pulsar's beams, void's eclipse) draw over the bare
   // spirograph — they restyle or occlude the base form.
   if (geo.form !== 'spirograph') {
-    drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
-      ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
-    });
+    if (p === null) {
+      drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
+        ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+      });
+    } else if (lateAlpha > 0.004) {
+      ctx.globalAlpha = lateAlpha;
+      drawProposal(geo.form, ctx, projector, archR, baseRGB as RGB, time, {
+        ev, totalTheta: geo.totalTheta, angularSpeed: geo.angularSpeed, seed: geo.arch.seed,
+      });
+      ctx.globalAlpha = 1;
+    }
   }
 }
 
@@ -490,9 +619,9 @@ export function createSpirograph(
       geo = computeGeometry(currentDims);
       baseRGB = EMOTIONS[currentDims.emotionIndex]?.rgb ?? [255, 255, 255];
     },
-    renderStatic(time = 2.5) {
+    renderStatic(time = 2.5, options?: RenderOptions) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      renderFrame(ctx, size, size, geo, baseRGB, time);
+      renderFrame(ctx, size, size, geo, baseRGB, time, options?.forming);
     },
     getCanvas() { return canvas; },
   };

@@ -17,7 +17,13 @@ const FALLBACK: Question[] = [{ id: 'fallback', text: QUESTION_TEXT }];
 export type ValidatedPayload = {
   answer: string;
   questionId: string;
-  dimensions: DimensionResult & { curveType: CurveType };
+  /**
+   * Stage G — the star's shortcode, minted by /api/submit/validate so the
+   * preview and the born star share an archetype seed. Also carried on
+   * `dimensions.seed`, which is how it reaches the preview renderer.
+   */
+  shortcode?: string;
+  dimensions: DimensionResult & { curveType: CurveType; seed?: string };
 };
 
 interface QuestionCyclerProps {
@@ -92,7 +98,12 @@ export default function QuestionCycler({ onQuestionChange, onValidated, validati
       });
       const data = await res.json();
       if (data.valid) {
-        onValidated?.({ answer: text.trim(), questionId: questions[currentIndex].id, dimensions: data.dimensions });
+        onValidated?.({
+          answer: text.trim(),
+          questionId: questions[currentIndex].id,
+          shortcode: data.shortcode,
+          dimensions: data.dimensions,
+        });
       } else {
         setInlineError(data.reason ?? 'Something went wrong.');
       }

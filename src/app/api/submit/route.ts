@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { generateShortcode } from '@/lib/shortcode';
+import { generateShortcode, isValidShortcode } from '@/lib/shortcode';
 import { extractDimensions, visualDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
 import { MIN_ANSWER_LENGTH, MAX_ANSWER_LENGTH } from '@/lib/constants';
@@ -8,7 +8,11 @@ import { hashString } from '@/lib/btw';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { answer, question_id, unique_fact, dimensions: providedDimensions } = body;
+  const {
+    answer, question_id, unique_fact,
+    dimensions: providedDimensions,
+    shortcode: suggestedShortcode,
+  } = body;
 
   if (!answer || typeof answer !== 'string') {
     return Response.json({ error: 'Missing answer' }, { status: 400 });
@@ -40,7 +44,12 @@ export async function POST(req: NextRequest) {
     'unknown';
   const ipHash = hashString(rawIp).toString(16);
 
-  const shortcode = generateShortcode();
+  // Stage G — the shortcode is minted at /api/submit/validate so the pre-birth
+  // preview can seed its archetype with it and show the star that is actually
+  // born. The client's copy is a SUGGESTION: it is accepted only if it matches
+  // exactly what generateShortcode() produces (alphabet + length), and a
+  // collision at insert is retried once with a fresh server-generated code.
+  let shortcode = isValidShortcode(suggestedShortcode) ? suggestedShortcode : generateShortcode();
   // The publish gate always runs server-side — client-provided dimensions are
   // trusted for visuals only (so the star matches its pre-submit preview), never
   // for the publishability verdict.
@@ -61,8 +70,8 @@ export async function POST(req: NextRequest) {
   // locally regardless of status.
   const status = gateResult.publishable === false ? 'pending' : 'approved';
 
-  const baseInsert = {
-    shortcode,
+  const baseInsert = (code: string) => ({
+    shortcode: code,
     answer,
     question_id: questionId,
     status,
@@ -70,15 +79,30 @@ export async function POST(req: NextRequest) {
     ip_hash: ipHash,
     dimensions,
     unique_fact: unique_fact ?? null,
-  };
+  });
+  const answerHash = hashString(answer.trim().toLowerCase()).toString(16);
 
-  let { error } = await supabaseServer
-    .from('stars')
-    .insert({ ...baseInsert, answer_hash: hashString(answer.trim().toLowerCase()).toString(16) });
+  async function insertStar(code: string) {
+    let { error } = await supabaseServer
+      .from('stars')
+      .insert({ ...baseInsert(code), answer_hash: answerHash });
 
-  // Retry without answer_hash if the column doesn't exist yet (migration pending)
-  if (error && (error.message?.includes('answer_hash') || error.code === '42703')) {
-    ({ error } = await supabaseServer.from('stars').insert(baseInsert));
+    // Retry without answer_hash if the column doesn't exist yet (migration pending)
+    if (error && (error.message?.includes('answer_hash') || error.code === '42703')) {
+      ({ error } = await supabaseServer.from('stars').insert(baseInsert(code)));
+    }
+    return error;
+  }
+
+  const isShortcodeCollision = (err: { code?: string; message?: string } | null) =>
+    !!err && (err.code === '23505' || /duplicate key|unique constraint|already exists/i.test(err.message ?? ''));
+
+  let error = await insertStar(shortcode);
+  // Vanishingly rare at 10 characters — and only reachable via a client-supplied
+  // code. The star is worth more than its preview's archetype, so it gets born.
+  if (isShortcodeCollision(error)) {
+    shortcode = generateShortcode();
+    error = await insertStar(shortcode);
   }
 
   if (!error) {

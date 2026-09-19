@@ -11,11 +11,20 @@ const Spirograph = dynamic(() => import('@/components/Spirograph'), { ssr: false
 interface UniqueOverlayProps {
   answer: string;
   questionId: string;
-  dimensions: DimensionResult & { curveType: CurveType };
+  dimensions: DimensionResult & { curveType: CurveType; seed?: string };
+  /**
+   * Stage G — the shortcode minted at validate time. Defaults to the copy
+   * carried on `dimensions.seed`, which is how it arrives from the composer.
+   */
+  shortcode?: string;
   onBack: () => void;
 }
 
-export default function UniqueOverlay({ answer, questionId, dimensions, onBack }: UniqueOverlayProps) {
+export default function UniqueOverlay({ answer, questionId, dimensions, shortcode, onBack }: UniqueOverlayProps) {
+  // The star previewed here must be the star met in the sky: same dimensions
+  // (all ten axes), same archetype seed. The seed is the shortcode the server
+  // minted alongside the dimensions and will use at birth.
+  const seed = shortcode ?? dimensions.seed;
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,6 +48,7 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
           question_id: questionId,
           unique_fact: text.trim() || null,
           dimensions,
+          shortcode: seed,
         }),
       });
       const data = await res.json();
@@ -79,7 +89,7 @@ export default function UniqueOverlay({ answer, questionId, dimensions, onBack }
       <div style={{ width: '100%', maxWidth: 520, textAlign: 'center' }}>
         {/* Star preview */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
-          <Spirograph dimensions={dimensions} size={160} animate={true} />
+          <Spirograph dimensions={dimensions} seed={seed} size={160} animate={true} forming={true} />
         </div>
 
         <div style={{
