@@ -2,7 +2,14 @@
  * The Between — the keepsake image.
  *
  * A 1080×1920 PNG a visitor can save to their camera roll: their star, what
- * they said, and the two ways back — the URL in plain text and a QR code.
+ * they said, and the way back — a QR code, quiet in the bottom-right corner,
+ * with the site's name facing it from the bottom-left.
+ *
+ * Revision 2 removed the spelled-out URL that used to sit beside the code. A
+ * shortcode printed in 44 px type is the loudest thing on a contemplative
+ * image, and it reads as a receipt number; the corner pair says the same thing
+ * without raising its voice. The code itself is the way back, and it is sized
+ * and coloured to be scannable rather than decorative (see `qr.ts`).
  *
  * Built on the same canvas the story video uses rather than on Satori, so it
  * gets the real Cormorant Garamond and the question's real sky. One rendering
@@ -19,8 +26,9 @@ import { EMOTIONS, type SpiroDimensions } from '../spirograph/renderer';
 import { font } from './fonts';
 import { STORY_W, STORY_H, renderSkyLayer, renderMiniStar, STAR_LOGICAL_BOX } from './layers';
 import { captureCurvePath, fitScale } from './curve';
-import { defaultOrigin, originHost, starUrlOn } from './origin';
-import { renderQrTile } from './qr';
+import { SITE_URL } from '../constants';
+import { defaultOrigin, starUrlOn } from './origin';
+import { renderQrTile, QUIET_PLATE, QUIET_INK, QUIET_QR_SIZE } from './qr';
 import { ANSWER_MAX_CHARS, answerFontSize, layoutBlock, truncate } from './text';
 
 export const KEEPSAKE_LINE = "We don't know who you are, so keep this if you want to come back.";
@@ -49,7 +57,6 @@ export async function renderKeepsakePng(input: KeepsakeInput): Promise<Buffer> {
   const rgb = EMOTIONS[dims.emotionIndex]?.rgb ?? [240, 232, 224];
   const origin = input.origin ?? defaultOrigin();
   const url = starUrlOn(origin, input.shortcode);
-  const host = originHost(origin);
 
   const canvas = createCanvas(STORY_W, STORY_H);
   const ctx = canvas.getContext('2d');
@@ -114,15 +121,17 @@ export async function renderKeepsakePng(input: KeepsakeInput): Promise<Buffer> {
     face: 'serifItalic', size: 36, maxWidth: CONTENT_W - 30, maxLines: 3, lineHeightFactor: 1.38, minSize: 28,
   });
 
-  // The same tile the story's closing beat uses: dark modules on a cream plate,
-  // whole-pixel modules, a full quiet zone. A keepsake whose code will not scan
-  // is a keepsake with one way back instead of two.
-  const tile = renderQrTile(url, { size: 236 });
+  // The same tile the story's closing corner uses: the quiet plate, whole-pixel
+  // modules, a full quiet zone. A keepsake whose code will not scan is a
+  // keepsake with no way back at all, now that the URL text is gone.
+  const tile = renderQrTile(url, {
+    size: QUIET_QR_SIZE, light: QUIET_PLATE, dark: QUIET_INK,
+  });
 
   // Bottom-anchored so the block sits the same whatever the answer's height.
   const blockBottom = STORY_H - 130;
   const qrTop = blockBottom - tile.px;
-  const keepTop = qrTop - 52 - keep.lines.length * keep.lineHeight;
+  const keepTop = qrTop - 56 - keep.lines.length * keep.lineHeight;
 
   ctx.font = keep.fontSpec;
   ctx.fillStyle = 'rgba(240,232,224,0.72)';
@@ -130,21 +139,15 @@ export async function renderKeepsakePng(input: KeepsakeInput): Promise<Buffer> {
   keep.lines.forEach((l, i) =>
     ctx.fillText(l, STORY_W / 2, keepTop + i * keep.lineHeight + keep.fontSize));
 
-  const qrX = MARGIN + 18;
-  ctx.drawImage(tile.canvas, qrX, qrTop);
+  // The two corners, facing each other: the door on the right, the name of the
+  // place on the left, set on the code's own optical centre line.
+  ctx.drawImage(tile.canvas, STORY_W - MARGIN - tile.px, qrTop);
 
-  // The URL in plain text, beside the code — a QR nobody can scan is not a way
-  // back on its own.
   ctx.textAlign = 'left';
-  const textX = qrX + tile.px + 44;
-  const textMid = qrTop + tile.px / 2;
-  ctx.font = font('sansLight', 30);
-  ctx.fillStyle = 'rgba(240,232,224,0.82)';
-  ctx.letterSpacing = '1.6px';
-  ctx.fillText(`${host}/s/`, textX, textMid - 12);
-  ctx.font = font('sans', 44);
-  ctx.fillStyle = '#F0E8E0';
-  ctx.fillText(input.shortcode, textX, textMid + 44);
+  ctx.font = font('sansLight', 28);
+  ctx.fillStyle = 'rgba(240,232,224,0.55)';
+  ctx.letterSpacing = '6px';
+  ctx.fillText(SITE_URL, MARGIN, qrTop + tile.px / 2 + 10);
   ctx.letterSpacing = '0px';
 
   // A single mote in the star's own colour — the site's punctuation.

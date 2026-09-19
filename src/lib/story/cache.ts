@@ -30,7 +30,7 @@ import crypto from 'node:crypto';
  * Bump on every change to the compositor, the timeline, or the encode profile.
  * Without it, a dev server happily serves a video rendered by older code.
  */
-export const STORY_VERSION = 3;
+export const STORY_VERSION = 4;
 
 export function storyCacheDir(): string {
   return process.env.STORY_CACHE_DIR || path.join(os.tmpdir(), 'thebetween-story');
@@ -44,8 +44,23 @@ export function cacheKey(id: string, ext: string): string {
 
 const inFlight = new Map<string, Promise<string>>();
 
-/** Longest a second request will wait to join a render already under way. */
-const JOIN_TIMEOUT_MS = 90_000;
+/**
+ * Longest a second request will wait to join a render already under way.
+ *
+ * Ninety seconds was a performance budget pretending to be a deadlock guard: a
+ * five-star reel on a loaded two-vCPU box is *minutes* of honest work, and a
+ * joiner was being failed for it — the same mistake the encode watchdog used to
+ * make (see `encode.ts`). Twelve minutes covers every render this project
+ * actually produces, including a reel on a busy box.
+ *
+ * It does not cover the encoder's own absolute ceiling, which scales with frame
+ * count and can reach half an hour for a long reel; a second requester of a
+ * pathologically slow reel would still give up here while the first one
+ * eventually gets its file. That is the right trade — this is a backstop
+ * against a `produce` that never settles, and the only caller who can hit the
+ * gap is an admin regenerating a reel in two tabs.
+ */
+const JOIN_TIMEOUT_MS = 720_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

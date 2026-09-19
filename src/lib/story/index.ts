@@ -21,9 +21,9 @@
 
 export {
   STORY_W, STORY_H, STAR_SEGMENT_SECONDS, CARD_SECONDS, POSTER_T,
-  STORY_SECONDS, STORY_OPEN_SECONDS, STORY_STAR_SECONDS, STORY_QR_SECONDS,
+  STORY_SECONDS, STORY_OPEN_SECONDS, STORY_STAR_SECONDS,
   STORY_CROSSFADE,
-  starSegment, storySegment, questionOpening, qrCard,
+  starSegment, storySegment, questionOpening, layoutTopQuestion,
   introCard, outroCard, sequence, renderSegmentFrame,
   type Segment, type StarSegmentOptions,
   type StoryInput, type StoryStar, type StoryNeighbour,
@@ -32,7 +32,10 @@ export {
 export {
   defaultOrigin, originFromRequest, originHost, originTag, starUrlOn,
 } from './origin';
-export { renderQrTile, type QrTile, type QrTileOptions } from './qr';
+export {
+  renderQrTile, QUIET_PLATE, QUIET_INK, QUIET_QR_SIZE,
+  type QrTile, type QrTileOptions,
+} from './qr';
 
 export { STORY_FPS, encodeMp4, encodeSegment, ffmpegAvailable, FfmpegUnavailableError } from './encode';
 export { STORY_VERSION, getOrProduce, storyCacheDir, cacheKey, inFlightCount } from './cache';

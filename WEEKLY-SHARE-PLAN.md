@@ -246,6 +246,18 @@ Owner feedback, grouped. Fewer words everywhere; one unified save/share experien
 - Keepsake image MUST include the question.
 - Bump STORY_VERSION.
 
+## Revision round 2 (owner review, 2026-09-19) — story/keepsake only
+
+**Keepsake:** drop the full-URL text line. Keep "We don't know who you are, so keep this if
+you want to come back." Bottom-LEFT: "thebetween.world" (quiet). Bottom-RIGHT: the QR, as
+small and as subtle in color as it can be while still scanning (verify by decoding).
+
+**Video:** the question rises to the TOP and STAYS there for the whole video, the way it
+floats at the top of the main interface (it may open larger/centered, then travel up and
+settle). NO dedicated QR end card. The final frame is the STAR, question above it at the
+top, QR small in the lower LEFT, "thebetween.world" in the lower RIGHT, no URL text — the
+corner elements fade in for the closing seconds. Bump STORY_VERSION.
+
 ## Stage V — Verification (sonnet)
 
 Full walkthrough on 390×844 and 1280×720 with Playwright against the real dev stack (mock

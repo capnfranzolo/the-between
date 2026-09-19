@@ -22,6 +22,30 @@ import './fonts';
 export const STORY_FPS = 30;
 
 /**
+ * How long the encode may make *no progress at all* before it is killed.
+ *
+ * This used to be a ceiling on the whole encode, and that was wrong (owner hit
+ * it, 2026-09-19): on a 2-vCPU box with a second render already running, a
+ * perfectly healthy 708-frame reel crawls along at ~1.3 fps and blew past a
+ * two-minute total budget — the watchdog killed a job that was working. Slow is
+ * not the same as stuck. What actually distinguishes a wedged encode is that
+ * *nothing happens*: no frame goes down the pipe and ffmpeg stops reporting.
+ * So the watchdog now measures the gap between signs of life, and this window
+ * is generous enough that a single frame on a loaded box can never exhaust it.
+ */
+const STALL_MS = 90_000;
+
+/**
+ * A backstop under the stall watchdog, in case something contrives to look busy
+ * forever. It scales with the work — 2 s per frame is roughly 25× slower than
+ * this box manages when idle — with a ten-minute floor so short jobs still get
+ * a sane allowance.
+ */
+function ceilingMs(frameCount: number): number {
+  return Math.max(600_000, frameCount * 2_000);
+}
+
+/**
  * Where the ffmpeg binary actually is.
  *
  * `ffmpeg-static` computes its export from `__dirname`, which a bundler
@@ -93,9 +117,12 @@ export async function encodeMp4(
     /** libx264 preset; `veryfast` keeps encode off the critical path. */
     preset?: string;
     crf?: number;
-    /** Hard ceiling on the whole encode. An 8 s story takes ~6 s; anything
-     *  near this means something is wrong, and a request must never hang. */
-    timeoutMs?: number;
+    /** How long the encode may show no sign of life before it is killed
+     *  (default `STALL_MS`). A request must never hang — but a slow encode is
+     *  not a hung one. */
+    stallMs?: number;
+    /** Absolute ceiling (default: scaled with `frameCount`). */
+    maxMs?: number;
   },
   drawFrame: (ctx: SKRSContext2D, frameIndex: number, t: number) => void,
 ): Promise<EncodeResult> {
@@ -135,21 +162,52 @@ export async function encodeMp4(
   console.log(`[story/encode] spawning ${binary} → ${opts.outPath} (${opts.frameCount} frames)`);
   const ff = spawn(binary, args, { stdio: ['pipe', 'ignore', 'pipe'] });
   let stderr = '';
+
+  // ── The watchdog ──
+  // Two clocks, not one. `lastProgress` moves whenever there is a sign of life:
+  // a frame accepted by the pipe, or one of ffmpeg's own `frame=` stat lines.
+  // Only a *silent* process gets killed; a slow one is left to finish.
+  let lastProgress = Date.now();
+  let killedBecause: string | null = null;
+  const noteProgress = () => { lastProgress = Date.now(); };
+
   ff.stderr.on('data', (d: Buffer) => {
-    stderr += d.toString();
+    const text = d.toString();
+    stderr += text;
     if (stderr.length > 16_000) stderr = stderr.slice(-8_000);
+    // ffmpeg prints `frame=  123 fps=1.3 …` to stderr a couple of times a
+    // second while it is encoding — the encoder's own pulse.
+    if (/frame=\s*\d+/.test(text)) noteProgress();
   });
 
-  const watchdog = setTimeout(() => {
-    console.error('[story/encode] timed out — killing ffmpeg');
+  const stallMs = opts.stallMs ?? STALL_MS;
+  const maxMs = opts.maxMs ?? ceilingMs(opts.frameCount);
+  const watchdog = setInterval(() => {
+    const now = Date.now();
+    const quiet = now - lastProgress;
+    if (quiet > stallMs) {
+      killedBecause = `no sign of life for ${(quiet / 1000).toFixed(1)}s`;
+    } else if (now - started > maxMs) {
+      killedBecause = `past the ${(maxMs / 1000).toFixed(0)}s ceiling`;
+    }
+    if (!killedBecause) return;
+    clearInterval(watchdog);
+    console.error(`[story/encode] ${killedBecause} — killing ffmpeg`);
     ff.kill('SIGKILL');
-  }, opts.timeoutMs ?? 120_000);
+  }, Math.max(250, Math.min(5_000, Math.round(stallMs / 4))));
+  // Never hold the process open just to police an encode.
+  watchdog.unref?.();
 
   const closed = new Promise<void>((resolve, reject) => {
     ff.on('error', reject);
     ff.on('close', code => {
-      clearTimeout(watchdog);
+      clearInterval(watchdog);
       if (code === 0) resolve();
+      // The watchdog's own kill lands here as `code === null`; say so, rather
+      // than reporting an inscrutable "exited null". Either way this rejects,
+      // and `getOrProduce` drops the in-flight entry and the half-written temp
+      // file — a killed encode must never poison the cache key.
+      else if (killedBecause) reject(new Error(`ffmpeg killed: ${killedBecause}`));
       else reject(new Error(`ffmpeg exited ${code}\n${stderr.slice(-2000)}`));
     });
   });
@@ -169,12 +227,15 @@ export async function encodeMp4(
       // `data()` hands back the canvas's live pixel buffer; the next frame draws
       // over it, so it has to be copied before going into an async write queue.
       const buf = Buffer.from(canvas.data());
+      // A frame handed to the pipe is the clearest sign of life there is.
+      noteProgress();
       if (!ff.stdin.write(buf)) {
         // Respect backpressure — without this the whole video (≈2 GB of raw
         // RGBA for an 8 s story) queues in memory. The drain wait MUST race
         // against the pipe dying, or a failed spawn hangs the request forever.
         await new Promise<void>(resolve => {
           const done = () => {
+            noteProgress();
             ff.stdin.off('drain', done);
             ff.stdin.off('close', done);
             ff.stdin.off('error', done);
@@ -195,7 +256,7 @@ export async function encodeMp4(
   try {
     await closed;
   } finally {
-    clearTimeout(watchdog);
+    clearInterval(watchdog);
   }
 
   return { frames: opts.frameCount, ms: Date.now() - started };

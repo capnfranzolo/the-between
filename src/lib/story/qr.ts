@@ -55,6 +55,31 @@ export interface QrTile {
 const PLATE = '#F0E8E0';
 const INK = '#100B1E';
 
+/**
+ * The *quiet* treatment (owner review, revision 2): the code lives in a corner
+ * now, not on a card of its own, and a full-cream plate reads as a sticker
+ * pasted onto the twilight. So the plate is pulled 45% of the way toward the
+ * sky it sits on and the modules are lifted 25% off black — a dusty lilac card
+ * with plum ink rather than a browser artefact.
+ *
+ * The numbers are not taste alone: they are the subtlest pair that still
+ * decoded at every test scale (native, ½, and 0.37 — the last being the code as
+ * a phone renders the 1080-wide frame full-bleed, i.e. someone scanning it off
+ * another person's screen). Measured contrast is 4.9:1; decoding first became
+ * unreliable around 3.0:1, so this ships two sweep steps above the edge. Drop
+ * it further and the code stops being a door.
+ */
+export const QUIET_PLATE = '#AB9CAB';
+export const QUIET_INK = '#372F41';
+/**
+ * Requested tile size for a corner code. The tile rounds to whole module
+ * pixels, so what actually matters is that this lands on **5 px per module**
+ * for the longest URL the site can mint (`https://stage.thebetween.world/s/` +
+ * a 10-char shortcode → 33 modules + an 8-module quiet zone = 41 across). 4 px
+ * per module decoded only intermittently at 0.37; 5 is the margin.
+ */
+export const QUIET_QR_SIZE = 205;
+
 /** A rounded rectangle path — `roundRect` is not on every canvas build. */
 export function roundedRectPath(
   ctx: SKRSContext2D,
