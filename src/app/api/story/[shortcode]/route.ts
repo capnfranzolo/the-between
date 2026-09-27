@@ -18,7 +18,7 @@
  * poster and simply never upgrades to video.
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, after } from 'next/server';
 import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
 import { storySegment } from '@/lib/story/composer';
@@ -29,6 +29,10 @@ import { storeEnabled, storedArtefactUrl, uploadArtefact } from '@/lib/story/sto
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Serverless hint (Vercel): a cold story render is ~10 s of ffmpeg on an idle
+// box and the default function timeout is below that under load. Same
+// precedent as the admin reel route's 120.
+export const maxDuration = 120;
 
 function parseRange(header: string | null, size: number): { start: number; end: number } | null {
   if (!header) return null;
@@ -115,9 +119,11 @@ export async function GET(
   if (!artefact.rendered) console.log(`[story] cache hit ${shortcode}`);
 
   // This request streams from disk (first render, or storage was unreachable);
-  // future ones should come from the CDN. Fire-and-forget — an upload failure
-  // only means the next request streams from disk too.
-  if (storeEnabled()) void uploadArtefact(storeKey, artefact.path, 'video/mp4');
+  // future ones should come from the CDN. `after` runs the upload once the
+  // response is sent — on serverless it's `waitUntil`, so the instance isn't
+  // frozen mid-upload. An upload failure only means the next request streams
+  // from disk too.
+  if (storeEnabled()) after(() => uploadArtefact(storeKey, artefact.path, 'video/mp4'));
 
   const headers = new Headers({
     'Content-Type': 'video/mp4',

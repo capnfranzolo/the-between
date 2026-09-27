@@ -7,7 +7,7 @@
  * the poster is literally a frame of the video rather than a separate design.
  */
 
-import { NextRequest } from 'next/server';
+import { NextRequest, after } from 'next/server';
 import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
 import { storySegment, renderSegmentFrame, POSTER_T } from '@/lib/story/composer';
@@ -17,6 +17,9 @@ import { storeEnabled, storedArtefactUrl, uploadArtefact } from '@/lib/story/sto
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Serverless hint (Vercel): a poster is a single composed frame — quick, but
+// comfortably clear of the default timeout on a cold, loaded function.
+export const maxDuration = 60;
 
 export async function GET(
   req: NextRequest,
@@ -63,7 +66,8 @@ export async function GET(
     return new Response('Render failed', { status: 500 });
   }
 
-  if (storeEnabled()) void uploadArtefact(storeKey, artefact.path, 'image/png');
+  // `after` = post-response upload that serverless won't freeze mid-flight.
+  if (storeEnabled()) after(() => uploadArtefact(storeKey, artefact.path, 'image/png'));
 
   const buf = await fs.readFile(artefact.path);
   return new Response(new Uint8Array(buf), {
