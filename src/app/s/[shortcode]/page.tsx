@@ -42,6 +42,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: pageTitle,
     description: `${questionText} — ${answerSnippet}`,
+    alternates: {
+      canonical: pageUrl,
+      // oEmbed discovery: Discord, Notion, WordPress etc. find /api/oembed
+      // through this link and get an iframe of /embed/{code} — a playing
+      // video in surfaces that ignore og:video.
+      types: {
+        'application/json+oembed': [{
+          url: `https://${SITE_URL}/api/oembed?url=${encodeURIComponent(pageUrl)}`,
+          title: pageTitle,
+        }],
+      },
+    },
     openGraph: {
       title: questionText,
       description: answerSnippet,
@@ -79,7 +91,7 @@ export default async function StarPage({ params }: Props) {
   const { shortcode } = await params;
   const { data: star } = await supabaseServer
     .from('stars')
-    .select('answer, unique_fact, question_id')
+    .select('answer, unique_fact, question_id, created_at')
     .eq('shortcode', shortcode)
     .eq('status', 'approved')
     .single();
@@ -98,12 +110,44 @@ export default async function StarPage({ params }: Props) {
     ? `/cosmos/${star.question_id}?star=${shortcode}`
     : '/';
 
+  // VideoObject structured data — what lets the star's video (and its
+  // thumbnail) surface as a rich result in search. `<` is escaped so user
+  // content can never break out of the script element.
+  const jsonLd = star
+    ? JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'VideoObject',
+        name: `${questionText} — The Between`,
+        description: `"${(star.answer ?? '').slice(0, 160)}"`,
+        thumbnailUrl: [
+          `https://${SITE_URL}/api/og/${shortcode}`,
+          `https://${SITE_URL}/api/story/${shortcode}/poster`,
+        ],
+        contentUrl: `https://${SITE_URL}/api/story/${shortcode}`,
+        embedUrl: `https://${SITE_URL}/embed/${shortcode}`,
+        uploadDate: star.created_at ?? undefined,
+        duration: 'PT21S',
+        width: 1080,
+        height: 1920,
+        publisher: {
+          '@type': 'Organization',
+          name: 'The Between',
+          url: `https://${SITE_URL}`,
+        },
+      }).replace(/</g, '\\u003c')
+    : null;
+
   return (
-    <StarRedirectClient
-      to={to}
-      answer={star?.answer ?? null}
-      byline={star?.unique_fact ?? null}
-      question={questionText}
-    />
+    <>
+      {jsonLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
+      )}
+      <StarRedirectClient
+        to={to}
+        answer={star?.answer ?? null}
+        byline={star?.unique_fact ?? null}
+        question={questionText}
+      />
+    </>
   );
 }
