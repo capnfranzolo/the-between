@@ -88,12 +88,16 @@ routes noticing.
    it's the L1 that saves a re-render when storage is cold after a
    `STORY_VERSION` bump.
 
-**Device checklist addition:** on staging, open a star's share panel and
-confirm the video loads and Save video works. The panel `fetch()`es the MP4
-and now follows a cross-origin redirect to the bucket; Supabase Cloud sends
-permissive CORS on public objects, but this is the one behaviour we could not
-verify from the sandbox. If it ever misbehaves, point the panel at
-`/api/story/{code}?proxy=1` and the bytes come same-origin again.
+**Verified in production 2026-09-27:** share panel loads and plays the video
+in a real browser against thebetween.world — the cross-origin redirect works
+(the bucket sends `access-control-allow-origin: *`, honours Range, serves
+`max-age=31536000`). `?proxy=1` remains as a same-origin escape hatch.
+
+**Vercel note:** the route's `s-maxage=31536000` means Vercel's edge also
+caches the streamed MP4 on the story URL, so many requests are edge hits that
+never reach the function. That cache is best-effort and purged on every
+deploy; the bucket is what makes renders survive both. A `STORY_VERSION` bump
+ships via a deploy, which purges the edge cache — so bumps still take effect.
 
 ## Housekeeping notes
 
