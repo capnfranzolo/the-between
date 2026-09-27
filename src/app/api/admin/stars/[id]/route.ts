@@ -1,17 +1,15 @@
 import { NextRequest } from 'next/server';
+import { isAdmin, isUuid } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
 import { extractDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
 import { hashString } from '@/lib/btw';
 import { purgeStarArtefacts } from '@/lib/story/store';
 
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
-
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
+  if (!isUuid(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
   const body = await req.json();
   const { answer, uniqueFact, status } = body;
 
@@ -75,8 +73,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
+  // The id lands inside a PostgREST `or=` filter string below — UUIDs only.
+  if (!isUuid(id)) return Response.json({ error: 'Invalid id' }, { status: 400 });
 
   // Delete associated connections first
   const { data: removedConns } = await supabaseServer

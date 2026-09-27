@@ -44,6 +44,30 @@ export async function POST(req: NextRequest) {
     'unknown';
   const ipHash = hashString(rawIp).toString(16);
 
+  // Enforce the rate limit this route has always *recorded* but never read: a
+  // direct POST here skips the Turnstile that fronts /api/submit/validate, so
+  // without this check a bot can mint auto-approved stars (and spend an LLM
+  // call each) as fast as it can loop. Five stars an hour is generous for a
+  // human with feelings and useless for a botnet of one.
+  try {
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count } = await supabaseServer
+      .from('rate_limits')
+      .select('id', { count: 'exact', head: true })
+      .eq('ip_hash', ipHash)
+      .eq('action', 'star_create')
+      .gte('created_at', cutoff);
+    if ((count ?? 0) >= 5) {
+      return Response.json(
+        { error: 'The sky needs a moment — try again in a little while.' },
+        { status: 429 },
+      );
+    }
+  } catch (err) {
+    // Fail open: a rate-limit outage must not block a real submission.
+    console.error('[submit] rate_limit check failed:', err);
+  }
+
   // Stage G — the shortcode is minted at /api/submit/validate so the pre-birth
   // preview can seed its archetype with it and show the star that is actually
   // born. The client's copy is a SUGGESTION: it is accepted only if it matches

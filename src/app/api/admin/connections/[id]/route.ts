@@ -1,12 +1,9 @@
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
 
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
-
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
   const { status } = await req.json();
 
@@ -22,7 +19,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
 
   const { error } = await supabaseServer.from('connections').delete().eq('id', id);

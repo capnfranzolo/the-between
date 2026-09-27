@@ -1,12 +1,9 @@
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
 
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
-
 export async function POST(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { fromStarId, toStarId, reason } = await req.json();
   if (!fromStarId || !toStarId) {
@@ -58,7 +55,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status') ?? 'pending';

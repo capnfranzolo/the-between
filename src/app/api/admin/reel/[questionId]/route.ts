@@ -15,6 +15,7 @@
  */
 
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { supabaseServer } from '@/lib/supabase/server';
@@ -33,10 +34,6 @@ export const dynamic = 'force-dynamic';
 // ~43 s (uncompressed forming per star) — ~1300 frames, which a cold
 // serverless box encodes in minutes. The dev server imposes no ceiling.
 export const maxDuration = 300;
-
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
 
 const DIM_DEFAULTS: SpiroDimensions = {
   certainty: 0.5,
@@ -74,7 +71,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ questionId: string }> },
 ) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { questionId } = await params;
 
   const { data: question } = await supabaseServer

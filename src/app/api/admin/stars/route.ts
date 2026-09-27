@@ -1,12 +1,9 @@
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
 
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
-
 export async function GET(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status') ?? 'pending';
@@ -26,7 +23,10 @@ export async function GET(req: NextRequest) {
   if (status !== 'all') query = query.eq('status', status);
   if (questionId) query = query.eq('question_id', questionId);
   if (search) {
-    query = query.or(`answer.ilike.%${search}%,unique_fact.ilike.%${search}%`);
+    // The term is interpolated into a PostgREST or= filter — strip the
+    // characters that delimit clauses there so a search stays a search.
+    const term = search.replace(/[,()."\\]/g, ' ').trim();
+    if (term) query = query.or(`answer.ilike.%${term}%,unique_fact.ilike.%${term}%`);
   }
 
   const { data: stars, error } = await query;

@@ -1,13 +1,10 @@
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
-
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
 
 /** GET /api/admin/questions — list all questions with per-question stats */
 export async function GET(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: questions, error } = await supabaseServer
     .from('questions')
@@ -56,7 +53,7 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/admin/questions — create a new question */
 export async function POST(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json();
   const text = (body.text ?? '').trim();

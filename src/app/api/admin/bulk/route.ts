@@ -1,13 +1,10 @@
 import { NextRequest } from 'next/server';
+import { isAdmin, isUuid } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
 import { purgeStarArtefacts } from '@/lib/story/store';
 
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
-
 export async function POST(req: NextRequest) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { action, type, ids } = await req.json() as {
     action: 'approve' | 'reject' | 'delete';
@@ -17,6 +14,11 @@ export async function POST(req: NextRequest) {
 
   if (!action || !type || !Array.isArray(ids) || ids.length === 0) {
     return Response.json({ error: 'Missing fields' }, { status: 400 });
+  }
+  // Ids are interpolated into PostgREST `or=` filter strings below — a crafted
+  // "id" could smuggle extra filter clauses. UUIDs only, no exceptions.
+  if (!ids.every(isUuid)) {
+    return Response.json({ error: 'Invalid id' }, { status: 400 });
   }
 
   const table = type === 'star' ? 'stars' : 'connections';

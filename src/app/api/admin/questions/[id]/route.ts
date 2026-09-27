@@ -1,9 +1,6 @@
 import { NextRequest } from 'next/server';
+import { isAdmin } from '@/lib/adminSession';
 import { supabaseServer } from '@/lib/supabase/server';
-
-function isAuthed(req: NextRequest) {
-  return req.cookies.get('admin_session')?.value === '1';
-}
 
 /**
  * PATCH /api/admin/questions/[id] — update text, slug, active, display_order,
@@ -12,7 +9,7 @@ function isAuthed(req: NextRequest) {
  * directly (an ISO string, or null) to set an explicit value or un-feature.
  */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
   const body = await req.json();
@@ -47,7 +44,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 /** DELETE /api/admin/questions/[id] — delete question + all its stars and connections */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  if (!isAuthed(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
 
