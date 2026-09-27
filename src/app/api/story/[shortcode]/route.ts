@@ -129,9 +129,12 @@ export async function GET(
     'Content-Type': 'video/mp4',
     'Accept-Ranges': 'bytes',
     ETag: etag,
-    // The URL is stable across composer versions, so the ETag — not a long
-    // browser max-age — is what makes a bumped STORY_VERSION take effect.
-    'Cache-Control': 'public, max-age=300, s-maxage=31536000, stale-while-revalidate=86400',
+    // s-maxage is deliberately SHORT: Vercel's edge caches this streamed
+    // response on the story URL, and a year-long entry would outlive a
+    // moderation purge — the edge never re-consults the function, so a
+    // rejected star's video would keep playing. The bucket is the durable
+    // layer now; an edge miss costs a 302 hop, not a re-render.
+    'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
     'Content-Disposition': `inline; filename="thebetween-${shortcode}.mp4"`,
   });
 

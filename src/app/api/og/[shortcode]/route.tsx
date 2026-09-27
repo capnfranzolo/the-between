@@ -82,7 +82,13 @@ function defaultImage() {
         </div>
       </div>
     ),
-    { width: W, height: H },
+    {
+      width: W,
+      height: H,
+      // Override ImageResponse's year-long immutable default: the edge must
+      // not outlive a moderation purge (see the story route's rationale).
+      headers: { 'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400' },
+    },
   );
 }
 
@@ -200,6 +206,12 @@ export async function GET(
         )}
       </div>
     ),
-    { width: W, height: H },
+    {
+      width: W,
+      height: H,
+      // Override ImageResponse's year-long immutable default: the edge must
+      // not outlive a moderation purge (see the story route's rationale).
+      headers: { 'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400' },
+    },
   );
 }

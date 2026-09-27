@@ -75,7 +75,9 @@ export async function GET(
       'Content-Type': 'image/png',
       ETag: etag,
       'Content-Length': String(buf.byteLength),
-      'Cache-Control': 'public, max-age=300, s-maxage=31536000, stale-while-revalidate=86400',
+      // Short s-maxage so a moderation purge takes effect at the edge too
+      // (see the story route) — the bucket carries the long-lived copy.
+      'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
     },
   });
 }

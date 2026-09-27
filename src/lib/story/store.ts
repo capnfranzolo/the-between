@@ -101,9 +101,15 @@ export async function uploadArtefact(
   }
 }
 
-/** True for cache/bucket names that belong to this star's story or poster. */
+/** True for cache/bucket names that belong to this star — story, poster, or
+ *  keepsake (keepsakes are disk-only, but the disk purge must cover them: a
+ *  keepsake renders the star's answer too). */
 function isStarArtefact(name: string, safe: string): boolean {
-  return name.startsWith(`story-${safe}-`) || name.startsWith(`poster-${safe}-`);
+  return (
+    name.startsWith(`story-${safe}-`) ||
+    name.startsWith(`poster-${safe}-`) ||
+    name.startsWith(`keepsake-${safe}-`)
+  );
 }
 
 /**

@@ -93,11 +93,14 @@ in a real browser against thebetween.world — the cross-origin redirect works
 (the bucket sends `access-control-allow-origin: *`, honours Range, serves
 `max-age=31536000`). `?proxy=1` remains as a same-origin escape hatch.
 
-**Vercel note:** the route's `s-maxage=31536000` means Vercel's edge also
-caches the streamed MP4 on the story URL, so many requests are edge hits that
-never reach the function. That cache is best-effort and purged on every
-deploy; the bucket is what makes renders survive both. A `STORY_VERSION` bump
-ships via a deploy, which purges the edge cache — so bumps still take effect.
+**Vercel note:** Vercel's edge caches the streamed responses (`s-maxage`), so
+many requests are edge hits that never reach the function. `s-maxage` is
+deliberately **one hour** on every artefact route (story, poster, keepsake,
+OG): the edge never re-consults the function while an entry lives, so a
+year-long entry would keep serving a rejected star's video/image long after a
+moderation purge emptied the bucket and disk. With the bucket as the durable
+layer, an edge miss costs a 302 hop, not a re-render — worst case a purged
+star's media lingers at the edge for ~1 h.
 
 ## Housekeeping notes
 

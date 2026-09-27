@@ -19,6 +19,8 @@ import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Serverless hint (Vercel) — a keepsake is one composed frame, like the poster.
+export const maxDuration = 60;
 
 export async function GET(
   req: NextRequest,
@@ -65,7 +67,9 @@ export async function GET(
       'Content-Type': 'image/png',
       ETag: etag,
       'Content-Length': String(buf.byteLength),
-      'Cache-Control': 'public, max-age=300, s-maxage=31536000, stale-while-revalidate=86400',
+      // Short s-maxage so a moderation purge takes effect at the edge too
+      // (see the story route).
+      'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
       'Content-Disposition':
         `${download ? 'attachment' : 'inline'}; filename="thebetween-${shortcode}.png"`,
     },
