@@ -24,7 +24,8 @@ import { loadStoryInput } from '@/lib/story/data';
 import { storySegment } from '@/lib/story/composer';
 import { originFromRequest, originTag } from '@/lib/story/origin';
 import { encodeSegment, ffmpegAvailable } from '@/lib/story/encode';
-import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
+import { getOrProduce, cacheKey, STORY_VERSION } from '@/lib/story/cache';
+import { storeEnabled, storedArtefactUrl, uploadArtefact } from '@/lib/story/store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,6 +77,24 @@ export async function GET(
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
+  // Already in durable storage? Hand the request to the bucket's CDN instead
+  // of streaming 2 MB through this process. The redirect itself is cached only
+  // briefly — the object URL is versioned, so a STORY_VERSION bump changes
+  // where this route points, and a long-lived redirect would pin the old one.
+  // `?proxy=1` forces same-origin bytes (escape hatch if a client ever
+  // mishandles the cross-origin hop).
+  const storeKey = cacheKey(`story-${shortcode}-${tag}`, 'mp4');
+  const proxied = req.nextUrl.searchParams.get('proxy') === '1';
+  if (storeEnabled() && !proxied) {
+    const url = await storedArtefactUrl(storeKey);
+    if (url) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: url, 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+  }
+
   let artefact;
   try {
     artefact = await getOrProduce(`story-${shortcode}-${tag}`, 'mp4', async tmpPath => {
@@ -94,6 +113,11 @@ export async function GET(
   }
 
   if (!artefact.rendered) console.log(`[story] cache hit ${shortcode}`);
+
+  // This request streams from disk (first render, or storage was unreachable);
+  // future ones should come from the CDN. Fire-and-forget — an upload failure
+  // only means the next request streams from disk too.
+  if (storeEnabled()) void uploadArtefact(storeKey, artefact.path, 'video/mp4');
 
   const headers = new Headers({
     'Content-Type': 'video/mp4',

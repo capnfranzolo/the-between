@@ -3,6 +3,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { extractDimensions } from '@/lib/dimensions/extract';
 import { randomCurveType } from '@/lib/spirograph/renderer';
 import { hashString } from '@/lib/btw';
+import { purgeStarArtefacts } from '@/lib/story/store';
 
 function isAuthed(req: NextRequest) {
   return req.cookies.get('admin_session')?.value === '1';
@@ -58,6 +59,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  // The story/poster artefacts in durable storage are renders of this star's
+  // content. Two changes make them wrong: an edit (the render is now stale)
+  // and a de-approval (an unapproved star must not keep a live public URL).
+  // Purge is best-effort — the moderation write above has already landed.
+  const contentChanged =
+    answer !== undefined || uniqueFact !== undefined || body.dimensions !== undefined;
+  const unpublished = status !== undefined && status !== 'approved';
+  if ((contentChanged || unpublished) && data?.shortcode) {
+    await purgeStarArtefacts(data.shortcode);
+  }
+
   return Response.json({ ok: true, star: data });
 }
 
@@ -77,12 +90,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     .from('stars')
     .delete()
     .eq('id', id)
-    .select('id');
+    .select('id, shortcode');
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!deleted || deleted.length === 0) {
     return Response.json({ error: 'Star not found or could not be deleted' }, { status: 404 });
   }
+
+  // A deleted star's public video/poster must go with it.
+  const shortcode = deleted[0]?.shortcode;
+  if (shortcode) await purgeStarArtefacts(shortcode);
 
   return Response.json({ ok: true, connectionsRemoved: removedConns?.length ?? 0 });
 }

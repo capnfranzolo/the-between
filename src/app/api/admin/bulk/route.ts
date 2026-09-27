@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { supabaseServer } from '@/lib/supabase/server';
+import { purgeStarArtefacts } from '@/lib/story/store';
 
 function isAuthed(req: NextRequest) {
   return req.cookies.get('admin_session')?.value === '1';
@@ -35,11 +36,17 @@ export async function POST(req: NextRequest) {
       .from(table)
       .delete()
       .in('id', ids)
-      .select('id');
+      .select(type === 'star' ? 'id, shortcode' : 'id');
     if (delError) return Response.json({ error: delError.message }, { status: 500 });
     affected = deleted?.length ?? 0;
     if (affected === 0) {
       return Response.json({ error: 'No rows deleted — check service role key' }, { status: 500 });
+    }
+    if (type === 'star') {
+      // Deleted stars must not keep live public artefacts (best-effort).
+      for (const row of deleted as { shortcode?: string }[]) {
+        if (row.shortcode) await purgeStarArtefacts(row.shortcode);
+      }
     }
   } else {
     const status = action === 'approve' ? 'approved' : 'rejected';
@@ -47,8 +54,15 @@ export async function POST(req: NextRequest) {
       .from(table)
       .update({ status })
       .in('id', ids)
-      .select('id');
+      .select(type === 'star' ? 'id, shortcode' : 'id');
     affected = updated?.length ?? ids.length;
+    if (type === 'star' && status === 'rejected') {
+      // Same rule as the single-star route: a rejected star's public
+      // video/poster come down with it.
+      for (const row of (updated ?? []) as { shortcode?: string }[]) {
+        if (row.shortcode) await purgeStarArtefacts(row.shortcode);
+      }
+    }
   }
 
   return Response.json({ ok: true, affected });

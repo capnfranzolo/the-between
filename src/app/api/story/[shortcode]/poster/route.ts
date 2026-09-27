@@ -12,7 +12,8 @@ import fs from 'node:fs/promises';
 import { loadStoryInput } from '@/lib/story/data';
 import { storySegment, renderSegmentFrame, POSTER_T } from '@/lib/story/composer';
 import { originFromRequest, originTag } from '@/lib/story/origin';
-import { getOrProduce, STORY_VERSION } from '@/lib/story/cache';
+import { getOrProduce, cacheKey, STORY_VERSION } from '@/lib/story/cache';
+import { storeEnabled, storedArtefactUrl, uploadArtefact } from '@/lib/story/store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,20 @@ export async function GET(
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
+  // Serve from durable storage when we can — same contract as the MP4 route:
+  // short-lived redirect, year-long cache on the versioned object itself.
+  const storeKey = cacheKey(`poster-${shortcode}-${tag}`, 'png');
+  const proxied = req.nextUrl.searchParams.get('proxy') === '1';
+  if (storeEnabled() && !proxied) {
+    const url = await storedArtefactUrl(storeKey);
+    if (url) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: url, 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+  }
+
   let artefact;
   try {
     artefact = await getOrProduce(`poster-${shortcode}-${tag}`, 'png', async tmpPath => {
@@ -47,6 +62,8 @@ export async function GET(
     console.error('[story/poster] render failed:', err);
     return new Response('Render failed', { status: 500 });
   }
+
+  if (storeEnabled()) void uploadArtefact(storeKey, artefact.path, 'image/png');
 
   const buf = await fs.readFile(artefact.path);
   return new Response(new Uint8Array(buf), {
