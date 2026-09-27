@@ -29,10 +29,9 @@ import { storeEnabled, storedArtefactUrl, uploadArtefact } from '@/lib/story/sto
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Serverless hint (Vercel): a cold story render is ~10 s of ffmpeg on an idle
-// box and the default function timeout is below that under load. Same
-// precedent as the admin reel route's 120.
-export const maxDuration = 120;
+// Serverless hint (Vercel): the revision-3 story is 21 s / 630 frames —
+// ~40 s of ffmpeg on an idle box, ~90-100 s on a cold serverless one.
+export const maxDuration = 300;
 
 function parseRange(header: string | null, size: number): { start: number; end: number } | null {
   if (!header) return null;

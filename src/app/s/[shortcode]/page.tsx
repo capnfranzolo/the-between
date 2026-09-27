@@ -36,6 +36,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const pageTitle = `${shortQ}: ${answerSnippet}`;
 
   const ogImageUrl = `https://${SITE_URL}/api/og/${shortcode}`;
+  const ogVideoUrl = `https://${SITE_URL}/api/story/${shortcode}`;
   const pageUrl    = `https://${SITE_URL}/s/${shortcode}`;
 
   return {
@@ -52,6 +53,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         width: 1200,
         height: 630,
         alt: answerSnippet,
+      }],
+      // The story MP4. Facebook and X ignore third-party og:video and show the
+      // image; Telegram, Discord, WhatsApp and often iMessage unfurl it as a
+      // playable inline video — the channels a personal link actually travels.
+      // The image above stays as the universal fallback.
+      videos: [{
+        url: ogVideoUrl,
+        secureUrl: ogVideoUrl,
+        type: 'video/mp4',
+        width: 1080,
+        height: 1920,
       }],
     },
     twitter: {

@@ -29,9 +29,10 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// A hint for deployment platforms (Vercel) — a 5-star reel's encode is well
-// under this. The dev server itself imposes no such ceiling.
-export const maxDuration = 120;
+// A hint for deployment platforms (Vercel). Revision 3 grew the reel to
+// ~43 s (uncompressed forming per star) — ~1300 frames, which a cold
+// serverless box encodes in minutes. The dev server imposes no ceiling.
+export const maxDuration = 300;
 
 function isAuthed(req: NextRequest) {
   return req.cookies.get('admin_session')?.value === '1';
@@ -154,7 +155,10 @@ export async function GET(
           questionId,
           neighbours,
         };
-        return starSegment(input, { duration: 6 });
+        // 1 s breath + the uncompressed 5 s forming + 2.5 s of play. Forming
+        // never compresses (revision 3), so this is the floor for a beat that
+        // still gets to *be* a star for a moment.
+        return starSegment(input, { duration: 8.5 });
       }));
 
       const reel = sequence([

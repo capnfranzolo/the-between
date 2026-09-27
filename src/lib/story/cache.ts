@@ -30,7 +30,7 @@ import crypto from 'node:crypto';
  * Bump on every change to the compositor, the timeline, or the encode profile.
  * Without it, a dev server happily serves a video rendered by older code.
  */
-export const STORY_VERSION = 4;
+export const STORY_VERSION = 5;
 
 export function storyCacheDir(): string {
   return process.env.STORY_CACHE_DIR || path.join(os.tmpdir(), 'thebetween-story');

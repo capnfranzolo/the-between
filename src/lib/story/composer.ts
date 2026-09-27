@@ -12,7 +12,7 @@
  * cheap enough to run 240 times inside an ffmpeg pipe (~22 ms/frame at
  * 1080×1920; see `encode.ts`).
  *
- * ── The single-star story (`storySegment`, 9.0 s) ──
+ * ── The single-star story (`storySegment`, 21.0 s) ──
  *
  * Revision 1 turned the story inside out: it used to open on the star and close
  * on the question, which buried the question — the one thing that makes a
@@ -41,31 +41,42 @@
  * ── The star beat alone (`starSegment`) ──
  *
  * Still a self-contained unit, and still what the weekly reel sequences between
- * its own intro and outro cards. Its timeline, in seconds of an 8 s beat
- * (shorter beats keep the proportions):
+ * its own intro and outro cards. Revision 3 (owner): the star no longer draws
+ * as a fast-forwarded single trace that a finished star then fades over — it
+ * FORMS, using the renderer's own Stage-G reveal (`renderStatic(t, {forming})`),
+ * at the site's own five-second pace: fireflies arrive one at a time, the ghost
+ * inscribes itself, dressings arrive last, and the forming star hands off to
+ * its living self mid-motion because they are the same drawing. Then it *plays*
+ * — the owner wants the finished animation enjoyed, not glimpsed.
  *
- *   0.0 – 1.2   darkness; the question's sky and its star field breathe in
- *               (`skyIn: false` when a preceding beat already raised that sky)
- *   1.0 – 3.5   the star draws itself — its real curve, traced progressively
- *   2.6 – 4.0   the living star (fireflies, archetype) crossfades over the trace
- *   2.5 – 6.0   the answer rises line by line in Cormorant italic, then holds
- *   4.5 – 6.5   real neighbour stars from the same question drift faintly in
- *   6.4 – 8.0   thebetween.world · the question as an invitation ·
- *               "A new question opens every week." (`close: false` in the
- *               story, which carries the question at the top throughout and
- *               ends on the corners instead)
+ * The timeline (absolute seconds; the head and forming never compress — a
+ * shorter `duration` only shortens the play):
+ *
+ *   0.0 – 1.35        darkness; the sky and its star field breathe in
+ *                     (`skyIn: false` when a preceding beat raised that sky)
+ *   1.0 – 6.0         the star forms — `FORMING_DURATION_MS`, the site's speed
+ *   3.2 – 5.5         the answer rises line by line in Cormorant italic
+ *   6.6 – 8.6         real neighbour stars from the same question drift in
+ *   6.0 – end         the living star plays (12 s in the story's beat)
+ *   last 2.1 s        thebetween.world · the question as an invitation ·
+ *                     "A new question opens every week." (`close: false` in
+ *                     the story, which carries the question at the top
+ *                     throughout and ends on the corners instead)
  *
  * Nothing here is a button, a logo or a call to action. Branding is a whisper.
  * The QR is the one exception, and it is a door, not an advertisement.
  */
 
 import { createCanvas, type Canvas, type SKRSContext2D } from '@napi-rs/canvas';
-import { createSpirograph, EMOTIONS, type SpiroDimensions } from '../spirograph/renderer';
+import {
+  createSpirograph, formingProgress, FORMING_DURATION_MS,
+  EMOTIONS, type SpiroDimensions,
+} from '../spirograph/renderer';
 import { getAtmosphere } from '../atmosphere';
 import { BTW, mulberry32, hashString } from '../btw';
 import { SITE_URL } from '../constants';
 import { font } from './fonts';
-import { captureCurvePath, fitScale, tracePartial, type CurvePath } from './curve';
+import { captureCurvePath, fitScale } from './curve';
 import { defaultOrigin, starUrlOn } from './origin';
 import { renderQrTile, QUIET_PLATE, QUIET_INK, QUIET_QR_SIZE } from './qr';
 import {
@@ -78,9 +89,16 @@ import {
 
 export { STORY_W, STORY_H };
 
-/** Default length of the star beat on its own, in seconds. The whole timeline
- *  is authored against this number; a shorter beat scales proportionally. */
-export const STAR_SEGMENT_SECONDS = 8;
+/** When the forming reveal begins inside a star beat — one breath of sky. */
+const FORM_START = 1.0;
+/** The forming reveal itself: `FORMING_DURATION_MS`, never compressed — the
+ *  owner's revision-3 note was precisely that a sped-up forming reads as
+ *  fast-forward. A beat's `duration` budget goes to the play, not the build. */
+const FORM_SECONDS = FORMING_DURATION_MS / 1000;
+
+/** Default length of the star beat on its own, in seconds: one breath, the
+ *  five-second forming, then twelve seconds of the star simply playing. */
+export const STAR_SEGMENT_SECONDS = FORM_START + FORM_SECONDS + 12;
 /** Default intro/outro card length for the weekly reel. */
 export const CARD_SECONDS = 4;
 
@@ -88,7 +106,7 @@ export const CARD_SECONDS = 4;
 /** The question alone, while the sky builds — and then its travel to the top. */
 export const STORY_OPEN_SECONDS = 3.6;
 /** The star and the answer — the longest beat, and the point of the piece. */
-export const STORY_STAR_SECONDS = 6.0;
+export const STORY_STAR_SECONDS = STAR_SEGMENT_SECONDS;
 /** Seam length between beats. */
 export const STORY_CROSSFADE = 0.6;
 /** The whole single-star story, in seconds. */
@@ -104,8 +122,9 @@ const CORNERS_SETTLED = 1.2;
  *  artefacts sit their codes at the same height. */
 const CORNER_BOTTOM = 130;
 
-/** Camera time the star is frozen at while it draws itself. Matches the OG
- *  route's `renderStatic(3.0)`, so a poster and an unfurl show the same pose. */
+/** Camera time the curve is *captured* at — used only to measure the star's
+ *  extent for framing (`fitScale`). Matches the OG route's `renderStatic(3.0)`
+ *  so the two artefacts are framed around the same pose. */
 const STAR_CAM_T = 3.0;
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -232,11 +251,6 @@ function rgbaOf(rgb: readonly [number, number, number], a: number): string {
   return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a.toFixed(3)})`;
 }
 
-function creamAlpha(a: number): string {
-  // BTW.textPri #F0E8E0
-  return `rgba(240,232,224,${a.toFixed(3)})`;
-}
-
 /** Draws text with extra tracking — the quiet, spaced voice the site uses for
  *  its few sans-serif lines. */
 function drawTracked(
@@ -325,83 +339,6 @@ function drawTopQuestion(
     perLineAlpha: i => alpha * (opts.perLineAlpha ? opts.perLineAlpha(i) : 1),
     perLineRise: opts.perLineRise,
   });
-  ctx.restore();
-}
-
-// ── The star's reveal ─────────────────────────────────────────────────────────
-
-/**
- * Strokes the captured curve up to `progress`, with a hot recent trail and a
- * firefly-bright tip — the pen that is drawing the star.
- *
- * Falls back to nothing when the star has no capturable curve (standalone
- * family forms); `starSegment` then blooms the live render in instead.
- */
-function drawTrace(
-  ctx: SKRSContext2D,
-  path: CurvePath,
-  progress: number,
-  rgb: readonly [number, number, number],
-  alpha: number,
-  scale: number,
-  centreY: number,
-): void {
-  if (alpha <= 0.004 || progress <= 0) return;
-  const place = starPlacement(scale, centreY);
-
-  ctx.save();
-  // Curve points are in the renderer's logical space — the same space the live
-  // star is drawn in, so one transform serves both.
-  ctx.translate(place.dx, place.dy);
-  ctx.scale(place.scale, place.scale);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // Settled line: everything already drawn, quiet.
-  ctx.strokeStyle = rgbaOf(rgb, 0.16 * alpha);
-  ctx.lineWidth = 1.1;
-  const head = tracePartial(ctx, path, progress);
-  ctx.stroke();
-
-  // The last stretch still glows — a comet's tail behind the pen.
-  const n = path.points.length - 1;
-  const tailLen = Math.min(0.09, progress) * n;
-  const CHUNKS = 7;
-  for (let c = 0; c < CHUNKS; c++) {
-    const p0 = (progress * n - tailLen * (1 - c / CHUNKS)) / n;
-    const p1 = (progress * n - tailLen * (1 - (c + 1) / CHUNKS)) / n;
-    if (p1 <= 0) continue;
-    const heat = (c + 1) / CHUNKS;
-    ctx.beginPath();
-    const from = Math.max(1, Math.floor(p0 * n));
-    const to = Math.max(1, Math.floor(p1 * n));
-    if (to <= from) continue;
-    ctx.moveTo(path.points[from].x, path.points[from].y);
-    for (let i = from + 1; i <= to; i++) {
-      const pt = path.points[i];
-      ctx.quadraticCurveTo(pt.cx, pt.cy, pt.x, pt.y);
-    }
-    ctx.strokeStyle = rgbaOf(rgb, 0.10 + 0.55 * Math.pow(heat, 2) * alpha);
-    ctx.lineWidth = 1.1 + heat * 1.4;
-    ctx.stroke();
-  }
-
-  // The pen itself.
-  if (head && progress < 0.999) {
-    const glowR = 26;
-    const g = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, glowR);
-    g.addColorStop(0, rgbaOf(rgb, 0.55 * alpha));
-    g.addColorStop(0.35, rgbaOf(rgb, 0.22 * alpha));
-    g.addColorStop(1, rgbaOf(rgb, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, glowR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = creamAlpha(0.8 * alpha);
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, 2.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
   ctx.restore();
 }
 
@@ -507,10 +444,10 @@ export function starSegment(
   const wantClose = opts.close ?? true;
   const wantNeighbours = opts.neighbours ?? true;
   const topQuestion = opts.topQuestion ?? null;
-  // The timeline is authored against 8 s; a reel's shorter star beats keep the
-  // same proportions rather than truncating the ending.
-  const k = duration / STAR_SEGMENT_SECONDS;
-  const at = (s: number) => s * k;
+  // The head of the timeline is absolute — the sky's breath and the forming
+  // reveal happen at the site's own speed no matter what `duration` says
+  // (revision 3: a compressed forming reads as fast-forward). A shorter beat
+  // only shortens the *play* — the stretch where the finished star just lives.
 
   const dims: SpiroDimensions = { ...input.star.dimensions, seed: input.star.shortcode };
   const rgb = (EMOTIONS[dims.emotionIndex]?.rgb ?? [240, 232, 224]) as [number, number, number];
@@ -567,61 +504,55 @@ export function starSegment(
       // 1 ── darkness, then the question's sky breathes in
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, STORY_W, STORY_H);
-      const skyIn = wantSkyIn ? easeInOut(ramp(t, 0, at(1.35))) : 1;
+      const skyIn = wantSkyIn ? easeInOut(ramp(t, 0, 1.35)) : 1;
       ctx.globalAlpha = skyIn;
       ctx.drawImage(sky, 0, 0);
       ctx.globalAlpha = 1;
 
-      // 2 ── the star draws itself, then comes alive
-      const drawP = easeInOut(ramp(t, at(1.0), at(3.5)));
-      const settle = fit * (0.955 + 0.045 * easeOut(ramp(t, at(1.0), at(4.0))));
-      const liveIn = easeInOut(ramp(t, at(2.6), at(4.0)));
-      // The trace is captured at a frozen camera, so it must be gone before the
-      // live star has rotated far enough for the two to read as doubled.
-      const traceOut = 1 - easeInOut(ramp(t, at(3.9), at(5.0)));
-
-      if (curve) {
-        drawTrace(ctx, curve, drawP, rgb, traceOut, settle, centreY);
-      }
-
-      // Star time: frozen at the capture pose while it draws, then living.
-      const starT = t <= at(3.5) ? STAR_CAM_T : STAR_CAM_T + (t - at(3.5));
-      const liveAlpha = curve ? liveIn : easeInOut(ramp(t, at(1.0), at(3.2)));
-      if (liveAlpha > 0.004) {
-        spiro.renderStatic(starT);
-        const place = starPlacement(settle, centreY);
-        ctx.globalAlpha = liveAlpha;
+      // 2 ── the star FORMS — the renderer's own Stage-G reveal, driven
+      // deterministically at the site's own pace (Spirograph.tsx does exactly
+      // this with a rAF clock). Camera time runs from the same clock, so the
+      // forming star hands off to its living self mid-motion — one continuous
+      // drawing, not a trace crossfading into a different object. The renderer
+      // raises its own canvas from empty: no external fade, no settle scale.
+      const starT = t - FORM_START;
+      if (starT >= 0) {
+        const p = formingProgress(starT * 1000);
+        spiro.renderStatic(starT, p < 1 ? { forming: p } : undefined);
+        const place = starPlacement(fit, centreY);
         ctx.drawImage(starCanvas, place.dx, place.dy, place.dest, place.dest);
-        ctx.globalAlpha = 1;
       }
 
-      // 3 ── neighbours drift in from the same question's sky
-      drawNeighbours(ctx, neighbours, easeInOut(ramp(t, at(4.5), at(6.5))), t);
+      // 3 ── neighbours drift in once the star has fully formed
+      drawNeighbours(ctx, neighbours, easeInOut(ramp(t, 6.6, 8.6)), t);
 
       // 3½ ── the story's question, resting at the top where the opening beat
       // left it. Drawn every frame at exactly the pose `drawTopQuestion(…, 1)`
       // produces, so the crossfade with the opening lands on identical pixels.
       if (topQuestion) drawTopQuestion(ctx, topQuestion, 1);
 
-      // 4 ── the answer rises, line by line, and holds
+      // 4 ── the answer rises, line by line, while the star is still forming —
+      // the words and the drawing finish together.
       drawBlock(ctx, answer, STORY_W / 2, ANSWER_TOP, () => BTW.textPri, {
-        perLineAlpha: i => easeOut(ramp(t, at(2.5 + i * 0.22), at(3.5 + i * 0.22))),
-        perLineRise: i => (1 - easeOut(ramp(t, at(2.5 + i * 0.22), at(3.5 + i * 0.22)))) * 26,
+        perLineAlpha: i => easeOut(ramp(t, 3.2 + i * 0.25, 4.4 + i * 0.25)),
+        perLineRise: i => (1 - easeOut(ramp(t, 3.2 + i * 0.25, 4.4 + i * 0.25))) * 26,
       });
       if (byline) {
         drawBlock(
           ctx, byline, STORY_W / 2,
           ANSWER_TOP + answer.lines.length * answer.lineHeight + 20,
           () => 'rgba(240,232,224,0.52)',
-          { perLineAlpha: () => easeOut(ramp(t, at(3.6), at(4.6))) * 0.9 },
+          { perLineAlpha: () => easeOut(ramp(t, 4.6, 5.6)) * 0.9 },
         );
       }
 
-      // 5 ── the quiet close
-      const closeIn = wantClose ? easeInOut(ramp(t, at(6.4), at(7.4))) : 0;
+      // 5 ── the quiet close, anchored to the END of the beat: however long the
+      // play runs, the invitation arrives in its final two seconds.
+      const closeStart = duration - 2.1;
+      const closeIn = wantClose ? easeInOut(ramp(t, closeStart, closeStart + 1.0)) : 0;
       if (closeIn > 0.004) {
         drawBlock(ctx, question, STORY_W / 2, closeTop, () => 'rgba(240,232,224,0.66)', {
-          perLineAlpha: i => easeOut(ramp(t, at(6.4 + i * 0.12), at(7.3 + i * 0.12))),
+          perLineAlpha: i => easeOut(ramp(t, closeStart + i * 0.12, closeStart + 0.9 + i * 0.12)),
         });
         const qBottom = closeTop + question.lines.length * question.lineHeight;
 
@@ -969,13 +900,13 @@ export function renderSegmentFrame(segment: Segment, t: number): Buffer {
 
 /**
  * The poster moment, in seconds of a `storySegment`: the question has arrived
- * at the top and settled, the star is fully drawn and living, the answer is up
- * and holding, the neighbours are drifting in — and the corners have not begun
- * to fade up yet. The crossfade is long past (it ends at 3.6) and the corners
- * start at `duration − CORNERS_IN` (6.8), so this is the widest still moment
- * the story has, and the poster is never a transitional frame.
+ * at the top and settled, the star is fully formed and living (forming ends at
+ * story-time 9.0), the answer is up and holding, the neighbours have drifted
+ * in (11.6) — and the corners (duration − CORNERS_IN ≈ 18.8) have not begun to
+ * fade up yet. Mid-play: the widest still moment the story has, never a
+ * transitional frame.
  */
-export const POSTER_T = 6.5;
+export const POSTER_T = 12;
 
 // Re-exported so the keepsake can build a matching background without reaching
 // into the layer module itself.
