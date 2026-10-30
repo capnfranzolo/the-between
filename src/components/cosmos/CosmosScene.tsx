@@ -1037,11 +1037,17 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
       const DRIFT_STOP_DIST = FOCUS_STOP_DIST;
       const DRIFT_PITCH_OFFSET = 0.17;  // star rides upper third during dwell
       const DRIFT_MAX_TURN = 0.55;      // rad/s heading cap while drifting
+      // The FIRST star of a world is picked at random, not nearest, so the
+      // same URL doesn't open on the same answer every time. Capped by
+      // distance so the opening glide stays short (~10s at 300 units).
+      const DRIFT_FIRST_MAX_DIST = 300;
+      const DRIFT_FIRST_MIN_POOL = 6;
       const DRIFT_MAX_PITCH_RATE = 0.35;
       let driftPhase: 'seek' | 'glide' | 'handoff' = 'seek';
       let handoffT = 0; // s waiting for the page to open the panel
       let driftTargetId: string | null = null;
       const driftVisited = new Set<string>();      // shown this session
+      let driftFirstPick = true;                   // next pick opens a world
       const driftRecentEmotions: number[] = [];    // last 3 — gentle variety
       let driftSeekDelay = 1.0; // s before first pick — lets deep-link focus land
       let glideT = 0;
@@ -1089,6 +1095,15 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         });
         if (all.length === 0) return null;
         all.sort((a, b) => a.d - b.d);
+        if (driftFirstPick) {
+          // Opening the world: uniformly random among the near candidates so
+          // two visitors to the same sky meet different strangers. Falls back
+          // to the nearest few when the world is too sparse to offer any.
+          const near = all.filter(c => c.d <= DRIFT_FIRST_MAX_DIST);
+          const opening = near.length >= DRIFT_FIRST_MIN_POOL ? near : all.slice(0, DRIFT_FIRST_MIN_POOL);
+          driftFirstPick = false;
+          return opening[Math.floor(Math.random() * opening.length)].id;
+        }
         let pool = all.filter(c => !driftVisited.has(c.id)).slice(0, 12);
         if (pool.length === 0) {
           // Everything has been shown — start the tour over
@@ -1339,6 +1354,7 @@ const CosmosScene = forwardRef<CosmosSceneHandle, CosmosSceneProps>(
         driftPhase = 'seek';
         driftTargetId = null;
         driftVisited.clear();
+        driftFirstPick = true;
         driftRecentEmotions.length = 0;
         driftSeekDelay = FADE_OUT_DUR + 0.25;
 
