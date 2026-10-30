@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     type: 'website',
     url: 'https://thebetween.world',
     images: [{
-      url: 'https://thebetween.world/api/og/default',
+      url: 'https://thebetween.world/api/og/default?v=2',
       width: 1200,
       height: 630,
       alt: 'The Between',
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'The Between',
     description: "Answer one question. Your answer becomes a star.",
-    images: ['https://thebetween.world/api/og/default'],
+    images: ['https://thebetween.world/api/og/default?v=2'],
   },
   manifest: '/manifest.json',
   appleWebApp: {

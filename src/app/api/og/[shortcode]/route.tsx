@@ -70,7 +70,7 @@ function defaultImage() {
         <div style={{ fontSize: 32, letterSpacing: '0.32em', textTransform: 'uppercase', color: 'rgba(240,232,224,0.45)', marginBottom: 64, fontFamily: 'sans-serif' }}>
           The Between
         </div>
-        <div style={{ width: '100%', fontSize: 76, fontFamily: 'serif', color: BTW.textPri, textAlign: 'center', maxWidth: 1400, lineHeight: 1.25 }}>
+        <div style={{ ...CENTER, fontSize: 76, fontFamily: 'serif', color: BTW.textPri, maxWidth: 1400, lineHeight: 1.25 }}>
           What shape are your thoughts?
         </div>
         <div style={{ marginTop: 96, display: 'flex', alignItems: 'center', gap: 20, padding: '24px 48px', border: `2px solid ${BTW.horizon[3]}`, borderRadius: 999, color: BTW.horizon[3], fontSize: 28, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'sans-serif' }}>
